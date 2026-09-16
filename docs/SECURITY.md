@@ -2,7 +2,7 @@
 
 **Status:** requisitos para implementação
 
-**Referência geral:** OWASP ASVS 5
+**Referência geral:** OWASP ASVS 5 · [THREAT_MODEL.md](THREAT_MODEL.md)
 
 ## 1. Modelo de confiança
 
@@ -101,7 +101,7 @@ IP é sinal imperfeito e dado pessoal potencial. Nunca é prova isolada de abuso
 
 ## 11. Checklist de release
 
-- threat model revisado;
+- [threat model](THREAT_MODEL.md) revisado;
 - testes de autorização e CSRF;
 - testes de cache público/privado;
 - teste de webhook repetido;
