@@ -1,8 +1,10 @@
 # ADR-002 — HTML server-side com templ e HTMX
 
-**Status:** aceito
+**Status:** substituído pelo [ADR-009](ADR-009-native-typescript-frontend.md)
 
 **Data:** 2026-09-16
+
+> Registro histórico. A decisão abaixo não representa mais a stack atual.
 
 ## Contexto
 

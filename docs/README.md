@@ -35,6 +35,9 @@ Quando houver conflito, a ordem de precedência é:
 
 - [STACK.md](STACK.md) — stack aprovada e política de versões.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — arquitetura inicial e limites dos módulos.
+- [FRONTEND.md](FRONTEND.md) — componentes TypeScript nativos e CSS.
+- [BACKEND.md](BACKEND.md) — domain, application, ports e adapters.
+- [SCALABILITY.md](SCALABILITY.md) — caminho mensurável para alta escala.
 - [SECURITY.md](SECURITY.md) — requisitos técnicos de segurança.
 - [DEPLOYMENT.md](DEPLOYMENT.md) — topologia, ambientes, backup e evolução.
 - [COMMITS.md](COMMITS.md) — Conventional Commits, scopes e versionamento.

@@ -2,92 +2,154 @@
 
 **Status:** arquitetura inicial aprovada
 
-**Estilo:** monólito modular orientado a domínio
+**Estilo:** API-first, monólito modular, ports and adapters
 
 ## 1. Objetivos
 
-- operar com margem em uma VPS de 16 GB;
-- manter o conteúdo público rápido e indexável;
-- preservar transações fortes para wallet, posições e atribuições;
-- permitir auditoria e reconstrução de métricas;
-- evitar serviços distribuídos antes de necessidade medida;
-- manter caminho de saída de fornecedores.
+- frontend substituível e sem dependências de runtime de terceiros;
+- backend reutilizável por web, worker, CLI e futuros clientes;
+- regras de negócio independentes de transporte e fornecedores;
+- operação eficiente em uma VPS de 16 GB;
+- conteúdo público rápido, acessível e indexável;
+- transações fortes para wallet, posições e atribuições;
+- evolução horizontal baseada em medidas, sem reescrita precoce.
 
 ## 2. Topologia inicial
 
 ```text
-Internet
+Browser
+HTML semântico · CSS nativo · TypeScript→ESM · Web Components
    │
    ▼
 Cloudflare
-DNS · CDN · WAF · Turnstile · rate limits de borda
+DNS · CDN · WAF · Turnstile · cache público
    │
    ▼
 Caddy
 TLS · headers · reverse proxy · compressão
    │
-   ├──────────────► Goyim Arena server (Go)
-   │                 HTML · HTMX fragments · JSON público
-   │                 auth · autorização · domínio · billing
-   │
-   └──────────────► Goyim Arena worker (mesma imagem Go)
-                     email · jobs · manutenção assíncrona
-                         │
-                         ▼
-                    PostgreSQL 18
-              única fonte persistente inicial
+   ▼
+HTTP adapter ──────────────── Worker adapter / CLI adapter
+   │                                  │
+   └──────────── Application use cases┘
+                      │
+                    Domain
+                      │
+                 Outbound ports
+             ┌────────┼─────────┐
+             ▼        ▼         ▼
+         PostgreSQL  Stripe   Email/Telemetry
 
-Externos: Stripe · Resend · Sentry · PostHog · R2 futuro
+PostgreSQL 18 é a única fonte persistente inicial.
 ```
 
-Server e worker usam o mesmo código e comandos diferentes. Podem começar no mesmo host e ser separados sem dividir o domínio em microserviços.
+Server e worker usam o mesmo módulo Go e casos de uso. A aplicação começa como uma unidade de deploy, sem acoplar o domínio à topologia.
 
-## 3. Módulos
+## 3. Regra de dependência
 
-O processo é único, mas os módulos não acessam tabelas ou regras uns dos outros arbitrariamente.
+Dependências apontam para dentro:
 
-- `identity`: contas, email, credenciais, sessões e recuperação.
+```text
+adapters ──► application ──► domain
+bootstrap ─► adapters + application
+domain ────► biblioteca padrão apenas
+```
+
+- domínio não conhece SQL, HTTP, JSON, cookies ou fornecedores;
+- aplicação conhece o domínio e declara ports pequenos;
+- adapters implementam ports e fazem tradução;
+- bootstrap instancia implementações e configuração;
+- módulos de domínio não importam detalhes internos uns dos outros;
+- ciclos são proibidos e verificados pelo grafo de packages.
+
+“Desacoplado” não significa abstração para tudo. Só existe interface onde há fronteira, efeito externo ou mais de uma execução relevante. Abstração sem caso de uso é removida.
+
+## 4. Módulos de negócio
+
+- `identity`: contas, credenciais, sessões e recuperação.
 - `profiles`: usernames, locale e perfil público.
 - `arenas`: rascunho, publicação, fechamento, categoria e idioma.
 - `positions`: posição inicial, atual e mudanças.
 - `arguments`: argumentos, respostas, fontes e retirada.
 - `persuasion`: elegibilidade, atribuições e métricas públicas.
-- `wallet`: contas, lançamentos, buckets e consumo atômico.
-- `billing`: produtos, checkout, assinatura e webhooks.
+- `wallet`: ledger, buckets e consumo atômico.
+- `billing`: catálogo, checkout, assinatura e webhooks.
 - `moderation`: denúncias, decisões, recursos e sanções.
 - `transparency`: agregados públicos e exportações versionadas.
 - `audit`: eventos administrativos e integridade.
-- `notifications`: emails transacionais e preferências futuras.
-- `jobs`: fila persistente e políticas de retry.
+- `notifications`: mensagens transacionais.
+- `jobs`: execução persistente, lease e retry.
 
-Cada módulo possui tipos de domínio, serviço de aplicação, queries e interfaces próprias. Dependências cruzadas passam por serviços explícitos; ciclos são proibidos.
+Cada módulo expõe apenas comandos, queries e eventos públicos próprios. Acesso direto às tabelas de outro módulo é proibido fora de projeções explicitamente aprovadas.
 
-## 4. Organização futura do repositório
+## 5. Fluxo de um caso de uso
+
+```text
+HTTP request
+  → parse/validate transport
+  → command tipado
+  → authorization context
+  → application use case
+  → domain invariants
+  → transaction boundary
+  → outbound ports
+  → result tipado
+  → HTTP representation
+```
+
+Erros de domínio são estáveis e independentes de status HTTP. O adapter mapeia erro para Problem Details. Regras não são repetidas em handlers, jobs ou SQL.
+
+## 6. Contratos
+
+- OpenAPI 3.1 é o contrato HTTP versionado.
+- APIs públicas vivem sob `/api/v1`; mudanças incompatíveis criam nova versão.
+- DTOs de transporte não são entidades de domínio.
+- tipos TypeScript são gerados do contrato por tooling interno do repositório; código gerado não recebe lógica manual.
+- contract tests garantem que implementação e documento permanecem iguais.
+- idempotency keys fazem parte dos contratos de mutações repetíveis.
+- paginação pública usa cursor opaco, nunca offset profundo.
+
+O frontend é um consumidor da API, não uma exceção com acesso privilegiado ao banco.
+
+## 7. Organização do repositório
 
 ```text
 cmd/
-  arena/          servidor HTTP, worker e comandos operacionais
+  arena/                    server, worker e comandos operacionais
 internal/
-  identity/
-  profiles/
-  arenas/
-  positions/
-  arguments/
-  persuasion/
-  wallet/
-  billing/
-  moderation/
-  transparency/
-  audit/
-  jobs/
-  platform/       postgres, email, observabilidade e clock
+  <module>/
+    domain/                 entidades, values, policies e erros
+    application/            commands, queries, use cases e ports
+    adapters/
+      in/http/
+      in/jobs/
+      out/postgres/
+  platform/                 adapters compartilhados estritamente técnicos
+  bootstrap/                composition root
+api/
+  openapi.json              contrato HTTP fonte de verdade
+tools/
+  contractgen/              gerador Go interno para tipos TypeScript
 web/
-  components/     arquivos templ
-  assets/         CSS, JS e imagens versionadas
+  src/
+    core/                    http, lifecycle, events, i18n e tipos básicos
+    contracts/              tipos gerados do contrato
+    components/
+      primitives/           componentes sem domínio
+      arenas/
+      arguments/
+      wallet/
+    pages/                   composition roots de cada página
+    styles/
+      reset.css
+      tokens.css
+      base.css
+      layout.css
+  public/                    assets estáticos
+  generated/                 JS/CSS versionados para deploy, não editados
 db/
   migrations/
-  queries/        SQL de entrada do sqlc
-  generated/      código gerado; política será definida antes do código
+  queries/
 infra/
   compose/
   caddy/
@@ -95,67 +157,69 @@ infra/
 docs/
   adr/
 tests/
+  contract/
+  integration/
   e2e/
   load/
 ```
 
-Isto não é um monorepo de múltiplos produtos: é um único módulo Go e uma única unidade de deploy, com infraestrutura e documentação no mesmo repositório.
+## 8. Arquitetura dos componentes web
 
-## 5. Separação entre conteúdo público e privado
+Componentes são pequenos elementos nativos, não miniaplicações. Um componente:
 
-O HTML público nunca contém email, saldo, sessão, posição individual ou autoria de atribuição. Conteúdo personalizado usa rotas sem cache.
+- recebe dados serializáveis e dependências por contrato;
+- mantém apenas estado visual local;
+- usa `AbortController` para cancelar efeitos ao sair do DOM;
+- emite eventos sem conhecer o consumidor;
+- não chama endpoints arbitrários: usa um client tipado injetado;
+- não conhece autenticação, analytics ou cache diretamente;
+- funciona com teclado, leitores de tela e motion reduzido;
+- possui CSS local e teste de contrato visual/comportamental.
 
-- `/d/:slug`: statement, contexto e conteúdo público; pode ser cacheado.
-- fragmentos públicos de argumentos e agregados: cacheáveis com TTL curto.
-- `/me/*`, `/wallet/*`, `/admin/*` e respostas autenticadas: `private, no-store`.
-- toda resposta com `Set-Cookie`: não elegível para cache compartilhado.
+Page controllers compõem componentes e casos de navegação. Não existe singleton global mutável nem event bus genérico.
 
-O bloqueio do agregado antes da escolha é uma regra de experiência, não um segredo de segurança. Argumentos continuam públicos e indexáveis. Metadados e previews não exibem o resultado agregado.
+## 9. HTML, SEO e progressive enhancement
 
-## 6. Cache e consistência
+Go entrega documento HTML semântico com `html/template`, metadados e conteúdo público necessário à indexação. TypeScript registra componentes e aprimora filtros, formulários, paginação e atualização parcial usando `fetch`.
 
-- Assets com hash: cache longo e imutável.
-- Páginas e fragmentos públicos: TTL curto, inicialmente na ordem de dezenas de segundos.
-- Dados privados, wallet, checkout e admin: nunca em cache compartilhado.
-- Após escrita, a resposta ao autor mostra estado confirmado diretamente da origem.
-- Purge de cache é otimização; correção não pode depender apenas de purge remoto.
-- Conteúdo removido por risco grave exige invalidação prioritária e resposta segura na origem.
+Formulários críticos têm endpoint HTTP normal e continuam funcionais sem JavaScript sempre que possível. Isso melhora acessibilidade, resiliência e testes. Não há duplicação de regra: tanto resposta HTML quanto JSON chamam o mesmo caso de uso.
 
-As regras do Cloudflare devem excluir cookies e rotas privadas explicitamente. “Cache everything” global é proibido.
+## 10. Separação entre público e privado
 
-## 7. Persistência e transações
+- `/d/:slug`: documento público cacheável.
+- `/api/v1/public/*`: dados públicos com TTL e ETag.
+- `/api/v1/me/*`, wallet, auth, checkout e admin: `private, no-store`.
+- respostas com `Set-Cookie` nunca entram em cache compartilhado.
+- HTML público não inclui email, saldo, posição individual ou autoria de atribuição.
 
-PostgreSQL é a fonte de verdade. Wallet, publicação de argumento, consumo de passe, mudança de posição e webhook usam transações explícitas e idempotência.
+O bloqueio do agregado antes da escolha é regra de experiência, não segredo. Metadados e previews não mostram o agregado.
 
-Contadores como `arguments_count` ou `minds_changed_count` são projeções reconstruíveis. Os eventos normalizados continuam sendo a autoridade. Atualização pode ser transacional quando barata ou por job idempotente quando eventual.
+## 11. Persistência e consistência
 
-Feeds usam keyset pagination. `OFFSET` profundo é proibido em fluxos de produção. Busca começa com full-text search do PostgreSQL.
+PostgreSQL é a fonte de verdade. Wallet, argumento, passe, posição e webhook usam transações explícitas, constraints e idempotência.
 
-## 8. Autorização e acesso ao banco
+Contadores são projeções reconstruíveis. Feeds usam keyset pagination. Busca começa no PostgreSQL. Eventos destinados a jobs podem usar transactional outbox na mesma transação do domínio.
 
-O browser nunca acessa PostgreSQL. Toda autorização ocorre no servidor Go.
+Interfaces de persistência são específicas, como `ReserveInkForArgument`, e não um `Repository[T]` genérico que vaza detalhes e multiplica boilerplate.
 
-Papéis separados:
+## 12. Reutilização sem duplicação
 
-- migrator: altera schema; não é usado no runtime;
-- app: somente permissões necessárias à aplicação;
-- backup: somente permissões de backup;
-- observability: leitura limitada de métricas.
+- regra de negócio existe uma vez no domínio ou caso de uso;
+- transação é declarada na aplicação e implementada pelo adapter;
+- validação sintática fica no transporte; invariantes ficam no domínio;
+- mapeamentos repetitivos podem ser gerados, nunca escondidos por reflection em runtime;
+- cross-cutting concerns usam middleware/adapters, não chamadas espalhadas;
+- utilitários genéricos só existem após três usos reais coerentes;
+- composição substitui herança e registries globais.
 
-RLS universal não é requisito porque nenhuma tabela é exposta diretamente. Pode ser adotado como defesa adicional em dados específicos, com testes, sem substituir autorização de aplicação.
+## 13. Caminho de escala
 
-## 9. Jobs
+1. VPS única com edge cache e pool limitado.
+2. aplicação stateless replicada; sessões e jobs continuam persistentes.
+3. PostgreSQL em host dedicado com PITR e maior I/O.
+4. réplicas para queries públicas comprovadamente read-heavy.
+5. particionamento somente para tabelas cujo tamanho e padrão de acesso justifiquem.
+6. Valkey ou broker apenas quando coordenação/throughput não couber no PostgreSQL medido.
+7. extração de serviço somente para isolamento de carga, falha, segurança ou ownership.
 
-Jobs ficam em tabela própria com tipo, payload versionado, estado, tentativas, agendamento, lease e chave de idempotência. Workers obtêm lotes com `FOR UPDATE SKIP LOCKED`.
-
-Payload não armazena segredos nem cópias desnecessárias de dados pessoais. Dead letters são estados consultáveis, não outra infraestrutura.
-
-## 10. Caminho de evolução
-
-1. VPS única: Caddy, app, worker e PostgreSQL.
-2. Banco em host dedicado quando I/O, risco operacional ou memória justificarem.
-3. Múltiplas instâncias stateless da aplicação atrás de proxy.
-4. Valkey apenas quando coordenação distribuída ou cache compartilhado tiver ganho medido.
-5. Réplica PostgreSQL para leituras somente após queries e cache estarem otimizados.
-
-Dividir um módulo em serviço independente exige ownership, gargalo ou isolamento de risco demonstrável.
+O objetivo de atender milhões orienta statelessness, cache e contratos. Capacidade real é demonstrada por SLO, testes de carga e métricas; não é garantida pela forma do diagrama.

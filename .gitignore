@@ -16,7 +16,7 @@ coverage.out
 *.test
 
 # Generated frontend artifacts
-/web/assets/dist/
+/web/generated/
 
 # Local data
 /tmp/

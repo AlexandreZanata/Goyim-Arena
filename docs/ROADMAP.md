@@ -54,7 +54,8 @@ Nenhum item. O projeto está em documentação e descoberta.
 - constituição e regras de negócio v0.1;
 - escopo recomendado do MVP;
 - políticas iniciais de monetização, moderação, privacidade e transparência.
-- stack Go/PostgreSQL/HTMX e arquitetura de monólito modular;
+- frontend TypeScript 7 com Web Components, CSS nativo e zero dependências de runtime;
+- backend Go API-first com ports and adapters e PostgreSQL;
 - planos iniciais de segurança, deploy, backup e evolução;
 - ADRs das decisões técnicas fundadoras;
 - padrão de commits e contribuição.

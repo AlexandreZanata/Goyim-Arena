@@ -47,7 +47,7 @@ Nunca copiar banco de produção integral para desenvolvimento. Fixtures e dados
 
 ## 5. Pipeline
 
-1. PR executa formatação, lint, geração verificada, testes, migrations, segurança e build.
+1. PR executa TypeScript estrito, build ESM, testes Go/browser, contrato, migrations, segurança e build da imagem.
 2. Merge em `main` produz imagem OCI no GitHub Container Registry.
 3. Release promove uma imagem por digest, não recompila na VPS.
 4. Backup e verificações pré-deploy são executados.

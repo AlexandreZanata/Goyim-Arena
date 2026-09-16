@@ -6,83 +6,162 @@
 
 ## 1. Resumo
 
-Goyim Arena será um monólito modular, renderizado no servidor e operado inicialmente em uma VPS de 16 GB. A stack prioriza baixo custo fixo, auditabilidade, páginas públicas rápidas e uma rota clara de crescimento.
+Goyim Arena será uma aplicação API-first com backend Go e frontend baseado somente na plataforma nativa do browser. A implantação inicial continua sendo um monólito modular em uma VPS de 16 GB, mas suas interfaces são desenhadas para permitir clientes e processos independentes.
+
+### Frontend
+
+- **Linguagem:** TypeScript 7.x, patch estável mais recente.
+- **Saída:** JavaScript ESM nativo gerado pelo compilador oficial `tsc`.
+- **Componentes:** Custom Elements/Web Components e composição de HTML sem framework.
+- **Rede:** `fetch`, `Request`, `Response`, `AbortController` e Streams quando necessário.
+- **Estado:** estado local de componente e estado do servidor; sem store global.
+- **Eventos:** `CustomEvent` tipado e eventos DOM nativos.
+- **CSS:** CSS nativo com custom properties, `@layer`, container queries e cascade controlada.
+- **HTML:** semântico, acessível e progressivamente aprimorado.
+- **Dependências no browser:** zero pacotes de terceiros.
+- **Dependência de build do frontend:** somente o pacote oficial `typescript`.
+- **Build:** sem Vite, Webpack, Rollup, Babel, Sass, PostCSS ou bundler.
+
+### Backend e dados
+
+- **Aplicação:** Go 1.27.x, patch suportado mais recente.
+- **HTTP:** `net/http` e `http.ServeMux` da biblioteca padrão.
+- **Templates iniciais:** `html/template` da biblioteca padrão para documento semântico e SEO.
+- **Contrato:** OpenAPI 3.1 versionado; tipos gerados são artefatos, não runtime.
+- **Arquitetura:** domínio + casos de uso + ports + adapters + composition root.
+- **Banco:** PostgreSQL 18.x, patch suportado mais recente.
+- **Driver:** pgx v5, isolado no adapter PostgreSQL.
+- **SQL tipado:** sqlc, também restrito ao adapter.
+- **Migrations:** goose com SQL versionado.
+- **Sessões:** tokens opacos em cookie e armazenamento PostgreSQL.
+- **Senhas:** Argon2id via `golang.org/x/crypto`.
+- **Busca inicial:** full-text search e índices GIN do PostgreSQL.
+- **Jobs:** PostgreSQL e worker Go com `FOR UPDATE SKIP LOCKED`.
+
+### Operação
 
 - **Borda:** Cloudflare DNS, CDN, WAF e Turnstile.
 - **Proxy e TLS:** Caddy 2.
-- **Aplicação:** Go 1.27.x, usando sempre o patch suportado mais recente.
-- **Roteamento HTTP:** chi.
-- **HTML:** templ.
-- **Interatividade:** HTMX 2.x e JavaScript vanilla pontual.
-- **CSS:** Tailwind CSS 4.x.
-- **Banco:** PostgreSQL 18.x, usando sempre o patch suportado mais recente.
-- **Driver:** pgx v5.
-- **SQL tipado:** sqlc.
-- **Migrations:** goose, com migrations SQL versionadas.
-- **Sessões:** tokens opacos em cookie e armazenamento PostgreSQL, com SCS v2.
-- **Senhas:** Argon2id via `golang.org/x/crypto`.
-- **Busca inicial:** full-text search e índices GIN do PostgreSQL.
-- **Jobs:** tabela PostgreSQL e worker Go com `FOR UPDATE SKIP LOCKED`.
 - **Pagamento:** Stripe Checkout, Billing e webhooks.
 - **Email:** Resend.
-- **Storage futuro:** Cloudflare R2 quando arquivos forem realmente necessários.
+- **Storage futuro:** Cloudflare R2 quando arquivos forem necessários.
 - **Analytics:** PostHog com eventos mínimos e sem conteúdo privado.
-- **Erros:** Sentry.
-- **Logs:** `log/slog` em JSON para stdout.
+- **Erros:** Sentry, isolado por adapter.
+- **Logs:** `log/slog` em JSON.
 - **Deploy:** Docker Compose em Debian estável ou Ubuntu LTS.
 - **CI/CD:** GitHub Actions.
-- **Testes de carga:** k6.
-- **E2E:** Playwright.
+- **Carga:** k6.
+- **E2E:** Playwright fora do bundle do frontend.
 
-## 2. Política de versões
+## 2. O significado de “sem dependências externas”
 
-Documentos registram linhas suportadas, não imagens flutuantes. Builds e deploys devem fixar patch e digest quando houver implementação.
+O browser não baixa nem executa bibliotecas de terceiros. Isso elimina dependência de frameworks e reduz supply chain, JavaScript, atualizações e risco de abandono.
 
+TypeScript não é executado pelo browser: o compilador oficial transforma `.ts` em `.js`. Portanto, `typescript` é uma dependência de desenvolvimento obrigatória e fixada. Playwright e ferramentas de auditoria podem existir no CI, mas nada delas é entregue ao usuário.
+
+APIs externas de negócio — Stripe, Resend, Cloudflare, Sentry e PostHog — ficam atrás de ports do backend. Elas são substituíveis; nenhuma pode contaminar o domínio.
+
+## 3. Política do frontend
+
+### Componentes
+
+Cada componente possui responsabilidade única, contrato explícito e diretório próprio:
+
+```text
+web/src/components/argument-card/
+  argument-card.ts
+  argument-card.css
+  argument-card.test.ts
+```
+
+Regras:
+
+- nomes customizados usam prefixo `ga-`, como `<ga-argument-card>`;
+- propriedades entram por tipos, atributos ou data inicial serializada com segurança;
+- componentes publicam `CustomEvent` documentado, sem conhecer páginas ou serviços concretos;
+- efeitos externos passam por interfaces pequenas injetadas;
+- nenhum componente importa outro módulo de domínio por caminho interno;
+- Light DOM é o padrão para acessibilidade e composição; Shadow DOM apenas quando isolamento real justificar;
+- formulários e links funcionam antes do aprimoramento JavaScript sempre que possível;
+- conteúdo de usuário usa `textContent`, nunca `innerHTML`.
+
+### CSS
+
+CSS usa camadas estáveis:
+
+```css
+@layer reset, tokens, base, layout, components, utilities, overrides;
+```
+
+- design tokens são custom properties versionadas;
+- componentes não dependem da ordem de importação acidental;
+- layout usa Grid, Flexbox e container queries;
+- especificidade permanece baixa com `:where()`;
+- seletores são locais ao componente, com prefixo `ga-` ou atributo explícito;
+- temas usam tokens, não duplicação de folhas;
+- estilos inline e `!important` exigem justificativa;
+- acessibilidade respeita contraste, teclado, `prefers-reduced-motion` e zoom.
+
+### Módulos e carregamento
+
+- código emitido é ESM nativo;
+- páginas carregam apenas o entrypoint necessário;
+- módulos são cacheados com nome versionado ou manifest de assets;
+- não há client-side router no MVP; navegação usa URLs e histórico nativos;
+- o servidor entrega HTML útil e o TypeScript aprimora interação;
+- compressão ocorre no Caddy/Cloudflare; minificador não é requisito inicial.
+
+## 4. Política do backend
+
+O backend não é “100% sem acoplamento”, pois todo software possui dependências. A regra verificável é: domínio e casos de uso não importam HTTP, PostgreSQL, Stripe, email, analytics ou frameworks.
+
+- `domain`: entidades, value objects, invariantes e erros; Go puro.
+- `application`: casos de uso e ports necessários; orquestra transações.
+- `adapters/in/http`: traduz HTTP/OpenAPI para comandos e respostas.
+- `adapters/in/jobs`: executa os mesmos casos de uso fora do HTTP.
+- `adapters/out/postgres`: pgx, sqlc, queries e locks.
+- `adapters/out/stripe`: pagamento e webhooks.
+- `adapters/out/email`: Resend.
+- `adapters/out/observability`: Sentry, PostHog e métricas.
+- `bootstrap`: composição das implementações; nenhuma regra de negócio.
+
+Interfaces pertencem ao consumidor, não ao adapter. Evitar repositories genéricos; cada port expressa intenção do caso de uso. HTTP, worker, CLI e futuros clientes reutilizam os mesmos casos de uso.
+
+Um gerador interno em Go poderá ler o subconjunto versionado do contrato OpenAPI e emitir `contracts/generated.ts`. Assim o frontend continua tendo somente TypeScript como dependência de build e os tipos mecânicos não são duplicados manualmente.
+
+## 5. Política de versões
+
+- TypeScript: linha 7, patch estável mais recente testado; 7.0 é estável desde julho de 2026.
 - Go: linha 1.27, patch mais recente testado; atualmente 1.27.1.
 - PostgreSQL: linha 18, patch mais recente testado; atualmente 18.6.
-- Dependências Go: versões fixadas por `go.mod` e `go.sum`.
-- Dependências de frontend: versões fixadas e artefatos servidos pela própria aplicação; produção não depende de CDN de terceiros para HTMX.
-- Imagens de container: tags semânticas e digest no ambiente de produção.
-- Atualizações de segurança: prioridade, com rollback documentado.
+- Builds fixam versões e checksums; produção usa imagens por digest.
+- JavaScript emitido tem alvo definido pela política de browsers, não pela versão do compilador.
+- Atualização só avança após CI, testes de contrato, browser e rollback.
 
-Não atualizar versões automaticamente em produção sem CI, backup válido e teste de migração.
+## 6. Ferramentas de desenvolvimento
 
-## 3. Escolhas deliberadas
-
-### Go em vez de Node SSR
-
-O produto é predominantemente HTTP, validação, SQL e HTML. Go oferece processo único, concorrência simples, consumo previsível e deploy por binário/container. A escolha sacrifica parte do ecossistema visual de React em troca de operação mais simples.
-
-### HTML server-side em vez de SPA
-
-Páginas públicas precisam de SEO, baixo JavaScript e cache eficiente. templ mantém componentes tipados; HTMX atualiza fragmentos sem transformar toda a aplicação em cliente stateful.
-
-### JavaScript vanilla antes de Alpine.js
-
-Alpine.js não entra como dependência padrão. Será reconsiderado apenas se houver estado de interface repetitivo que HTMX e JavaScript pequeno não resolvam claramente.
-
-### SQL explícito em vez de ORM
-
-pgx e sqlc preservam SQL visível, geram tipos e permitem analisar queries críticas. Migrations continuam sendo SQL legível.
-
-### PostgreSQL antes de novos serviços
-
-PostgreSQL atende persistência, transações, sessões, busca, jobs e projeções iniciais. Redis, Valkey, RabbitMQ, Kafka, Elasticsearch e banco vetorial só entram após gargalo medido e ADR específico.
-
-## 4. Ferramentas de desenvolvimento
-
+- `tsc --noEmit` para tipos e `tsc` para emissão ESM.
+- APIs nativas de teste para unidades puras; Playwright para comportamento real do browser.
 - `go test`, race detector, fuzzing dirigido e benchmarks.
-- `golangci-lint` com configuração versionada.
-- `govulncheck` para vulnerabilidades do ecossistema Go.
-- `sqlc vet` e validação das migrations em banco descartável.
-- Testcontainers-Go para integrações que exigem PostgreSQL real.
-- Playwright para fluxos críticos no browser.
-- k6 para capacidade e regressões de desempenho.
-- Gitleaks e Dependabot para segredos e dependências.
+- `golangci-lint` e `govulncheck`.
+- `sqlc vet` e migrations em banco descartável.
+- Testcontainers-Go para integrações com PostgreSQL real.
+- k6 para capacidade e regressão.
+- Gitleaks e Dependabot para supply chain.
 
-## 5. O que não entra no MVP
+## 7. O que não entra no frontend
 
-- React, Next.js ou SPA;
+- React, Vue, Angular, Svelte ou outro framework;
+- HTMX, Alpine.js, jQuery ou biblioteca de componentes;
+- templ ou JSX;
+- Tailwind, Bootstrap, Sass ou CSS-in-JS;
+- Redux, Zustand ou store semelhante;
+- Vite, Webpack, Rollup, Babel ou bundler;
+- dependência carregada de CDN;
+- polyfill sem browser-alvo e necessidade documentados.
+
+## 8. O que não entra na infraestrutura inicial
+
 - Supabase;
 - Redis ou Valkey;
 - Kubernetes;
@@ -91,19 +170,20 @@ PostgreSQL atende persistência, transações, sessões, busca, jobs e projeçõ
 - Elasticsearch, Meilisearch ou Typesense;
 - blockchain ou banco vetorial;
 - IA no fluxo central;
-- armazenamento de uploads no disco local da VPS.
+- uploads no disco local da VPS.
 
-## 6. Regra de expansão
+## 9. Regra de expansão
 
-> Nenhuma nova infraestrutura entra enquanto Go, PostgreSQL e Cloudflare resolverem o problema de forma razoável e mensurável.
+> Nenhuma nova biblioteca ou infraestrutura entra sem problema medido, alternativa nativa avaliada, custo operacional e plano de remoção.
 
-Uma exceção precisa declarar problema, evidência, custo esperado, alternativa simples, plano de saída e novo ADR.
+Escala é obtida primeiro com cache, queries corretas, processos stateless, índices, particionamento criterioso e capacidade medida — não com quantidade de tecnologias.
 
-## 7. Referências oficiais
+## 10. Referências oficiais
 
+- [TypeScript 7.0](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/)
+- [Web Components — MDN](https://developer.mozilla.org/docs/Web/API/Web_components)
+- [CSS — MDN](https://developer.mozilla.org/docs/Web/CSS)
 - [Histórico de releases do Go](https://go.dev/doc/devel/release)
 - [Release notes do PostgreSQL](https://www.postgresql.org/docs/release/)
-- [Documentação do templ](https://templ.guide/)
-- [Documentação do HTMX](https://htmx.org/docs/)
 - [Documentação do Caddy](https://caddyserver.com/docs/)
 - [Cache do Cloudflare](https://developers.cloudflare.com/cache/)

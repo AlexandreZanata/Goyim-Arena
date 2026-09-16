@@ -36,10 +36,11 @@ Não implementar JWT como sessão principal no browser. JWT pode ser reavaliado 
 
 ## 4. Aplicação web
 
-- templ com escaping padrão; HTML arbitrário de usuário é proibido.
+- HTML inicial usa `html/template` com escaping padrão; HTML arbitrário de usuário é proibido.
+- Componentes TypeScript usam DOM seguro e `textContent`; `innerHTML` é proibido para dados dinâmicos.
 - Conteúdo do MVP é plaintext. Markdown, se introduzido, exige parser com allowlist e sanitização.
 - CSRF token em toda mutação baseada em cookie, além de validação de origem quando aplicável.
-- CSP restritiva; scripts e estilos próprios, sem `unsafe-inline` por padrão.
+- CSP restritiva; módulos e estilos próprios, sem `unsafe-inline` ou `unsafe-eval` por padrão.
 - Headers: HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` e proteção de framing.
 - Uploads não entram no MVP. Quando entrarem, usar object storage, tipo detectado, limites e domínio de entrega separado quando necessário.
 - Redirecionamentos e URLs externas passam por validação.

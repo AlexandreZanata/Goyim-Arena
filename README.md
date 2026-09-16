@@ -24,7 +24,7 @@ O projeto está na fase de definição do produto e da arquitetura. Ainda não h
 
 **Mercados iniciais:** Brasil e internacional, em português do Brasil e inglês dos Estados Unidos
 
-**Stack aprovada:** Go, PostgreSQL, templ, HTMX, Tailwind CSS, Caddy e Cloudflare
+**Stack aprovada:** TypeScript 7 e CSS nativo no frontend; Go e PostgreSQL no backend; Caddy e Cloudflare na operação
 
 **Próximo passo:** validar o problema e os fluxos centrais antes de implementar o SaaS completo
 
