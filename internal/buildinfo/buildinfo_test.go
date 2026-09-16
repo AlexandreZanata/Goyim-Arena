@@ -20,12 +20,10 @@ func setLinkTimeVars(t *testing.T, versionValue, commitValue, dateValue string) 
 }
 
 func TestCurrentWithoutInjectionReturnsDevelopmentDefaults(t *testing.T) {
-	t.Setenv("SOURCE_DATE_EPOCH", "")
-
 	restore := setLinkTimeVars(t, "", "", "")
 	defer restore()
 
-	info := Current()
+	info := Current(nil)
 
 	if info.Version != "dev" {
 		t.Fatalf("version = %q, want %q", info.Version, "dev")
@@ -39,12 +37,10 @@ func TestCurrentWithoutInjectionReturnsDevelopmentDefaults(t *testing.T) {
 }
 
 func TestCurrentUsesInjectedValues(t *testing.T) {
-	t.Setenv("SOURCE_DATE_EPOCH", "")
-
 	restore := setLinkTimeVars(t, "1.2.3", "abc1234", "1760000000")
 	defer restore()
 
-	info := Current()
+	info := Current(nil)
 
 	if info.Version != "1.2.3" {
 		t.Fatalf("version = %q, want %q", info.Version, "1.2.3")
@@ -58,13 +54,11 @@ func TestCurrentUsesInjectedValues(t *testing.T) {
 	}
 }
 
-func TestCurrentPrefersInjectedDateOverSourceDateEpoch(t *testing.T) {
-	t.Setenv("SOURCE_DATE_EPOCH", "1700000000")
-
+func TestCurrentIgnoresSourceDateEpochWhenInjected(t *testing.T) {
 	restore := setLinkTimeVars(t, "2.0.0", "def5678", "1760000000")
 	defer restore()
 
-	info := Current()
+	info := Current([]string{"SOURCE_DATE_EPOCH=1700000000"})
 
 	want := time.Unix(1760000000, 0).UTC()
 	if !info.Date.Equal(want) {
@@ -73,12 +67,10 @@ func TestCurrentPrefersInjectedDateOverSourceDateEpoch(t *testing.T) {
 }
 
 func TestCurrentFallsBackToSourceDateEpoch(t *testing.T) {
-	t.Setenv("SOURCE_DATE_EPOCH", "1700000000")
-
 	restore := setLinkTimeVars(t, "", "", "")
 	defer restore()
 
-	info := Current()
+	info := Current([]string{"SOURCE_DATE_EPOCH=1700000000"})
 
 	if info.Version != "dev" || info.Commit != "unknown" {
 		t.Fatalf("version/commit = %q/%q, want dev/unknown", info.Version, info.Commit)
@@ -90,8 +82,6 @@ func TestCurrentFallsBackToSourceDateEpoch(t *testing.T) {
 }
 
 func TestParseBuildDateAcceptsUnixAndRFC3339(t *testing.T) {
-	t.Setenv("SOURCE_DATE_EPOCH", "")
-
 	unix := ParseBuildDate("1760000000")
 	if !unix.Equal(time.Unix(1760000000, 0).UTC()) {
 		t.Fatalf("unix date = %v, want %v", unix.Time, time.Unix(1760000000, 0).UTC())
@@ -108,8 +98,6 @@ func TestParseBuildDateAcceptsUnixAndRFC3339(t *testing.T) {
 }
 
 func TestBuildTimeJSONRoundTrip(t *testing.T) {
-	t.Setenv("SOURCE_DATE_EPOCH", "")
-
 	want := time.Unix(1760000000, 0).UTC()
 
 	encoded, err := json.Marshal(BuildTime{Time: want})
@@ -130,8 +118,6 @@ func TestBuildTimeJSONRoundTrip(t *testing.T) {
 }
 
 func TestBuildTimeZeroMarshalsAsUnknown(t *testing.T) {
-	t.Setenv("SOURCE_DATE_EPOCH", "")
-
 	encoded, err := json.Marshal(BuildTime{})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -150,12 +136,10 @@ func TestBuildTimeZeroMarshalsAsUnknown(t *testing.T) {
 }
 
 func TestInfoJSONShape(t *testing.T) {
-	t.Setenv("SOURCE_DATE_EPOCH", "")
-
 	restore := setLinkTimeVars(t, "1.2.3", "abc1234", "1760000000")
 	defer restore()
 
-	encoded, err := json.Marshal(Current())
+	encoded, err := json.Marshal(Current(nil))
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}

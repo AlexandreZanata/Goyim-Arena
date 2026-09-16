@@ -8,7 +8,6 @@
 package buildinfo
 
 import (
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -83,37 +82,48 @@ func nonEmpty(value, fallback string) string {
 // Current returns the build metadata with deterministic fallbacks applied:
 // without -ldflags injection the binary reports the development version
 // "dev", commit "unknown" and the date derived from SOURCE_DATE_EPOCH (when
-// set) or zero ("unknown") to stay reproducible.
-func Current() Info {
+// present in the given environ) or zero ("unknown") to stay reproducible.
+//
+// The environ is handed in by the caller (cmd/ is the process edge) instead
+// of being read here, keeping this package free of environment access.
+func Current(environ []string) Info {
 	info := Info{
 		Version: nonEmpty(version, fallbackVersion),
 		Commit:  nonEmpty(commit, fallbackCommit),
+		Date:    ParseBuildDate(date),
 	}
-	info.Date = ParseBuildDate(date)
+	if info.Date.IsZero() {
+		info.Date = ParseBuildDate(environValue(environ, "SOURCE_DATE_EPOCH"))
+	}
 	return info
 }
 
-// ParseBuildDate resolves a raw injected date: a Unix number is interpreted
-// as seconds since the epoch; RFC 3339 strings are parsed as-is; empty or
-// unset values fall back to SOURCE_DATE_EPOCH (when available) or the zero
-// time ("unknown" in JSON).
+// environValue finds one variable in an environ-style slice without touching
+// the process environment.
+func environValue(environ []string, name string) string {
+	for _, entry := range environ {
+		if entryName, value, found := strings.Cut(entry, "="); found && entryName == name {
+			return value
+		}
+	}
+	return ""
+}
+
+// ParseBuildDate resolves a raw injected date deterministically: a Unix
+// number is interpreted as seconds since the epoch; RFC 3339 strings are
+// parsed as-is; anything else (including empty) yields the zero time, which
+// serializes as "unknown" in JSON. Environment fallbacks are the caller's
+// responsibility (see Current).
 func ParseBuildDate(raw string) BuildTime {
-	if trimmed := strings.TrimSpace(raw); trimmed != "" {
-		if unixSeconds, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
-			return BuildTime{time.Unix(unixSeconds, 0).UTC()}
-		}
-		if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
-			return BuildTime{parsed.UTC()}
-		}
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return BuildTime{}
 	}
-
-	// SOURCE_DATE_EPOCH is the reproducible-builds.org convention for the
-	// deterministic fallback timestamp.
-	if epoch := strings.TrimSpace(os.Getenv("SOURCE_DATE_EPOCH")); epoch != "" {
-		if unixSeconds, err := strconv.ParseInt(epoch, 10, 64); err == nil {
-			return BuildTime{time.Unix(unixSeconds, 0).UTC()}
-		}
+	if unixSeconds, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+		return BuildTime{time.Unix(unixSeconds, 0).UTC()}
 	}
-
+	if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		return BuildTime{parsed.UTC()}
+	}
 	return BuildTime{}
 }

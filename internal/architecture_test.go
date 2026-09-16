@@ -6,10 +6,15 @@
 // external dependencies are forbidden in these layers, per
 // docs/ARCHITECTURE.md (Ports and Adapters) and AGENTS.md. Adding an approved
 // dependency to a layer requires an ADR and a matching change here.
+//
+// Since P02-T01, direct process-environment reads are additionally gated to
+// the typed configuration package (and cmd/bootstrap when it appears):
+// no other internal package may call os.Getenv, os.LookupEnv or os.Setenv.
 package architecture_test
 
 import (
 	"fmt"
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
@@ -57,6 +62,13 @@ var businessModules = []string{
 	"arenas", "arguments", "audit", "billing", "identity", "jobs",
 	"moderation", "persuasion", "positions", "profiles", "transparency",
 	"wallet",
+}
+
+// envReadAllowlist lists the internal packages allowed to touch the process
+// environment directly, per the P02-T01 gate ("nenhum package lê os.Getenv
+// fora de config/bootstrap"). cmd/bootstrap joins this list when it appears.
+var envReadAllowlist = map[string]bool{
+	"internal/platform/config": true,
 }
 
 func repositoryRoot(t *testing.T) string {
@@ -114,7 +126,36 @@ func forbiddenImportForDomainOrApplication(module, importPath string) (string, b
 	return "", false
 }
 
-func TestDomainAndApplicationDoNotImportForbiddenPackages(t *testing.T) {
+// envReadViolation inspects one expression for direct environment access and
+// reports a violation message when the containing package is not allowlisted.
+func envReadViolation(expression ast.Expr, pkgDir string) (string, bool) {
+	call, isCall := expression.(*ast.CallExpr)
+	if !isCall {
+		return "", false
+	}
+	selector, isSelector := call.Fun.(*ast.SelectorExpr)
+	if !isSelector {
+		return "", false
+	}
+	ident, isIdent := selector.X.(*ast.Ident)
+	if !isIdent || ident.Name != "os" {
+		return "", false
+	}
+	switch selector.Sel.Name {
+	case "Getenv", "LookupEnv", "Setenv", "Unsetenv", "Clearenv", "Expandenv":
+	default:
+		return "", false
+	}
+	if envReadAllowlist[pkgDir] {
+		return "", false
+	}
+	return fmt.Sprintf(
+		"%s calls os.%s directly — read the environment only in the typed config package (P02-T01 gate)",
+		pkgDir, selector.Sel.Name,
+	), true
+}
+
+func TestDependencyDirectionAndEnvironmentGate(t *testing.T) {
 	root := repositoryRoot(t)
 	internalDir := filepath.Join(root, "internal")
 	fset := token.NewFileSet()
@@ -133,6 +174,25 @@ func TestDomainAndApplicationDoNotImportForbiddenPackages(t *testing.T) {
 			return err
 		}
 		segments := strings.Split(filepath.ToSlash(relPath), "/")
+		pkgDir := strings.Join(segments[:minInt(3, len(segments))], "/")
+
+		source, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Errorf("parse %s: %v", filepath.ToSlash(relPath), err)
+			return nil
+		}
+
+		// Environment gate applies to every internal package.
+		ast.Inspect(source, func(node ast.Node) bool {
+			if expression, isExpression := node.(ast.Expr); isExpression {
+				if rule, forbidden := envReadViolation(expression, pkgDir); forbidden {
+					violations = append(violations, fmt.Sprintf("%s — %s", filepath.ToSlash(relPath), rule))
+				}
+			}
+			return true
+		})
+
+		// Dependency direction applies to domain and application layers.
 		if len(segments) < 3 {
 			return nil
 		}
@@ -141,12 +201,6 @@ func TestDomainAndApplicationDoNotImportForbiddenPackages(t *testing.T) {
 			return nil
 		}
 		module := segments[1]
-
-		source, err := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
-		if err != nil {
-			t.Errorf("parse %s: %v", filepath.ToSlash(relPath), err)
-			return nil
-		}
 		for _, importSpec := range source.Imports {
 			importPath, err := strconv.Unquote(importSpec.Path.Value)
 			if err != nil {
@@ -167,8 +221,16 @@ func TestDomainAndApplicationDoNotImportForbiddenPackages(t *testing.T) {
 	}
 
 	if len(violations) > 0 {
-		t.Fatalf("dependency direction violations:\n%s", strings.Join(violations, "\n"))
+		t.Fatalf("architecture violations:\n%s", strings.Join(violations, "\n"))
 	}
+}
+
+// minInt returns the smaller of two integers.
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func TestBusinessModulesExist(t *testing.T) {

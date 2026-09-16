@@ -65,7 +65,7 @@ func runVersion(args []string, stdout *os.File) error {
 		}
 	}
 
-	info := buildinfo.Current()
+	info := buildinfo.Current(os.Environ())
 	if asJSON {
 		encoder := json.NewEncoder(stdout)
 		encoder.SetEscapeHTML(false)
