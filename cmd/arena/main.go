@@ -1,14 +1,22 @@
 // Command arena is the single binary of Goyim Arena. Per the master plan,
-// future subcommands include server, worker, migrate and explicitly approved
-// operations; for now only version and help exist.
+// future subcommands include worker, migrate and explicitly approved
+// operations; for now server, version and help exist.
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/buildinfo"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
 )
 
 const usage = `arena is the command-line entrypoint of Goyim Arena.
@@ -19,6 +27,7 @@ Usage:
 
 The commands are:
 
+  server     run the HTTP server (ARENA_* configuration from the environment)
   version    show the arena version; use --json for machine-readable output
   help       show this help
 
@@ -38,6 +47,8 @@ func run(args []string, stdout *os.File) error {
 	}
 
 	switch args[0] {
+	case "server":
+		return runServer(args[1:], stdout)
 	case "version":
 		return runVersion(args[1:], stdout)
 	case "help", "-h", "-help", "--help":
@@ -49,6 +60,45 @@ func run(args []string, stdout *os.File) error {
 		return fmt.Errorf("unknown command %q\n\n%s\n\nRun \"arena help\" for usage.", args[0], usage)
 	}
 	return nil
+}
+
+// runServer boots the hardened HTTP server (P02-T05): typed configuration
+// from the environment, the structured JSON logger, request ID correlation
+// with the health routes, and a graceful shutdown on SIGTERM/SIGINT. It is
+// the process edge — the only place allowed to own signals and the real
+// clock/randomness sources.
+func runServer(args []string, stdout *os.File) error {
+	if len(args) > 0 {
+		return fmt.Errorf("server takes no arguments\n\nUsage: arena server")
+	}
+
+	cfg := config.MustLoad()
+	logger := logging.New(stdout, cfg.LogLevel())
+
+	ids := clockseed.NewIDGenerator("req", clockseed.NewRandom(), clockseed.NewClock())
+	handler := httpserver.NewMux(ids)
+
+	server, err := httpserver.New(httpserver.Options{
+		Addr:    cfg.Addr(),
+		Handler: handler,
+		Logger:  logger,
+	})
+	if err != nil {
+		return err
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := server.Listen(); err != nil {
+		return err
+	}
+	logger.Info("http server: listening",
+		slog.String("addr", server.Addr()),
+		slog.String("env", string(cfg.Env())),
+	)
+
+	return server.Run(ctx)
 }
 
 // runVersion prints the reproducible build metadata (P01-T05). Without

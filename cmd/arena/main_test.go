@@ -3,10 +3,16 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"io"
+	"net"
+	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func runForTest(t *testing.T, args ...string) (string, string, error) {
@@ -142,4 +148,185 @@ func TestModulePathMatchesMasterPlan(t *testing.T) {
 	if !strings.Contains(string(data), wantModule) {
 		t.Fatalf("go.mod does not declare %q:\n%s", wantModule, data)
 	}
+}
+
+func TestRunHelpListsServerCommand(t *testing.T) {
+	stdout, _, err := runForTest(t)
+	if err != nil {
+		t.Fatalf("run without arguments: %v", err)
+	}
+	if !strings.Contains(stdout, "server") {
+		t.Fatalf("expected help to list the server command, got %q", stdout)
+	}
+}
+
+// TestRunServerRejectsArguments guards the guard: argument validation must
+// run before configuration loading, so a typo never reaches the loader.
+func TestRunServerRejectsArguments(t *testing.T) {
+	_, _, err := runForTest(t, "server", "extra")
+	assertError(t, err, "server takes no arguments")
+	assertError(t, err, "Usage: arena server")
+}
+
+// TestServerBootsServesAndStopsOnSIGTERM is the subprocess validation
+// required by P02-T05: the binary boots from a clean environment, answers
+// /health/live and /health/ready with 200, logs the listening record as a
+// single JSON object, and terminates within the deadline after SIGTERM,
+// logging the graceful shutdown record.
+func TestServerBootsServesAndStopsOnSIGTERM(t *testing.T) {
+	if testing.Short() {
+		t.Skip("subprocess lifecycle test skipped in -short mode")
+	}
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+
+	binary := filepath.Join(t.TempDir(), "arena")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/arena")
+	build.Dir = repoRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, output)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close() // Reserve the port number only; the server binds it.
+
+	logPath := filepath.Join(t.TempDir(), "server.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		t.Fatalf("create log file: %v", err)
+	}
+	defer logFile.Close()
+
+	command := exec.Command(binary, "server")
+	command.Env = []string{
+		"ARENA_ADDR=" + address,
+		"ARENA_ENV=development",
+		"PATH=" + os.Getenv("PATH"), // go build may need the toolchain.
+	}
+	command.Stdout = logFile
+	command.Stderr = logFile
+	if err := command.Start(); err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+
+	baseURL := "http://" + address
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	deadline := time.Now().Add(10 * time.Second)
+	var liveResponse *http.Response
+	for liveResponse == nil {
+		if time.Now().After(deadline) {
+			_ = command.Process.Kill()
+			_ = command.Wait()
+			log, _ := os.ReadFile(logPath)
+			t.Fatalf("server did not answer /health/live in time; log:\n%s", log)
+		}
+		response, err := client.Get(baseURL + "/health/live")
+		if err == nil {
+			liveResponse = response
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	body, err := io.ReadAll(liveResponse.Body)
+	_ = liveResponse.Body.Close()
+	if err != nil {
+		t.Fatalf("read /health/live body: %v", err)
+	}
+	if liveResponse.StatusCode != http.StatusOK {
+		t.Fatalf("/health/live status = %d, want 200", liveResponse.StatusCode)
+	}
+	var livePayload struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &livePayload); err != nil || livePayload.Status != "live" {
+		t.Fatalf("/health/live body = %q (parse error: %v), want {\"status\":\"live\"}", body, err)
+	}
+	if got := liveResponse.Header.Get("X-Request-Id"); got == "" {
+		t.Error("/health/live response is missing the X-Request-Id correlation header")
+	}
+
+	readyResponse, err := client.Get(baseURL + "/health/ready")
+	if err != nil {
+		t.Fatalf("GET /health/ready: %v", err)
+	}
+	readyBody, err := io.ReadAll(readyResponse.Body)
+	_ = readyResponse.Body.Close()
+	if err != nil {
+		t.Fatalf("read /health/ready body: %v", err)
+	}
+	if readyResponse.StatusCode != http.StatusOK {
+		t.Fatalf("/health/ready status = %d, want 200", readyResponse.StatusCode)
+	}
+	var readyPayload struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(readyBody, &readyPayload); err != nil || readyPayload.Status != "ready" {
+		t.Fatalf("/health/ready body = %q (parse error: %v), want {\"status\":\"ready\"}", readyBody, err)
+	}
+
+	// SIGTERM must terminate the process within the deadline, gracefully.
+	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("send SIGTERM: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("server exited with error after SIGTERM: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		_ = command.Process.Kill()
+		<-done
+		t.Fatal("server did not terminate within 5s of SIGTERM")
+	}
+
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read server log: %v", err)
+	}
+	records := parseJSONLogRecords(t, string(log))
+	if !containsRecord(records, "msg", "http server: listening") {
+		t.Errorf("log is missing the listening record:\n%s", log)
+	}
+	if !containsRecord(records, "msg", "http server: graceful shutdown complete") {
+		t.Errorf("log is missing the graceful shutdown record:\n%s", log)
+	}
+}
+
+// parseJSONLogRecords decodes every line as a JSON object, failing on any
+// non-JSON line: the whole server log must stay machine-readable.
+func parseJSONLogRecords(t *testing.T, log string) []map[string]any {
+	t.Helper()
+
+	var records []map[string]any
+	for line := range strings.SplitSeq(strings.TrimSpace(log), "\n") {
+		if line == "" {
+			continue
+		}
+		var record map[string]any
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			t.Fatalf("log line is not a JSON object: %q (%v)\nfull log:\n%s", line, err, log)
+		}
+		records = append(records, record)
+	}
+	return records
+}
+
+func containsRecord(records []map[string]any, key, want string) bool {
+	for _, record := range records {
+		if value, ok := record[key].(string); ok && value == want {
+			return true
+		}
+	}
+	return false
 }
