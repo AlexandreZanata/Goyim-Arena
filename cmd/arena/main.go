@@ -76,7 +76,10 @@ func runServer(args []string, stdout *os.File) error {
 	logger := logging.New(stdout, cfg.LogLevel())
 
 	ids := clockseed.NewIDGenerator("req", clockseed.NewRandom(), clockseed.NewClock())
-	handler := httpserver.NewMux(ids)
+	handler, err := httpserver.NewMux(ids)
+	if err != nil {
+		return err
+	}
 
 	server, err := httpserver.New(httpserver.Options{
 		Addr:    cfg.Addr(),

@@ -8,7 +8,7 @@ GO ?= go
 GOFMT ?= gofmt
 NPM ?= npm
 
-.PHONY: fmt fmt-check test-unit typecheck build-web generate generate-check verify
+.PHONY: fmt fmt-check test-unit typecheck build-web test-contract generate generate-check verify
 
 # fmt formata o código Go (alvo mutante; use fmt-check para validar sem alterar).
 fmt:
@@ -43,6 +43,14 @@ build-web:
 	$(NPM) --prefix web run build
 	@echo "build-web: ok"
 
+# test-contract valida o contrato OpenAPI versionado: o documento parseia,
+# satisfaz as convenções estruturais do plano (Problem Details, security
+# schemes, paginação/idempotência) e casa com as rotas registradas pelo
+# binário — drift de rota falha o build (P02-T06).
+test-contract:
+	$(GO) test ./internal/contract/...
+	@echo "test-contract: ok"
+
 # generate é um gate ainda não implementado: o gerador de contratos
 # (api/openapi.json -> web/src/contracts/generated.ts) chega em fase posterior.
 generate:
@@ -58,12 +66,12 @@ generate-check:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check test-unit typecheck build-web
+verify: fmt-check test-unit test-contract typecheck build-web
 	@echo "verify: gates presentes, porém não implementados (falham explicitamente ao serem invocados):"
 	@echo "  - generate"
 	@echo "  - generate-check"
 	@echo "verify: gates ainda não criados:"
-	@for gate in lint test-integration test-contract test-security test-e2e test-race test-load-smoke vuln; do \
+	@for gate in lint test-integration test-security test-e2e test-race test-load-smoke vuln; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."

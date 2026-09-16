@@ -214,12 +214,15 @@ func writeStatus(status string) http.Handler {
 	})
 }
 
-// NewMux composes the platform router: request ID correlation around the
-// health routes registered with explicit method patterns, so wrong methods
-// answer 405 automatically.
-func NewMux(ids ports.IDGenerator) http.Handler {
+// NewMux composes the platform router from the route registry (routes.go):
+// request ID correlation around the health routes registered with explicit
+// method patterns, so wrong methods answer 405 automatically. Registration
+// failures (duplicate or malformed registry entries) return an error
+// instead of panicking at boot.
+func NewMux(ids ports.IDGenerator) (http.Handler, error) {
 	mux := http.NewServeMux()
-	mux.Handle("GET /health/live", LiveHandler())
-	mux.Handle("GET /health/ready", ReadyHandler())
-	return requestid.Middleware(ids, mux)
+	if err := RegisterAll(mux, RegisteredRoutes()); err != nil {
+		return nil, err
+	}
+	return requestid.Middleware(ids, mux), nil
 }

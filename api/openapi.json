@@ -1,0 +1,213 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Goyim Arena API",
+    "version": "0.1.0",
+    "description": "Public HTTP contract of Goyim Arena. Versioned per the master plan: routes registered by the binary must match this document; the contract test fails on drift.",
+    "summary": "Arena API contract"
+  },
+  "servers": [
+    {
+      "url": "/api/v1",
+      "description": "Versioned API surface served by the arena binary."
+    }
+  ],
+  "paths": {
+    "/health/live": {
+      "get": {
+        "operationId": "getHealthLive",
+        "summary": "Liveness probe",
+        "description": "Reports that the process is running. Never inspects dependencies: a wedged database must not make the supervisor restart a healthy-but-busy process.",
+        "responses": {
+          "200": {
+            "description": "Process is alive.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthStatus" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "operationId": "getHealthReady",
+        "summary": "Readiness probe",
+        "description": "Reports deployment readiness. At the current stage it validates process and configuration only; dependency checks arrive with the database phase.",
+        "responses": {
+          "200": {
+            "description": "Process and configuration are ready.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthStatus" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "HealthStatus": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": ["live", "ready"],
+            "description": "Probe verdict."
+          }
+        }
+      },
+      "Problem": {
+        "description": "RFC 9457 Problem Details document returned by every error response, with media type application/problem+json.",
+        "type": "object",
+        "required": ["type", "title", "status", "code"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri-reference",
+            "description": "Stable URI identifying the problem kind.",
+            "examples": ["https://goyim.dev/problems/validation"]
+          },
+          "title": {
+            "type": "string",
+            "description": "Short human-readable summary, generic for internal errors."
+          },
+          "status": {
+            "type": "integer",
+            "description": "HTTP status code, identical to the response status."
+          },
+          "code": {
+            "type": "string",
+            "description": "Stable machine-readable error code, e.g. ARENA-validation."
+          },
+          "request_id": {
+            "type": "string",
+            "description": "Correlation ID echoed by the X-Request-Id middleware; join it with server logs."
+          },
+          "detail": {
+            "type": "string",
+            "description": "Public safe detail. Suppressed for internal errors: causes never serialize to clients."
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "SessionCookie": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "arena_session",
+        "description": "Opaque session token cookie (Secure, HttpOnly, SameSite). Sessions arrive with the identity phase; the scheme is declared now to anchor the contract."
+      },
+      "CsrfHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-CSRF-Token",
+        "description": "Per-request CSRF token required by state-changing requests once sessions exist."
+      }
+    },
+    "parameters": {
+      "RequestId": {
+        "name": "X-Request-Id",
+        "in": "header",
+        "required": false,
+        "description": "Client-supplied correlation ID; validated (<=64 chars, [A-Za-z0-9_-]) and reused, or replaced by a generated one. Always echoed back.",
+        "schema": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "responses": {
+      "Validation": {
+        "description": "Request validation failed.",
+        "content": {
+          "application/problem+json": {
+            "schema": { "$ref": "#/components/schemas/Problem" }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "Authentication is required.",
+        "content": {
+          "application/problem+json": {
+            "schema": { "$ref": "#/components/schemas/Problem" }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The authenticated caller is not allowed to do this.",
+        "content": {
+          "application/problem+json": {
+            "schema": { "$ref": "#/components/schemas/Problem" }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found.",
+        "content": {
+          "application/problem+json": {
+            "schema": { "$ref": "#/components/schemas/Problem" }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "The request conflicts with the current state.",
+        "content": {
+          "application/problem+json": {
+            "schema": { "$ref": "#/components/schemas/Problem" }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "Too many requests.",
+        "content": {
+          "application/problem+json": {
+            "schema": { "$ref": "#/components/schemas/Problem" }
+          }
+        }
+      },
+      "Internal": {
+        "description": "Unexpected failure. The body stays generic; details go to logs, never to clients.",
+        "content": {
+          "application/problem+json": {
+            "schema": { "$ref": "#/components/schemas/Problem" }
+          }
+        }
+      }
+    },
+    "headers": {
+      "RequestId": {
+        "description": "Correlation ID resolved by the request ID middleware.",
+        "schema": { "type": "string", "maxLength": 64 }
+      }
+    }
+  },
+  "x-conventions": {
+    "pagination": {
+      "description": "List endpoints return cursor pages. Request: ?cursor=<opaque>&limit=<1..100>; limit defaults to 20. Response envelope: { items: [...], next_cursor: string|null }. Cursors are opaque, server-signed and never inspected by clients.",
+      "cursorParameter": "cursor",
+      "limitParameter": "limit",
+      "limitDefault": 20,
+      "limitMaximum": 100,
+      "responseEnvelope": {
+        "type": "object",
+        "required": ["items", "next_cursor"],
+        "properties": {
+          "items": { "type": "array", "items": {} },
+          "next_cursor": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "idempotency": {
+      "description": "State-changing POST endpoints accept an Idempotency-Key header. Keys are scoped per session and endpoint, stored with the request fingerprint, and a replay returns the original result instead of re-executing the mutation. Responses carry Idempotency-Replayed: true on replays.",
+      "header": "Idempotency-Key",
+      "scope": "session+endpoint",
+      "replayHeader": "Idempotency-Replayed"
+    }
+  },
+  "security": [],
+  "tags": [
+    { "name": "health", "description": "Process probes consumed by the supervisor." }
+  ]
+}
