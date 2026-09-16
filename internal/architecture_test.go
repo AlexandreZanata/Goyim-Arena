@@ -7,9 +7,10 @@
 // docs/ARCHITECTURE.md (Ports and Adapters) and AGENTS.md. Adding an approved
 // dependency to a layer requires an ADR and a matching change here.
 //
-// Since P02-T01, direct process-environment reads are additionally gated to
-// the typed configuration package (and cmd/bootstrap when it appears):
-// no other internal package may call os.Getenv, os.LookupEnv or os.Setenv.
+// Since P02-T01, direct process-environment reads are gated to the typed
+// configuration package (and cmd/bootstrap when it appears). Since P02-T02
+// (ADR-012), time.Now and crypto/math randomness readers are gated to
+// internal/platform/clockseed and future adapters that document the need.
 package architecture_test
 
 import (
@@ -71,6 +72,22 @@ var envReadAllowlist = map[string]bool{
 	"internal/platform/config": true,
 }
 
+// clockAndRandomAllowlist lists the internal packages allowed to call
+// time.Now and the randomness readers directly, per the P02-T02 gate and
+// ADR-012. Adapters join this list when their ADR documents the need.
+var clockAndRandomAllowlist = map[string]bool{
+	"internal/platform/clockseed": true,
+}
+
+// effectPackages maps standard library import paths to the kind of effect
+// they carry, used by the P02-T02 gate.
+var effectPackages = map[string]string{
+	"time":         "time",
+	"math/rand":    "rand",
+	"math/rand/v2": "rand",
+	"crypto/rand":  "rand",
+}
+
 func repositoryRoot(t *testing.T) string {
 	t.Helper()
 
@@ -126,6 +143,61 @@ func forbiddenImportForDomainOrApplication(module, importPath string) (string, b
 	return "", false
 }
 
+// importAliases maps the local package name of each import to its effect
+// kind, honoring import aliases such as `cryptorand "crypto/rand"`.
+func importAliases(source *ast.File) map[string]string {
+	aliases := make(map[string]string)
+	for _, importSpec := range source.Imports {
+		importPath, err := strconv.Unquote(importSpec.Path.Value)
+		if err != nil {
+			continue
+		}
+		kind, isEffect := effectPackages[importPath]
+		if !isEffect {
+			continue
+		}
+		localName := importPath[strings.LastIndex(importPath, "/")+1:]
+		if importSpec.Name != nil {
+			localName = importSpec.Name.Name
+		}
+		aliases[localName] = kind
+	}
+	return aliases
+}
+
+// effectCallViolation reports direct clock or randomness access outside the
+// allowlisted packages (P02-T02, ADR-012).
+func effectCallViolation(expression ast.Expr, aliases map[string]string, pkgDir string) (string, bool) {
+	call, isCall := expression.(*ast.CallExpr)
+	if !isCall {
+		return "", false
+	}
+	selector, isSelector := call.Fun.(*ast.SelectorExpr)
+	if !isSelector {
+		return "", false
+	}
+	ident, isIdent := selector.X.(*ast.Ident)
+	if !isIdent {
+		return "", false
+	}
+	kind, isEffect := aliases[ident.Name]
+	if !isEffect {
+		return "", false
+	}
+	if kind == "time" && selector.Sel.Name != "Now" {
+		// Constructing values from injected instants (time.Unix, .Add, ...)
+		// is pure; only reading the wall clock is gated.
+		return "", false
+	}
+	if clockAndRandomAllowlist[pkgDir] {
+		return "", false
+	}
+	return fmt.Sprintf(
+		"%s.%s() reads the %s effect directly — inject the ports.Clock/ports.Random port instead (P02-T02, ADR-012)",
+		ident.Name, selector.Sel.Name, kind,
+	), true
+}
+
 // envReadViolation inspects one expression for direct environment access and
 // reports a violation message when the containing package is not allowlisted.
 func envReadViolation(expression ast.Expr, pkgDir string) (string, bool) {
@@ -150,8 +222,8 @@ func envReadViolation(expression ast.Expr, pkgDir string) (string, bool) {
 		return "", false
 	}
 	return fmt.Sprintf(
-		"%s calls os.%s directly — read the environment only in the typed config package (P02-T01 gate)",
-		pkgDir, selector.Sel.Name,
+		"os.%s reads the process environment directly — read it only in the typed config package (P02-T01 gate)",
+		selector.Sel.Name,
 	), true
 }
 
@@ -173,8 +245,7 @@ func TestDependencyDirectionAndEnvironmentGate(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		segments := strings.Split(filepath.ToSlash(relPath), "/")
-		pkgDir := strings.Join(segments[:minInt(3, len(segments))], "/")
+		pkgDir := filepath.Dir(filepath.ToSlash(relPath))
 
 		source, err := parser.ParseFile(fset, path, nil, 0)
 		if err != nil {
@@ -193,6 +264,7 @@ func TestDependencyDirectionAndEnvironmentGate(t *testing.T) {
 		})
 
 		// Dependency direction applies to domain and application layers.
+		segments := strings.Split(filepath.ToSlash(relPath), "/")
 		if len(segments) < 3 {
 			return nil
 		}
@@ -225,12 +297,55 @@ func TestDependencyDirectionAndEnvironmentGate(t *testing.T) {
 	}
 }
 
-// minInt returns the smaller of two integers.
-func minInt(a, b int) int {
-	if a < b {
-		return a
+// TestNoDirectClockOrRandomOutsidePlatform automates the P02-T02 validation
+// (the `rg 'time\.Now|rand\.' internal` search): non-test internal files may
+// only read the wall clock or the randomness readers inside documented
+// allowlisted packages. Test files are exempt — they define the
+// deterministic stubs.
+func TestNoDirectClockOrRandomOutsidePlatform(t *testing.T) {
+	root := repositoryRoot(t)
+	internalDir := filepath.Join(root, "internal")
+	fset := token.NewFileSet()
+
+	var violations []string
+	walkErr := filepath.WalkDir(internalDir, func(path string, dirEntry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if dirEntry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		pkgDir := filepath.Dir(filepath.ToSlash(relPath))
+
+		source, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Errorf("parse %s: %v", filepath.ToSlash(relPath), err)
+			return nil
+		}
+		aliases := importAliases(source)
+
+		ast.Inspect(source, func(node ast.Node) bool {
+			if expression, isExpression := node.(ast.Expr); isExpression {
+				if rule, forbidden := effectCallViolation(expression, aliases, pkgDir); forbidden {
+					violations = append(violations, fmt.Sprintf("%s — %s", filepath.ToSlash(relPath), rule))
+				}
+			}
+			return true
+		})
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk internal/: %v", walkErr)
 	}
-	return b
+
+	if len(violations) > 0 {
+		t.Fatalf("clock/random gate violations:\n%s", strings.Join(violations, "\n"))
+	}
 }
 
 func TestBusinessModulesExist(t *testing.T) {
