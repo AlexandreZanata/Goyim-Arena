@@ -1,0 +1,13 @@
+{
+  "name": "goyim-arena-web",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

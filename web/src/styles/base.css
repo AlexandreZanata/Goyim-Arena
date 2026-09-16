@@ -1,0 +1,33 @@
+/* Goyim Arena — base styles. Imports native layers in cascade order. */
+
+@layer reset, tokens, base;
+
+@layer base {
+  body {
+    font-family: var(--ga-font-family);
+    font-size: var(--ga-font-size-md);
+    font-weight: var(--ga-font-weight-regular);
+    line-height: var(--ga-line-height-normal);
+    color: var(--ga-color-text);
+    background-color: var(--ga-color-surface);
+  }
+
+  a {
+    color: var(--ga-color-action);
+    text-decoration-thickness: from-font;
+  }
+
+  a:hover {
+    color: var(--ga-color-action-hover);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--ga-color-action);
+    outline-offset: 2px;
+  }
+
+  code,
+  pre {
+    font-family: ui-monospace, "Cascadia Code", "Source Code Pro", monospace;
+  }
+}

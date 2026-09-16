@@ -17,6 +17,7 @@ coverage.out
 
 # Generated frontend artifacts
 /web/generated/
+node_modules/
 
 # Local data
 /tmp/
