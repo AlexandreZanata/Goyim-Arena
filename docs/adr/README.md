@@ -24,3 +24,4 @@ Cada decisão arquitetural relevante recebe um arquivo numerado contendo:
 - [ADR-008 — Autorização server-side sem RLS universal](ADR-008-server-side-authorization.md)
 - [ADR-009 — Frontend TypeScript nativo e CSS nativo](ADR-009-native-typescript-frontend.md)
 - [ADR-010 — Backend API-first com ports and adapters](ADR-010-api-first-ports-adapters.md)
+- [ADR-011 — Política de admissão de dependências](ADR-011-dependency-admission-policy.md)
