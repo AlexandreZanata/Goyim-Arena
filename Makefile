@@ -10,6 +10,10 @@ NPM ?= npm
 
 .PHONY: fmt fmt-check test-unit typecheck build-web test-contract generate generate-check verify
 
+# Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
+# web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
+I18NGEN := $(GO) run ./cmd/i18ngen
+
 # fmt formata o código Go (alvo mutante; use fmt-check para validar sem alterar).
 fmt:
 	$(GOFMT) -w .
@@ -51,25 +55,23 @@ test-contract:
 	$(GO) test ./internal/contract/...
 	@echo "test-contract: ok"
 
-# generate é um gate ainda não implementado: o gerador de contratos
-# (api/openapi.json -> web/src/contracts/generated.ts) chega em fase posterior.
+# generate valida os catálogos i18n e reescreve os artefatos gerados
+# (paridade de chaves/placeholders, JSON válido, locales conhecidos).
 generate:
-	@echo "generate: FALHOU — gate ainda não implementado (geração de contratos OpenAPI ainda não existe no estágio atual)." >&2
-	@exit 1
+	$(I18NGEN)
+	@echo "generate: ok"
 
-# generate-check é um gate ainda não implementado: sem gerador, não há
-# artefato para comparar.
+# generate-check valida os catálogos e falha quando os artefatos gerados
+# estão desatualizados em relação a locales/ (drift = falha, nunca sucesso falso).
 generate-check:
-	@echo "generate-check: FALHOU — gate ainda não implementado (nenhuma capacidade de geração para validar)." >&2
-	@exit 1
+	$(I18NGEN) -check
+	@echo "generate-check: ok"
 
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check test-unit test-contract typecheck build-web
+verify: fmt-check generate-check test-unit test-contract typecheck build-web
 	@echo "verify: gates presentes, porém não implementados (falham explicitamente ao serem invocados):"
-	@echo "  - generate"
-	@echo "  - generate-check"
 	@echo "verify: gates ainda não criados:"
 	@for gate in lint test-integration test-security test-e2e test-race test-load-smoke vuln; do \
 		echo "  - $$gate"; \

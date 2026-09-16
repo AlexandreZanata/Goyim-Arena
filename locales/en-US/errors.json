@@ -1,0 +1,32 @@
+{
+  "errors": {
+    "validation": {
+      "title": "The request is invalid",
+      "detail": "Check the submitted data and try again."
+    },
+    "unauthorized": {
+      "title": "Authentication is required",
+      "detail": "Sign in to your account to continue."
+    },
+    "forbidden": {
+      "title": "You are not allowed to do this",
+      "detail": "This action is not available for your account."
+    },
+    "not_found": {
+      "title": "Resource not found",
+      "detail": "The requested resource does not exist or was removed."
+    },
+    "conflict": {
+      "title": "The request conflicts with the current state",
+      "detail": "The resource changed; reload and try again."
+    },
+    "rate_limited": {
+      "title": "Too many requests",
+      "detail": "Wait a moment before trying again."
+    },
+    "internal": {
+      "title": "Internal error",
+      "detail": "Something failed on our side. The team has been notified."
+    }
+  }
+}

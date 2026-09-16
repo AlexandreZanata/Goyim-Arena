@@ -1,0 +1,32 @@
+{
+  "errors": {
+    "validation": {
+      "title": "A requisição é inválida",
+      "detail": "Verifique os dados enviados e tente novamente."
+    },
+    "unauthorized": {
+      "title": "Autenticação é necessária",
+      "detail": "Entre na sua conta para continuar."
+    },
+    "forbidden": {
+      "title": "Você não tem permissão para fazer isso",
+      "detail": "Esta ação não está disponível para a sua conta."
+    },
+    "not_found": {
+      "title": "Recurso não encontrado",
+      "detail": "O recurso solicitado não existe ou foi removido."
+    },
+    "conflict": {
+      "title": "A requisição conflita com o estado atual",
+      "detail": "O recurso mudou; recarregue e tente novamente."
+    },
+    "rate_limited": {
+      "title": "Muitas requisições",
+      "detail": "Aguarde um momento antes de tentar novamente."
+    },
+    "internal": {
+      "title": "Erro interno",
+      "detail": "Algo falhou do nosso lado. A equipe já foi notificada."
+    }
+  }
+}
