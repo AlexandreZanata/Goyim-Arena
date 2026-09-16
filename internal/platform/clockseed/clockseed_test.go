@@ -147,15 +147,21 @@ func TestNewIDWithoutPrefixAndWithRealEntropy(t *testing.T) {
 	if strings.HasPrefix(id, "_") {
 		t.Fatalf("id %q must not start with an underscore when the prefix is empty", id)
 	}
-	parts := strings.Split(id, "_")
-	if len(parts) != 2 {
-		t.Fatalf("id %q must have 2 parts without prefix (timestamp + entropy)", id)
+	// Parse from the left: timestamp up to the first underscore, entropy as
+	// the remainder. The entropy alphabet includes underscores, so callers
+	// must never split blindly.
+	timestamp, entropy, found := strings.Cut(id, "_")
+	if !found {
+		t.Fatalf("id %q must be timestamp_entropy", id)
 	}
-	if parts[0] != "1760000000" {
+	if timestamp != "1760000000" {
 		t.Fatalf("timestamp part wrong in %q", id)
 	}
-	if len(parts[1]) != 22 {
-		t.Fatalf("entropy part %q must have 22 chars", parts[1])
+	if len(entropy) != 22 {
+		t.Fatalf("entropy part %q must have 22 chars", entropy)
+	}
+	if _, err := base64.RawURLEncoding.DecodeString(entropy); err != nil {
+		t.Fatalf("entropy part %q is not base64url: %v", entropy, err)
 	}
 }
 
