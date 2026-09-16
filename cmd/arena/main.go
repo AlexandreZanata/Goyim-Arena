@@ -4,13 +4,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
-)
 
-// version is the development version reported by `arena version` until the
-// reproducible build metadata task (P01-T05) injects real values via -ldflags.
-const version = "dev"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/buildinfo"
+)
 
 const usage = `arena is the command-line entrypoint of Goyim Arena.
 
@@ -20,7 +19,7 @@ Usage:
 
 The commands are:
 
-  version    show the arena version
+  version    show the arena version; use --json for machine-readable output
   help       show this help
 
 Run "arena <command> -h" for details about a command.`
@@ -40,10 +39,7 @@ func run(args []string, stdout *os.File) error {
 
 	switch args[0] {
 	case "version":
-		if len(args) > 1 {
-			return fmt.Errorf("version takes no arguments (got %q)", args[1])
-		}
-		fmt.Fprintf(stdout, "arena version %s\n", version)
+		return runVersion(args[1:], stdout)
 	case "help", "-h", "-help", "--help":
 		if len(args) > 1 {
 			return fmt.Errorf("help takes no arguments (got %q)", args[1])
@@ -52,5 +48,30 @@ func run(args []string, stdout *os.File) error {
 	default:
 		return fmt.Errorf("unknown command %q\n\n%s\n\nRun \"arena help\" for usage.", args[0], usage)
 	}
+	return nil
+}
+
+// runVersion prints the reproducible build metadata (P01-T05). Without
+// flags it renders one human-readable line; with --json it renders a single
+// RFC 8259 object, so scripts can parse the output safely.
+func runVersion(args []string, stdout *os.File) error {
+	asJSON := false
+	for _, arg := range args {
+		switch arg {
+		case "--json":
+			asJSON = true
+		default:
+			return fmt.Errorf("unknown flag %q\n\nUsage: arena version [--json]", arg)
+		}
+	}
+
+	info := buildinfo.Current()
+	if asJSON {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetEscapeHTML(false)
+		return encoder.Encode(info)
+	}
+
+	fmt.Fprintf(stdout, "arena version %s\n", info.Version)
 	return nil
 }

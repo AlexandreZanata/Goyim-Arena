@@ -1,0 +1,119 @@
+// Package buildinfo holds the reproducible build metadata of the arena
+// binary. Values are injected at link time via -ldflags and fall back to
+// deterministic defaults when absent, so two builds from the same inputs
+// produce identical metadata (P01-T05).
+//
+// This package belongs to the platform layer: it is consumed by cmd/ and
+// must not import domain or application packages.
+package buildinfo
+
+import (
+	"os"
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Link-time variables. The Makefile/CI injects real values with, for example:
+//
+//	go build -ldflags "-X github.com/AlexandreZanata/Goyim-Arena/internal/buildinfo.version=1.2.3 ..."
+//
+// Unset values keep the zero values below, which the fallbacks normalize
+// to the development defaults.
+var (
+	version = ""
+	commit  = ""
+	date    = ""
+)
+
+const (
+	fallbackVersion = "dev"
+	fallbackCommit  = "unknown"
+)
+
+// Info is the immutable build metadata of a binary.
+type Info struct {
+	Version string    `json:"version"`
+	Commit  string    `json:"commit"`
+	Date    BuildTime `json:"date"`
+}
+
+// BuildTime is a UTC build timestamp that serializes as RFC 3339 in JSON.
+// The zero value reports "unknown" instead of a fake date.
+type BuildTime struct {
+	time.Time
+}
+
+// MarshalJSON renders the timestamp as an RFC 3339 string, or "unknown" when
+// the build did not embed a date.
+func (buildTime BuildTime) MarshalJSON() ([]byte, error) {
+	if buildTime.IsZero() {
+		return []byte(`"unknown"`), nil
+	}
+	return []byte(`"` + buildTime.UTC().Format(time.RFC3339) + `"`), nil
+}
+
+// UnmarshalJSON parses an RFC 3339 timestamp or the "unknown" marker.
+func (buildTime *BuildTime) UnmarshalJSON(data []byte) error {
+	trimmed := string(data)
+	if trimmed == `""` || trimmed == `"unknown"` || trimmed == "null" {
+		buildTime.Time = time.Time{}
+		return nil
+	}
+	unquoted, err := strconv.Unquote(trimmed)
+	if err != nil {
+		return err
+	}
+	parsed, err := time.Parse(time.RFC3339, unquoted)
+	if err != nil {
+		return err
+	}
+	buildTime.Time = parsed
+	return nil
+}
+
+// nonEmpty returns value when set, falling back to the deterministic default.
+func nonEmpty(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
+// Current returns the build metadata with deterministic fallbacks applied:
+// without -ldflags injection the binary reports the development version
+// "dev", commit "unknown" and the date derived from SOURCE_DATE_EPOCH (when
+// set) or zero ("unknown") to stay reproducible.
+func Current() Info {
+	info := Info{
+		Version: nonEmpty(version, fallbackVersion),
+		Commit:  nonEmpty(commit, fallbackCommit),
+	}
+	info.Date = ParseBuildDate(date)
+	return info
+}
+
+// ParseBuildDate resolves a raw injected date: a Unix number is interpreted
+// as seconds since the epoch; RFC 3339 strings are parsed as-is; empty or
+// unset values fall back to SOURCE_DATE_EPOCH (when available) or the zero
+// time ("unknown" in JSON).
+func ParseBuildDate(raw string) BuildTime {
+	if trimmed := strings.TrimSpace(raw); trimmed != "" {
+		if unixSeconds, err := strconv.ParseInt(trimmed, 10, 64); err == nil {
+			return BuildTime{time.Unix(unixSeconds, 0).UTC()}
+		}
+		if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+			return BuildTime{parsed.UTC()}
+		}
+	}
+
+	// SOURCE_DATE_EPOCH is the reproducible-builds.org convention for the
+	// deterministic fallback timestamp.
+	if epoch := strings.TrimSpace(os.Getenv("SOURCE_DATE_EPOCH")); epoch != "" {
+		if unixSeconds, err := strconv.ParseInt(epoch, 10, 64); err == nil {
+			return BuildTime{time.Unix(unixSeconds, 0).UTC()}
+		}
+	}
+
+	return BuildTime{}
+}

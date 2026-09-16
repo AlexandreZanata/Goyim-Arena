@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -61,9 +62,36 @@ func TestRunVersionReportsDevelopmentVersion(t *testing.T) {
 	assertStdout(t, stdout, "arena version dev\n")
 }
 
-func TestRunVersionRejectsArguments(t *testing.T) {
+func TestRunVersionRejectsUnknownFlags(t *testing.T) {
 	_, _, err := runForTest(t, "version", "extra")
-	assertError(t, err, `version takes no arguments`)
+	assertError(t, err, `unknown flag "extra"`)
+	assertError(t, err, `Usage: arena version [--json]`)
+}
+
+func TestRunVersionJSONEmitsSingleValidObject(t *testing.T) {
+	stdout, _, err := runForTest(t, "version", "--json")
+	if err != nil {
+		t.Fatalf("run version --json: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("version --json output is not valid JSON: %v\n%s", err, stdout)
+	}
+	for _, key := range []string{"version", "commit", "date"} {
+		if _, ok := payload[key]; !ok {
+			t.Fatalf("JSON missing key %q: %s", key, stdout)
+		}
+	}
+	if payload["version"] != "dev" {
+		t.Fatalf("version = %v, want dev", payload["version"])
+	}
+	if payload["commit"] != "unknown" {
+		t.Fatalf("commit = %v, want unknown", payload["commit"])
+	}
+	if payload["date"] != "unknown" {
+		t.Fatalf("date = %v, want unknown", payload["date"])
+	}
 }
 
 func TestRunWithoutSubcommandPrintsHelp(t *testing.T) {
