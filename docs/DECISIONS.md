@@ -1,0 +1,101 @@
+# Log de decisões de produto
+
+Este arquivo registra decisões que alteram comportamento ou incentivos. Cada entrada deve manter contexto, decisão, consequência e condição de revisão.
+
+## PD-001 — Métrica central factual
+
+**Data:** 2026-09-16
+
+**Status:** aceita
+
+**Contexto:** likes e seguidores premiam popularidade, não contribuição para reflexão.
+
+**Decisão:** tratar mudanças declaradas e atribuições a argumentos como resultado central; não criar score universal.
+
+**Consequência:** a métrica depende de eventos raros e exige defesa contra reciprocidade e contas múltiplas.
+
+**Revisar quando:** o piloto mostrar frequência e qualidade reais das atribuições.
+
+## PD-002 — Escolha anônima não entra no agregado
+
+**Data:** 2026-09-16
+
+**Status:** aceita
+
+**Contexto:** o visitante deve experimentar o produto sem login, mas votos anônimos são baratos de manipular.
+
+**Decisão:** escolha local libera resultado, porém só posição confirmada por conta elegível integra o agregado oficial.
+
+**Consequência:** haverá uma etapa adicional ao cadastrar e diferença entre experiência local e dado público.
+
+**Revisar quando:** testes mostrarem abandono excessivo ou outra forma confiável de elegibilidade.
+
+## PD-003 — Argumentos imutáveis no MVP
+
+**Data:** 2026-09-16
+
+**Status:** aceita
+
+**Contexto:** edições silenciosas quebram atribuições, respostas e hashes; histórico de versões aumenta escopo.
+
+**Decisão:** oferecer prévia e tornar argumento imutável após publicação. Autor pode retirá-lo da exibição.
+
+**Consequência:** erros exigem retirada e nova publicação; é necessário comunicar isso com clareza.
+
+**Revisar quando:** erros de boa-fé produzirem fricção relevante e houver capacidade de implementar revisões públicas.
+
+## PD-004 — Ordenação temporal como padrão
+
+**Data:** 2026-09-16
+
+**Status:** aceita
+
+**Contexto:** ordenar por persuasão desde o início cria vantagem cumulativa e incentiva manipulação.
+
+**Decisão:** separar argumentos por relação com a afirmação e usar ordem temporal explícita no MVP. Persuasão é dado e filtro, não ranking padrão.
+
+**Consequência:** argumentos excelentes podem exigir descoberta manual.
+
+**Revisar quando:** volume por Arena tornar navegação temporal insuficiente.
+
+## PD-005 — Member substitui a franquia Free
+
+**Data:** 2026-09-16
+
+**Status:** hipótese adotada
+
+**Contexto:** “30.000 INK/mês” é ambíguo sobre somar ou substituir 5.000 Free.
+
+**Decisão:** Member oferece 30.000 INK totais por período, não 35.000.
+
+**Consequência:** comunicação e histórico de saldo devem deixar a regra evidente.
+
+**Revisar quando:** houver teste de preço e compreensão.
+
+## PD-006 — Lançamento por comunidade controlada
+
+**Data:** 2026-09-16
+
+**Status:** aceita
+
+**Contexto:** abrir todos os temas e cadastros antes de aprender cria risco desproporcional de moderação e métricas vazias.
+
+**Decisão:** iniciar com entrevistas, protótipo e piloto por convite; liberar autoatendimento progressivamente.
+
+**Consequência:** crescimento inicial será intencionalmente limitado.
+
+**Revisar quando:** o piloto cumprir critérios de saída definidos no MVP.
+
+## PD-007 — Posições individuais privadas por padrão
+
+**Data:** 2026-09-16
+
+**Status:** aceita
+
+**Contexto:** expor posição e mudança ligadas ao username aumenta risco de assédio e torna socialmente mais caro admitir mudança. O valor central pode ser entregue por agregados e contagens.
+
+**Decisão:** publicar argumentos, agregados de posições e contagens de influência. Manter posição individual, histórico de mudança e identidade de quem atribuiu influência privados por padrão.
+
+**Consequência:** auditoria pública não poderá reconstruir votos individuais; controles internos e metodologia pública precisarão sustentar a confiança sem expor participantes.
+
+**Revisar quando:** pesquisa mostrar demanda segura por endosso público opcional. Opt-in, se criado, não pode tornar-se requisito para contagem.

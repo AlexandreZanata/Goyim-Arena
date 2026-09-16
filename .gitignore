@@ -1,0 +1,27 @@
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Go
+/bin/
+/dist/
+coverage.out
+*.test
+
+# Generated frontend artifacts
+/web/assets/dist/
+
+# Local data
+/tmp/
+/data/
+
+# Test artifacts
+/test-results/
+/playwright-report/

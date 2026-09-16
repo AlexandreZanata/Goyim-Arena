@@ -1,0 +1,11 @@
+# type(scope)!: descrição curta
+#
+# Corpo: contexto e motivação. Explique por que a mudança existe.
+#
+# Rodapé: Closes #123
+# BREAKING CHANGE: descreva a incompatibilidade e a migração.
+#
+# Tipos: feat, fix, docs, refactor, perf, test, build, ci, chore, revert
+# Scopes: identity, profiles, arenas, positions, arguments, persuasion,
+#         wallet, billing, moderation, transparency, audit, jobs,
+#         web, db, infra, deps, security, docs, project
