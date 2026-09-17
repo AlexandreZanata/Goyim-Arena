@@ -13,6 +13,7 @@ import (
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/profiles/adapters/http"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/adapters/http"
 )
 
 // repoRoot locates the checkout root from this package's directory.
@@ -83,7 +84,73 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		if strings.HasPrefix(route.Path, "/api/v1/profiles/") || route.Path == "/api/v1/me/profile" {
 			continue
 		}
+		if route.Path == "/api/v1/me/wallet" || route.Path == "/api/v1/me/wallet/transactions" {
+			continue
+		}
 		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
+	}
+}
+
+// TestContractWalletSchemasExposeOnlyAllowedFields is the contract-level
+// proof of P06-T08: the wallet balance and statement documents declare
+// exactly the allowed properties, no restricted administrative or antifraud
+// data, and both routes require the session cookie.
+func TestContractWalletSchemasExposeOnlyAllowedFields(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"WalletBalance":        {"balance_free", "balance_purchased"},
+		"WalletStatementEntry": {"transaction_id", "operation_id", "operation_type", "bucket", "amount", "reference", "created_at"},
+		"WalletStatement":      {"items", "next_cursor"},
+	}
+	forbiddenMarkers := []string{
+		"reason", "actor", "email", "account_id", "password", "credential",
+		"stripe", "customer", "billing", "payment", "fraud", "admin",
+		"notes", "ip", "user_agent",
+	}
+
+	for name, expectedProperties := range expected {
+		raw, ok := document.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", name)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if len(schema.Properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(schema.Properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := schema.Properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range schema.Properties {
+			for _, marker := range forbiddenMarkers {
+				if strings.Contains(strings.ToLower(property), marker) {
+					t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+				}
+			}
+		}
+	}
+
+	entryRaw := document.Components.Schemas["WalletStatementEntry"]
+	if !strings.Contains(string(entryRaw), `"integer"`) {
+		t.Error("WalletStatementEntry.amount must be an integer")
+	}
+	for _, path := range []string{"/api/v1/me/wallet", "/api/v1/me/wallet/transactions"} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		if !strings.Contains(string(operations["get"]), `"SessionCookie"`) {
+			t.Errorf("%s must require the SessionCookie scheme", path)
+		}
 	}
 }
 

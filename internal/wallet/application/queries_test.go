@@ -2,6 +2,8 @@ package application_test
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"testing"
@@ -10,6 +12,23 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/wallet/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/wallet/domain"
 )
+
+var testCursorSecret = []byte("0123456789abcdef0123456789abcdef")
+
+func newTestStatementUseCase(t *testing.T, queries application.WalletQueryRepository) *application.GetWalletStatementUseCase {
+	t.Helper()
+	codec, err := application.NewStatementCursorCodec(testCursorSecret)
+	if err != nil {
+		t.Fatalf("build cursor codec: %v", err)
+	}
+	return application.NewGetWalletStatementUseCase(queries, codec)
+}
+
+func signedCursor(payload string) string {
+	mac := hmac.New(sha256.New, testCursorSecret)
+	mac.Write([]byte(payload))
+	return base64.RawURLEncoding.EncodeToString([]byte(payload)) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+}
 
 type fakeQueryRepo struct {
 	balance    *application.WalletBalance
@@ -105,7 +124,7 @@ func TestGetWalletBalanceUseCase(t *testing.T) {
 
 func TestWalletStatementPaginatesWithoutDuplicatesOrGaps(t *testing.T) {
 	repo := &fakeQueryRepo{entries: statementEntries(t, 5)}
-	useCase := application.NewGetWalletStatementUseCase(repo)
+	useCase := newTestStatementUseCase(t, repo)
 
 	seen := make([]string, 0, 5)
 	cursor := ""
@@ -148,7 +167,7 @@ func TestWalletStatementPaginatesWithoutDuplicatesOrGaps(t *testing.T) {
 
 func TestWalletStatementCursorRoundTrip(t *testing.T) {
 	repo := &fakeQueryRepo{entries: statementEntries(t, 3)}
-	useCase := application.NewGetWalletStatementUseCase(repo)
+	useCase := newTestStatementUseCase(t, repo)
 
 	first, err := useCase.Execute(context.Background(), domain.AccountID(testAccountID), "", 1)
 	if err != nil {
@@ -190,7 +209,7 @@ func TestWalletStatementCursorRoundTrip(t *testing.T) {
 
 func TestWalletStatementLimitClamping(t *testing.T) {
 	repo := &fakeQueryRepo{entries: statementEntries(t, 3)}
-	useCase := application.NewGetWalletStatementUseCase(repo)
+	useCase := newTestStatementUseCase(t, repo)
 
 	if _, err := useCase.Execute(context.Background(), domain.AccountID(testAccountID), "", 0); err != nil {
 		t.Fatalf("default limit error = %v", err)
@@ -209,16 +228,21 @@ func TestWalletStatementLimitClamping(t *testing.T) {
 
 func TestWalletStatementRejectsInvalidCursors(t *testing.T) {
 	repo := &fakeQueryRepo{entries: statementEntries(t, 1)}
-	useCase := application.NewGetWalletStatementUseCase(repo)
+	useCase := newTestStatementUseCase(t, repo)
 
 	notBase64 := "%%%"
-	wrongVersion := base64.RawURLEncoding.EncodeToString([]byte("v9|2026-09-17T12:00:00Z|transaction-a"))
-	badTime := base64.RawURLEncoding.EncodeToString([]byte("v1|not-a-time|transaction-a"))
-	emptyID := base64.RawURLEncoding.EncodeToString([]byte("v1|2026-09-17T12:00:00Z|"))
-	nonASCII := base64.RawURLEncoding.EncodeToString([]byte("v1|2026-09-17T12:00:00Z|trans\nação"))
-	tooManyParts := base64.RawURLEncoding.EncodeToString([]byte("v1|2026-09-17T12:00:00Z|transaction-a|extra"))
+	unsigned := base64.RawURLEncoding.EncodeToString([]byte("v1|2026-09-17T12:00:00Z|transaction-a"))
+	forgedMac := hmac.New(sha256.New, []byte("a-different-secret-key-32-bytes-long"))
+	forgedMac.Write([]byte("v1|2026-09-17T12:00:00Z|transaction-a"))
+	forged := base64.RawURLEncoding.EncodeToString([]byte("v1|2026-09-17T12:00:00Z|transaction-a")) +
+		"." + base64.RawURLEncoding.EncodeToString(forgedMac.Sum(nil))
+	wrongVersion := signedCursor("v9|2026-09-17T12:00:00Z|transaction-a")
+	badTime := signedCursor("v1|not-a-time|transaction-a")
+	emptyID := signedCursor("v1|2026-09-17T12:00:00Z|")
+	nonASCII := signedCursor("v1|2026-09-17T12:00:00Z|trans\nação")
+	tooManyParts := signedCursor("v1|2026-09-17T12:00:00Z|transaction-a|extra")
 
-	for _, cursor := range []string{notBase64, wrongVersion, badTime, emptyID, nonASCII, tooManyParts} {
+	for _, cursor := range []string{notBase64, unsigned, forged, wrongVersion, badTime, emptyID, nonASCII, tooManyParts} {
 		if _, err := useCase.Execute(context.Background(), domain.AccountID(testAccountID), cursor, 5); !errors.Is(err, application.ErrInvalidCursor) {
 			t.Errorf("cursor %q error = %v, want ErrInvalidCursor", cursor, err)
 		}

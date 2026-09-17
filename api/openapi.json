@@ -272,6 +272,63 @@
         }
       }
     },
+    "/api/v1/me/wallet": {
+      "get": {
+        "operationId": "getWalletBalance",
+        "summary": "Derived INK balance",
+        "description": "Returns the owner's INK bucket balances recomputed from the append-only ledger. Quantities are integer INK units (never floats, never pre-formatted money).",
+        "tags": ["wallet"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "Derived bucket balances.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WalletBalance" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/me/wallet/transactions": {
+      "get": {
+        "operationId": "getWalletStatement",
+        "summary": "Ledger statement",
+        "description": "Returns the owner's ledger statement, newest first, as a cursor page. Entries carry the stable operation type, bucket, signed integer amount, reference and RFC 3339 UTC timestamp; administrative justifications, actors and antifraud details never serialize.",
+        "tags": ["wallet"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque server-signed cursor returned as next_cursor by the previous page.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1..100); defaults to 20.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One statement page.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/WalletStatement" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
     "/api/v1/profiles/{username}": {
       "get": {
         "operationId": "getPublicProfile",
@@ -375,6 +432,50 @@
           "interface_locale": { "type": "string", "enum": ["pt-BR", "en-US"] },
           "created_at": { "type": "string", "format": "date-time" },
           "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "WalletBalance": {
+        "type": "object",
+        "description": "INK bucket balances derived from the append-only ledger. Integer INK units: never floats and never pre-formatted money.",
+        "required": ["balance_free", "balance_purchased"],
+        "properties": {
+          "balance_free": { "type": "integer", "minimum": 0, "description": "FREE_INK balance (plan franchise, consumed first)." },
+          "balance_purchased": { "type": "integer", "minimum": 0, "description": "PURCHASED_INK balance (bought INK, consumed after the franchise)." }
+        }
+      },
+      "WalletStatementEntry": {
+        "type": "object",
+        "description": "One ledger line of the owner statement. Restricted administrative reasons, actors and antifraud data are never part of this document.",
+        "required": ["transaction_id", "operation_id", "operation_type", "bucket", "amount", "reference", "created_at"],
+        "properties": {
+          "transaction_id": { "type": "string" },
+          "operation_id": { "type": "string" },
+          "operation_type": {
+            "type": "string",
+            "enum": [
+              "credit_free",
+              "credit_member",
+              "credit_purchase",
+              "credit_refund",
+              "credit_admin",
+              "debit_argument",
+              "debit_admin",
+              "expire_free"
+            ]
+          },
+          "bucket": { "type": "string", "enum": ["FREE_INK", "PURCHASED_INK"] },
+          "amount": { "type": "integer", "description": "Signed INK delta: positive credits the bucket, negative debits it." },
+          "reference": { "type": "string" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "WalletStatement": {
+        "type": "object",
+        "description": "Cursor page of the owner ledger statement.",
+        "required": ["items", "next_cursor"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/WalletStatementEntry" } },
+          "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
         }
       },
       "HealthStatus": {
@@ -537,6 +638,7 @@
   "tags": [
     { "name": "health", "description": "Process probes consumed by the supervisor." },
     { "name": "auth", "description": "Authentication, registration, session management and recovery." },
-    { "name": "profiles", "description": "Public and private profile projections." }
+    { "name": "profiles", "description": "Public and private profile projections." },
+    { "name": "wallet", "description": "Authenticated INK balance and statement reads." }
   ]
 }

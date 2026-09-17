@@ -12,11 +12,13 @@ import (
 // filter is applied on every page independently of the cursor.
 type GetWalletStatementUseCase struct {
 	queries WalletQueryRepository
+	cursors *StatementCursorCodec
 }
 
-// NewGetWalletStatementUseCase creates an instance of GetWalletStatementUseCase.
-func NewGetWalletStatementUseCase(queries WalletQueryRepository) *GetWalletStatementUseCase {
-	return &GetWalletStatementUseCase{queries: queries}
+// NewGetWalletStatementUseCase creates an instance of
+// GetWalletStatementUseCase with signed cursors.
+func NewGetWalletStatementUseCase(queries WalletQueryRepository, cursors *StatementCursorCodec) *GetWalletStatementUseCase {
+	return &GetWalletStatementUseCase{queries: queries, cursors: cursors}
 }
 
 // Execute returns one page of the statement plus the cursor of the next
@@ -27,7 +29,7 @@ func (uc *GetWalletStatementUseCase) Execute(ctx context.Context, accountID doma
 		return nil, domain.ErrEmptyAccountID
 	}
 
-	after, err := parseStatementCursor(cursor)
+	after, err := uc.cursors.Decode(cursor)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +49,7 @@ func (uc *GetWalletStatementUseCase) Execute(ctx context.Context, accountID doma
 	statement := &WalletStatement{Entries: entries}
 	if len(entries) > limit {
 		statement.Entries = entries[:limit]
-		statement.NextCursor = encodeStatementCursor(statement.Entries[limit-1])
+		statement.NextCursor = uc.cursors.Encode(statement.Entries[limit-1])
 	}
 	return statement, nil
 }

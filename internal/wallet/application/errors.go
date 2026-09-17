@@ -21,4 +21,8 @@ var (
 	// ErrNotAuthorized indicates the acting account is not allowed to perform
 	// administrative adjustments.
 	ErrNotAuthorized = errors.New("application: actor is not authorized for administrative adjustments")
+
+	// ErrWeakStatementCursorSecret indicates the configured cursor signing
+	// secret is shorter than the 256-bit minimum.
+	ErrWeakStatementCursorSecret = errors.New("application: statement cursor secret must be at least 32 bytes")
 )

@@ -974,7 +974,11 @@ func TestRepository_StatementIsPaginatedAndOwnerScoped(t *testing.T) {
 		}
 	}
 
-	useCase := application.NewGetWalletStatementUseCase(repo)
+	codec, err := application.NewStatementCursorCodec([]byte("test-cursor-secret-0123456789abcd"))
+	if err != nil {
+		t.Fatalf("build cursor codec: %v", err)
+	}
+	useCase := application.NewGetWalletStatementUseCase(repo, codec)
 	seen := make(map[string]bool, ownerEntries)
 	cursor := ""
 	pages := 0

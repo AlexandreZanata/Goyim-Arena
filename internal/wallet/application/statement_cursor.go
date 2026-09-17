@@ -1,6 +1,8 @@
 package application
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
 	"encoding/base64"
 	"strings"
 	"time"
@@ -10,44 +12,84 @@ import (
 // can be introduced without silently misreading old cursors.
 const statementCursorVersion = "v1"
 
-// encodeStatementCursor renders the opaque keyset cursor of the last
-// delivered entry. The cursor is an encoding, not a capability: every query
-// still filters by the authenticated account.
-func encodeStatementCursor(entry StatementEntry) string {
-	parts := []string{
+// minStatementCursorSecretLength is the minimum HMAC key size accepted for
+// cursor signing (256 bits).
+const minStatementCursorSecretLength = 32
+
+// StatementCursorCodec encodes and verifies opaque, server-signed statement
+// cursors: clients may pass them back verbatim, but a forged or corrupted
+// cursor is rejected instead of being interpreted.
+type StatementCursorCodec struct {
+	secret []byte
+}
+
+// NewStatementCursorCodec builds the codec from the configured signing
+// secret. Secrets shorter than 256 bits are refused.
+func NewStatementCursorCodec(secret []byte) (*StatementCursorCodec, error) {
+	if len(secret) < minStatementCursorSecretLength {
+		return nil, ErrWeakStatementCursorSecret
+	}
+	copied := make([]byte, len(secret))
+	copy(copied, secret)
+	return &StatementCursorCodec{secret: copied}, nil
+}
+
+// Encode renders the signed cursor of the last delivered entry.
+func (c *StatementCursorCodec) Encode(entry StatementEntry) string {
+	payload := strings.Join([]string{
 		statementCursorVersion,
 		entry.CreatedAt.UTC().Format(time.RFC3339Nano),
 		entry.TransactionID,
-	}
-	return base64.RawURLEncoding.EncodeToString([]byte(strings.Join(parts, "|")))
+	}, "|")
+
+	signature := hmac.New(sha256.New, c.secret)
+	signature.Write([]byte(payload))
+
+	return base64.RawURLEncoding.EncodeToString([]byte(payload)) +
+		"." + base64.RawURLEncoding.EncodeToString(signature.Sum(nil))
 }
 
-// parseStatementCursor decodes a cursor into its keyset position. An empty
-// cursor yields a nil position (first page); malformed, foreign or
+// Decode verifies the signature and decodes the keyset position. An empty
+// cursor yields a nil position (first page); malformed, forged or
 // version-mismatched cursors fail with ErrInvalidCursor instead of being
 // reflected back.
-func parseStatementCursor(raw string) (*StatementPosition, error) {
+func (c *StatementCursorCodec) Decode(raw string) (*StatementPosition, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, nil
 	}
 
-	decoded, err := base64.RawURLEncoding.DecodeString(trimmed)
+	parts := strings.Split(trimmed, ".")
+	if len(parts) != 2 {
+		return nil, ErrInvalidCursor
+	}
+
+	payloadBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return nil, ErrInvalidCursor
+	}
+	signatureBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
 		return nil, ErrInvalidCursor
 	}
 
-	parts := strings.Split(string(decoded), "|")
-	if len(parts) != 3 || parts[0] != statementCursorVersion {
+	expected := hmac.New(sha256.New, c.secret)
+	expected.Write(payloadBytes)
+	if !hmac.Equal(signatureBytes, expected.Sum(nil)) {
 		return nil, ErrInvalidCursor
 	}
 
-	createdAt, err := time.Parse(time.RFC3339Nano, parts[1])
+	fields := strings.Split(string(payloadBytes), "|")
+	if len(fields) != 3 || fields[0] != statementCursorVersion {
+		return nil, ErrInvalidCursor
+	}
+
+	createdAt, err := time.Parse(time.RFC3339Nano, fields[1])
 	if err != nil {
 		return nil, ErrInvalidCursor
 	}
 
-	transactionID := parts[2]
+	transactionID := fields[2]
 	if transactionID == "" {
 		return nil, ErrInvalidCursor
 	}
