@@ -99,6 +99,10 @@ type Querier interface {
 	// GetArenaStateForCreator diagnoses why a scoped draft write affected no
 	// row: missing or foreign arena, non-draft status, or stale version.
 	GetArenaStateForCreator(ctx context.Context, arg GetArenaStateForCreatorParams) (GetArenaStateForCreatorRow, error)
+	// GetArenaStatusBySlug reports the stored status of the Arena holding the
+	// slug, including removed, so the SEO document endpoint can answer 410 for
+	// removed Arenas instead of 404 (P08-T08). Drafts never hold a slug.
+	GetArenaStatusBySlug(ctx context.Context, slug pgtype.Text) (string, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
 	// app.profiles with the explicit opt-ins. A missing preferences row resolves
 	// to the conservative default (marketing opt-in false), never to an implicit

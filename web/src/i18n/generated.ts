@@ -3,6 +3,16 @@
 
 /** Message keys per namespace. */
 export const messageKeys = {
+  arenas: [
+    "arenas.document.gone.detail",
+    "arenas.document.gone.title",
+    "arenas.document.not_found.detail",
+    "arenas.document.not_found.title",
+    "arenas.document.page_title",
+    "arenas.document.status.closed",
+    "arenas.document.status.published",
+    "arenas.document.status.restricted",
+  ] as const,
   errors: [
     "errors.conflict.detail",
     "errors.conflict.title",
@@ -23,6 +33,14 @@ export const messageKeys = {
 
 /** Every message key across namespaces. */
 export type MessageKey =
+  | "arenas.document.gone.detail"
+  | "arenas.document.gone.title"
+  | "arenas.document.not_found.detail"
+  | "arenas.document.not_found.title"
+  | "arenas.document.page_title"
+  | "arenas.document.status.closed"
+  | "arenas.document.status.published"
+  | "arenas.document.status.restricted"
   | "errors.conflict.detail"
   | "errors.conflict.title"
   | "errors.forbidden.detail"
@@ -41,6 +59,14 @@ export type MessageKey =
 
 /** Named placeholders per message key. */
 export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "arenas.document.gone.detail": [],
+  "arenas.document.gone.title": [],
+  "arenas.document.not_found.detail": [],
+  "arenas.document.not_found.title": [],
+  "arenas.document.page_title": ["subject"],
+  "arenas.document.status.closed": [],
+  "arenas.document.status.published": [],
+  "arenas.document.status.restricted": [],
   "errors.conflict.detail": [],
   "errors.conflict.title": [],
   "errors.forbidden.detail": [],
@@ -60,6 +86,14 @@ export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = 
 /** Localized messages per locale per key. */
 export const messages: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
   "en-US": Object.freeze({
+    "arenas.document.gone.detail": "This Arena was removed by moderation and is no longer available.",
+    "arenas.document.gone.title": "Arena removed",
+    "arenas.document.not_found.detail": "This Arena does not exist or has not been published yet.",
+    "arenas.document.not_found.title": "Arena not found",
+    "arenas.document.page_title": "{subject} — Goyim Arena",
+    "arenas.document.status.closed": "Closed",
+    "arenas.document.status.published": "Published",
+    "arenas.document.status.restricted": "Restricted",
     "errors.conflict.detail": "The resource changed; reload and try again.",
     "errors.conflict.title": "The request conflicts with the current state",
     "errors.forbidden.detail": "This action is not available for your account.",
@@ -76,6 +110,14 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "errors.validation.title": "The request is invalid",
   }),
   "pt-BR": Object.freeze({
+    "arenas.document.gone.detail": "Esta Arena foi removida pela moderação e não está mais disponível.",
+    "arenas.document.gone.title": "Arena removida",
+    "arenas.document.not_found.detail": "Esta Arena não existe ou ainda não foi publicada.",
+    "arenas.document.not_found.title": "Arena não encontrada",
+    "arenas.document.page_title": "{subject} — Goyim Arena",
+    "arenas.document.status.closed": "Fechada",
+    "arenas.document.status.published": "Publicada",
+    "arenas.document.status.restricted": "Restrita",
     "errors.conflict.detail": "O recurso mudou; recarregue e tente novamente.",
     "errors.conflict.title": "A requisição conflita com o estado atual",
     "errors.forbidden.detail": "Esta ação não está disponível para a sua conta.",

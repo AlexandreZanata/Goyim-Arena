@@ -118,3 +118,11 @@ LIMIT sqlc.arg(page_limit);
 SELECT id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
 FROM app.arenas
 WHERE slug = $1 AND status IN ('published', 'closed', 'restricted');
+
+-- GetArenaStatusBySlug reports the stored status of the Arena holding the
+-- slug, including removed, so the SEO document endpoint can answer 410 for
+-- removed Arenas instead of 404 (P08-T08). Drafts never hold a slug.
+-- name: GetArenaStatusBySlug :one
+SELECT status
+FROM app.arenas
+WHERE slug = $1;

@@ -1,0 +1,20 @@
+{
+  "arenas": {
+    "document": {
+      "page_title": "{subject} — Goyim Arena",
+      "status": {
+        "published": "Published",
+        "closed": "Closed",
+        "restricted": "Restricted"
+      },
+      "not_found": {
+        "title": "Arena not found",
+        "detail": "This Arena does not exist or has not been published yet."
+      },
+      "gone": {
+        "title": "Arena removed",
+        "detail": "This Arena was removed by moderation and is no longer available."
+      }
+    }
+  }
+}

@@ -40,4 +40,9 @@ var (
 	// ErrInvalidFeedFilter indicates a feed filter that can never describe a
 	// public Arena (unknown status, draft or removed).
 	ErrInvalidFeedFilter = errors.New("application: arena feed filter is invalid")
+
+	// ErrArenaGone indicates the Arena existed and was addressed publicly
+	// before, but was removed by moderation. Removed is terminal, so the
+	// document endpoint answers 410 instead of 404.
+	ErrArenaGone = errors.New("application: arena was removed")
 )

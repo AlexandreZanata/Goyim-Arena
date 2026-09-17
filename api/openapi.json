@@ -695,6 +695,61 @@
         }
       }
     },
+    "/d/{slug}": {
+      "get": {
+        "operationId": "getArenaDocument",
+        "summary": "Public Arena document (HTML)",
+        "description": "Renders the cacheable public HTML document of an Arena addressed by its slug: title, description, canonical link, OpenGraph and JSON-LD built from the Arena's own content and content_language. Metadata never includes aggregated results (none exist in the MVP). Removed Arenas answer 410 Gone and every other unresolvable value answers 404; error documents are never cached and never echo the requested address.",
+        "tags": ["arenas"],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "description": "Stable public Arena address.",
+            "schema": { "type": "string", "minLength": 3, "maxLength": 80 }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public Arena document.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "text/html": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "404": {
+            "description": "Arena not found. The error document is not cacheable.",
+            "content": {
+              "text/html": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "410": {
+            "description": "Arena removed by moderation. The error document is not cacheable.",
+            "content": {
+              "text/html": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/profiles/{username}": {
       "get": {
         "operationId": "getPublicProfile",

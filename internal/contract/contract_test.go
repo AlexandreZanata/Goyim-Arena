@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/adapters/html"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
@@ -93,6 +94,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 			continue
 		}
 		if strings.HasPrefix(route.Path, "/api/v1/me/arenas") || route.Path == "/api/v1/arenas" || strings.HasPrefix(route.Path, "/api/v1/arenas/") {
+			continue
+		}
+		if route.Path == "/d/{slug}" {
 			continue
 		}
 		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
@@ -386,6 +390,31 @@ func TestContractArenaSchemasExposeOnlyAllowedFields(t *testing.T) {
 			if !strings.Contains(operation, marker) {
 				t.Errorf("%s operation must document %q", path, marker)
 			}
+		}
+	}
+}
+
+// TestContractArenaDocumentRoute is the contract-level proof of P08-T08:
+// the HTML document route is public, answers HTML, documents the ETag
+// revalidation and distinguishes removed (410) from not found (404).
+func TestContractArenaDocumentRoute(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	operations, ok := document.Paths["/d/{slug}"]
+	if !ok {
+		t.Fatal("contract is missing /d/{slug}")
+	}
+	operation := string(operations["get"])
+	if strings.Contains(operation, `"SessionCookie"`) {
+		t.Error("/d/{slug} must stay public")
+	}
+	for _, marker := range []string{
+		"text/html", "ETag", "public, max-age=60", `"304"`, "If-None-Match", `"410"`, `"404"`,
+	} {
+		if !strings.Contains(operation, marker) {
+			t.Errorf("/d/{slug} operation must document %q", marker)
 		}
 	}
 }

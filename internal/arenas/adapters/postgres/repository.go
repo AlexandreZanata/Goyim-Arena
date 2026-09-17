@@ -354,6 +354,19 @@ func (r *Repository) GetPublicArenaBySlug(ctx context.Context, slug domain.Slug)
 	return mapArenaRow(row)
 }
 
+// GetArenaStatusBySlug reports the stored status of the Arena holding the
+// slug, including removed (P08-T08); drafts never hold a slug.
+func (r *Repository) GetArenaStatusBySlug(ctx context.Context, slug domain.Slug) (domain.ArenaStatus, error) {
+	status, err := r.queriesFor(ctx).GetArenaStatusBySlug(ctx, pgtype.Text{String: slug.String(), Valid: true})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", application.ErrArenaNotFound
+		}
+		return "", fmt.Errorf("get arena status by slug: %w", err)
+	}
+	return domain.ArenaStatus(status), nil
+}
+
 // diagnoseCloseMiss explains why the closing affected no row.
 func (r *Repository) diagnoseCloseMiss(ctx context.Context, arenaUUID, creatorUUID pgtype.UUID, expectedVersion int32) error {
 	state, err := r.queriesFor(ctx).GetArenaStateForCreator(ctx, platformpg.GetArenaStateForCreatorParams{

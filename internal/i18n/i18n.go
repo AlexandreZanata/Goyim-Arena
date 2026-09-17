@@ -11,6 +11,7 @@ package i18n
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // The catalog and placeholders variables are declared in generated.go,
@@ -50,6 +51,26 @@ func Message(locale, key string) (string, error) {
 // Placeholders returns the sorted placeholder names of a key.
 func Placeholders(key string) []string {
 	return placeholders[key]
+}
+
+// Format returns the localized message of key with its named placeholders
+// replaced. Every placeholder declared by the catalog must be provided:
+// unknown keys, unknown locales and missing values are programming errors,
+// matching Message semantics. Placeholder values are substituted verbatim
+// (escaping belongs to the rendering context, never to the catalog).
+func Format(locale, key string, values map[string]string) (string, error) {
+	message, err := Message(locale, key)
+	if err != nil {
+		return "", err
+	}
+	for _, name := range placeholders[key] {
+		value, ok := values[name]
+		if !ok {
+			return "", fmt.Errorf("i18n: missing value for placeholder %q of key %q", name, key)
+		}
+		message = strings.ReplaceAll(message, "{"+name+"}", value)
+	}
+	return message, nil
 }
 
 // DefaultLocale is the product default per I18N_STANDARD.md.

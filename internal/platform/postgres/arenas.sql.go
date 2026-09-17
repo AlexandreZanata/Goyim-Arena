@@ -212,6 +212,22 @@ func (q *Queries) GetArenaStateForCreator(ctx context.Context, arg GetArenaState
 	return i, err
 }
 
+const getArenaStatusBySlug = `-- name: GetArenaStatusBySlug :one
+SELECT status
+FROM app.arenas
+WHERE slug = $1
+`
+
+// GetArenaStatusBySlug reports the stored status of the Arena holding the
+// slug, including removed, so the SEO document endpoint can answer 410 for
+// removed Arenas instead of 404 (P08-T08). Drafts never hold a slug.
+func (q *Queries) GetArenaStatusBySlug(ctx context.Context, slug pgtype.Text) (string, error) {
+	row := q.db.QueryRow(ctx, getArenaStatusBySlug, slug)
+	var status string
+	err := row.Scan(&status)
+	return status, err
+}
+
 const getPublicArenaBySlug = `-- name: GetPublicArenaBySlug :one
 SELECT id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
 FROM app.arenas
