@@ -49,6 +49,17 @@ type AppPasswordResetToken struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// Account profiles: public username and interface locale, without email or payment identifiers
+type AppProfile struct {
+	AccountID pgtype.UUID
+	Username  string
+	// Canonical ASCII-lowercase username; sole uniqueness/authority key for lookups
+	UsernameNormalized string
+	InterfaceLocale    string
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+}
+
 // goose forward-only migration history for the app schema (schema_metadata version table required by the master plan)
 type AppSchemaMetadatum struct {
 	ID        int32
@@ -68,4 +79,13 @@ type AppSession struct {
 	RevokedAt  pgtype.Timestamptz
 	IpAddress  pgtype.Text
 	UserAgent  pgtype.Text
+}
+
+// Audit trail of every username set or changed by an account (P05-T02 requires auditable history)
+type AppUsernameHistory struct {
+	ID                 pgtype.UUID
+	AccountID          pgtype.UUID
+	Username           string
+	UsernameNormalized string
+	ChangedAt          pgtype.Timestamptz
 }

@@ -16,7 +16,16 @@ type Querier interface {
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
 	CreatePasswordCredential(ctx context.Context, arg CreatePasswordCredentialParams) error
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (AppPasswordResetToken, error)
+	// Profile, username history and interface-locale queries for the PostgreSQL
+	// platform adapter.
+	//
+	// Privacy contract (docs/PRIVACY.md): profile queries never select or return
+	// email, credentials or payment-provider identifiers. Email stays in
+	// app.accounts; payment identifiers belong to the billing module.
+	// Public lookups only ever read from app.profiles by username_normalized.
+	CreateProfile(ctx context.Context, arg CreateProfileParams) (AppProfile, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (AppSession, error)
+	CreateUsernameHistoryEntry(ctx context.Context, arg CreateUsernameHistoryEntryParams) error
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	GetAccountByEmail(ctx context.Context, lower string) (AppAccount, error)
 	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
@@ -31,9 +40,15 @@ type Querier interface {
 	GetHealthMetadata(ctx context.Context) (GetHealthMetadataRow, error)
 	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
+	GetProfileByAccountID(ctx context.Context, accountID pgtype.UUID) (AppProfile, error)
+	// GetPublicProfileByUsername returns only the publicly allowed profile fields.
+	// It never selects email, credentials, internal financial identifiers or
+	// administrative flags, and deliberately omits account_id.
+	GetPublicProfileByUsername(ctx context.Context, usernameNormalized string) (GetPublicProfileByUsernameRow, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
 	InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error
+	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.
@@ -44,6 +59,8 @@ type Querier interface {
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateAccountStatus(ctx context.Context, arg UpdateAccountStatusParams) (AppAccount, error)
 	UpdatePasswordCredential(ctx context.Context, arg UpdatePasswordCredentialParams) error
+	UpdateProfileLocale(ctx context.Context, arg UpdateProfileLocaleParams) (AppProfile, error)
+	UpdateProfileUsername(ctx context.Context, arg UpdateProfileUsernameParams) (AppProfile, error)
 	UpdateSessionLastSeen(ctx context.Context, id pgtype.UUID) error
 }
 
