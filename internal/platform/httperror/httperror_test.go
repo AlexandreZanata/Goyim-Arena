@@ -9,8 +9,26 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AlexandreZanata/Goyim-Arena/internal/i18n"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/requestid"
 )
+
+// requestFor builds a test request carrying the given request ID and
+// interface locale in its context, mirroring the requestid and locale
+// middlewares.
+func requestFor(requestID string, tag locale.Tag) *http.Request {
+	request := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+	ctx := request.Context()
+	if requestID != "" {
+		ctx = requestid.WithID(ctx, requestID)
+	}
+	if tag != "" {
+		ctx = locale.WithLocale(ctx, tag)
+	}
+	return request.WithContext(ctx)
+}
 
 // kindCase fixes the expected public shape of one kind.
 type kindCase struct {
@@ -20,23 +38,24 @@ type kindCase struct {
 }
 
 // kindCases covers the validation minimum: one case per stable kind with
-// the exact public status mapping.
+// the exact public status mapping. Titles are asserted in the en-US
+// catalog locale, pinning the English problem surface.
 func kindCases() map[apperr.Kind]kindCase {
 	return map[apperr.Kind]kindCase{
-		apperr.KindValidation:   {http.StatusBadRequest, "validation", "the request is invalid"},
-		apperr.KindUnauthorized: {http.StatusUnauthorized, "unauthorized", "authentication is required"},
-		apperr.KindForbidden:    {http.StatusForbidden, "forbidden", "you are not allowed to do this"},
-		apperr.KindNotFound:     {http.StatusNotFound, "not_found", "resource not found"},
-		apperr.KindConflict:     {http.StatusConflict, "conflict", "the request conflicts with the current state"},
-		apperr.KindRateLimited:  {http.StatusTooManyRequests, "rate_limited", "too many requests"},
-		apperr.KindInternal:     {http.StatusInternalServerError, "internal", "internal error"},
+		apperr.KindValidation:   {http.StatusBadRequest, "validation", "The request is invalid"},
+		apperr.KindUnauthorized: {http.StatusUnauthorized, "unauthorized", "Authentication is required"},
+		apperr.KindForbidden:    {http.StatusForbidden, "forbidden", "You are not allowed to do this"},
+		apperr.KindNotFound:     {http.StatusNotFound, "not_found", "Resource not found"},
+		apperr.KindConflict:     {http.StatusConflict, "conflict", "The request conflicts with the current state"},
+		apperr.KindRateLimited:  {http.StatusTooManyRequests, "rate_limited", "Too many requests"},
+		apperr.KindInternal:     {http.StatusInternalServerError, "internal", "Internal error"},
 	}
 }
 
 func TestKindMappingTable(t *testing.T) {
 	for kind, want := range kindCases() {
 		err := apperr.New(kind, "ARENA-TEST", "public detail")
-		problem := ProblemFor("req-1", err)
+		problem := ProblemFor(requestFor("req-1", locale.AmericanEnglish), err)
 
 		if problem.Status != want.status {
 			t.Errorf("kind %s: status = %d, want %d", kind, problem.Status, want.status)
@@ -59,7 +78,7 @@ func TestKindMappingTable(t *testing.T) {
 func TestWriteProblemRendersProblemDetails(t *testing.T) {
 	for kind, want := range kindCases() {
 		recorder := httptest.NewRecorder()
-		status := WriteProblem(recorder, "req-42", apperr.New(kind, "ARENA-TEST", "public detail"))
+		status := WriteProblem(recorder, requestFor("req-42", locale.AmericanEnglish), apperr.New(kind, "ARENA-TEST", "public detail"))
 
 		if status != want.status {
 			t.Errorf("kind %s: rendered status = %d, want %d", kind, status, want.status)
@@ -81,6 +100,53 @@ func TestWriteProblemRendersProblemDetails(t *testing.T) {
 	}
 }
 
+// TestProblemTitlesLocalizeByNegotiatedLocale pins the P02-T08 exit gate:
+// problem titles localize through the typed catalog using the request's
+// negotiated interface locale, for every kind and every supported locale.
+func TestProblemTitlesLocalizeByNegotiatedLocale(t *testing.T) {
+	locales := []locale.Tag{locale.BrazilianPortuguese, locale.AmericanEnglish}
+	for _, tag := range locales {
+		for kind := range kindCases() {
+			request := requestFor("req", tag)
+			got := ProblemFor(request, apperr.New(kind, "ARENA-TEST", "")).Title
+
+			want, err := i18n.Message(string(tag), "errors."+string(kind)+".title")
+			if err != nil {
+				t.Fatalf("catalog missing %s title for %s: %v", kind, tag, err)
+			}
+			if got != want {
+				t.Errorf("%s %s: title = %q, want catalog %q", tag, kind, got, want)
+			}
+		}
+	}
+
+	// Exact spot checks keep the catalog from drifting silently.
+	pt := ProblemFor(requestFor("req", locale.BrazilianPortuguese), apperr.New(apperr.KindNotFound, "ARENA-TEST", ""))
+	if pt.Title != "Recurso não encontrado" {
+		t.Errorf("pt-BR not_found title = %q", pt.Title)
+	}
+	en := ProblemFor(requestFor("req", locale.AmericanEnglish), apperr.New(apperr.KindValidation, "ARENA-TEST", ""))
+	if en.Title != "The request is invalid" {
+		t.Errorf("en-US validation title = %q", en.Title)
+	}
+}
+
+// TestProblemTitleFallsBackToDefaultLocale proves the negotiation-miss
+// path: without a locale in the context the problem renders in the default
+// catalog locale, never in request-controlled data.
+func TestProblemTitleFallsBackToDefaultLocale(t *testing.T) {
+	request := requestFor("req", "")
+	problem := ProblemFor(request, apperr.New(apperr.KindNotFound, "ARENA-TEST", ""))
+
+	want, err := i18n.Message(i18n.DefaultLocale, "errors.not_found.title")
+	if err != nil {
+		t.Fatalf("catalog missing default title: %v", err)
+	}
+	if problem.Title != want || problem.Title == "" {
+		t.Errorf("fallback title = %q, want default catalog %q", problem.Title, want)
+	}
+}
+
 // TestInternalCauseNeverSerializes is the security invariant: the wrapped
 // cause (and the internal detail) must never reach the public body, while
 // staying available for logs via errors.Is/As.
@@ -90,7 +156,7 @@ func TestInternalCauseNeverSerializes(t *testing.T) {
 		WithCause(sensitive)
 
 	recorder := httptest.NewRecorder()
-	status := WriteProblem(recorder, "req-7", internal)
+	status := WriteProblem(recorder, requestFor("req-7", locale.AmericanEnglish), internal)
 
 	body := recorder.Body.String()
 	for _, leaked := range []string{"hunter2", "admin", "pq:", "database unavailable"} {
@@ -109,8 +175,8 @@ func TestInternalCauseNeverSerializes(t *testing.T) {
 	if problem.Detail != "" {
 		t.Errorf("internal problem must have empty detail, got %q", problem.Detail)
 	}
-	if problem.Title != "internal error" {
-		t.Errorf("internal problem must keep the generic title, got %q", problem.Title)
+	if problem.Title != "Internal error" {
+		t.Errorf("internal problem must keep the generic catalog title, got %q", problem.Title)
 	}
 	if problem.Code != "ARENA-DB-FAIL" {
 		t.Errorf("internal problem keeps the stable vocabulary code, got %q", problem.Code)
@@ -130,7 +196,7 @@ func TestForeignErrorCollapsesToGenericInternalProblem(t *testing.T) {
 	foreign := fmt.Errorf("explosive detail: secret-value-123")
 
 	recorder := httptest.NewRecorder()
-	status := WriteProblem(recorder, "req-8", foreign)
+	status := WriteProblem(recorder, requestFor("req-8", locale.AmericanEnglish), foreign)
 
 	if status != http.StatusInternalServerError {
 		t.Fatalf("foreign error status = %d", status)
@@ -155,20 +221,20 @@ func TestPublicDetailExposedForSafeKindsOnly(t *testing.T) {
 		apperr.KindNotFound, apperr.KindConflict, apperr.KindRateLimited,
 	}
 	for _, kind := range safe {
-		problem := ProblemFor("req", apperr.New(kind, "ARENA-X", "username already taken"))
+		problem := ProblemFor(requestFor("req", locale.AmericanEnglish), apperr.New(kind, "ARENA-X", "username already taken"))
 		if problem.Detail != "username already taken" {
 			t.Errorf("kind %s: safe detail hidden: %q", kind, problem.Detail)
 		}
 	}
 
-	internal := ProblemFor("req", apperr.New(apperr.KindInternal, "ARENA-X", "row lock timeout"))
+	internal := ProblemFor(requestFor("req", locale.AmericanEnglish), apperr.New(apperr.KindInternal, "ARENA-X", "row lock timeout"))
 	if internal.Detail != "" {
 		t.Errorf("internal detail must be hidden, got %q", internal.Detail)
 	}
 }
 
 func TestRateLimitedProblemShape(t *testing.T) {
-	problem := ProblemFor("req-9", apperr.New(apperr.KindRateLimited, "ARENA-RL-1", "try again in 30 seconds"))
+	problem := ProblemFor(requestFor("req-9", locale.AmericanEnglish), apperr.New(apperr.KindRateLimited, "ARENA-RL-1", "try again in 30 seconds"))
 	if problem.Status != http.StatusTooManyRequests {
 		t.Fatalf("rate limit status = %d", problem.Status)
 	}

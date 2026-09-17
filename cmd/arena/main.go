@@ -16,6 +16,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
 )
 
@@ -76,7 +77,8 @@ func runServer(args []string, stdout *os.File) error {
 	logger := logging.New(stdout, cfg.LogLevel())
 
 	ids := clockseed.NewIDGenerator("req", clockseed.NewRandom(), clockseed.NewClock())
-	handler, err := httpserver.NewMux(ids)
+	locResolver := locale.NewResolver()
+	handler, err := httpserver.NewMux(ids, locResolver)
 	if err != nil {
 		return err
 	}

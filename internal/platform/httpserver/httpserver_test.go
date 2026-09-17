@@ -140,7 +140,7 @@ func TestHealthEndpoints(t *testing.T) {
 func TestNewMuxRoutesAndCorrelates(t *testing.T) {
 	t.Parallel()
 
-	handler, err := httpserver.NewMux(stubIDs{value: "test-id-123"})
+	handler, err := httpserver.NewMux(stubIDs{value: "test-id-123"}, nil)
 	if err != nil {
 		t.Fatalf("NewMux() error = %v", err)
 	}
@@ -188,7 +188,7 @@ func TestListenFailsFastOnBusyPort(t *testing.T) {
 func TestGracefulShutdownLifecycle(t *testing.T) {
 	t.Parallel()
 
-	handler, err := httpserver.NewMux(stubIDs{value: "lifecycle-id"})
+	handler, err := httpserver.NewMux(stubIDs{value: "lifecycle-id"}, nil)
 	if err != nil {
 		t.Fatalf("NewMux() error = %v", err)
 	}

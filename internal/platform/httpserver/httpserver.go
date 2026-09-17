@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/requestid"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
 )
@@ -219,10 +220,14 @@ func writeStatus(status string) http.Handler {
 // method patterns, so wrong methods answer 405 automatically. Registration
 // failures (duplicate or malformed registry entries) return an error
 // instead of panicking at boot.
-func NewMux(ids ports.IDGenerator) (http.Handler, error) {
+func NewMux(ids ports.IDGenerator, locales *locale.Resolver) (http.Handler, error) {
 	mux := http.NewServeMux()
 	if err := RegisterAll(mux, RegisteredRoutes()); err != nil {
 		return nil, err
 	}
-	return requestid.Middleware(ids, mux), nil
+	handler := requestid.Middleware(ids, mux)
+	if locales != nil {
+		handler = locale.SetHandler(locales, handler)
+	}
+	return handler, nil
 }

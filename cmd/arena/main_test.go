@@ -254,6 +254,43 @@ func TestServerBootsServesAndStopsOnSIGTERM(t *testing.T) {
 		t.Error("/health/live response is missing the X-Request-Id correlation header")
 	}
 
+	// P02-T08: the negotiated interface locale is echoed to clients. A
+	// Brazilian Portuguese Accept-Language wins over the default; an
+	// unmapped locale falls back to the configured default.
+	if got := liveResponse.Header.Get("X-Interface-Locale"); got != "pt-BR" {
+		t.Errorf("/health/live X-Interface-Locale default = %q, want pt-BR", got)
+	}
+
+	acceptRequest, err := http.NewRequest(http.MethodGet, baseURL+"/health/live", nil)
+	if err != nil {
+		t.Fatalf("build accept-language request: %v", err)
+	}
+	acceptRequest.Header.Set("Accept-Language", "en-US")
+	acceptResponse, err := client.Do(acceptRequest)
+	if err != nil {
+		t.Fatalf("GET /health/live with Accept-Language: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, acceptResponse.Body)
+	_ = acceptResponse.Body.Close()
+	if got := acceptResponse.Header.Get("X-Interface-Locale"); got != "en-US" {
+		t.Errorf("X-Interface-Locale with Accept-Language en-US = %q, want en-US", got)
+	}
+
+	esRequest, err := http.NewRequest(http.MethodGet, baseURL+"/health/live", nil)
+	if err != nil {
+		t.Fatalf("build es-ES request: %v", err)
+	}
+	esRequest.Header.Set("Accept-Language", "es-ES")
+	esResponse, err := client.Do(esRequest)
+	if err != nil {
+		t.Fatalf("GET /health/live with es-ES: %v", err)
+	}
+	_, _ = io.Copy(io.Discard, esResponse.Body)
+	_ = esResponse.Body.Close()
+	if got := esResponse.Header.Get("X-Interface-Locale"); got != "pt-BR" {
+		t.Errorf("X-Interface-Locale with unsupported es-ES = %q, want pt-BR fallback", got)
+	}
+
 	readyResponse, err := client.Get(baseURL + "/health/ready")
 	if err != nil {
 		t.Fatalf("GET /health/ready: %v", err)
