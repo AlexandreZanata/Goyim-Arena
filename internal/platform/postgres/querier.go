@@ -20,8 +20,19 @@ type Querier interface {
 	// statement; the CHECK (balance >= 0) guards the invariant even if a caller
 	// gets the plan wrong.
 	ApplyWalletDebit(ctx context.Context, arg ApplyWalletDebitParams) (AppWalletAccount, error)
+	// ConsumeArenaPassLot atomically decrements a lot that still has passes. The
+	// conditional predicate and the remaining_quantity CHECK together make
+	// over-consumption impossible, even under concurrent consumers (P07-T03).
+	ConsumeArenaPassLot(ctx context.Context, id pgtype.UUID) (int64, error)
 	// Identity and authentication queries for the PostgreSQL platform adapter.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (AppAccount, error)
+	CreateArenaPassConsumption(ctx context.Context, arg CreateArenaPassConsumptionParams) (AppArenaPassConsumption, error)
+	// Arena Pass entitlement queries for the PostgreSQL platform adapter.
+	//
+	// Consumption is append-only: no query updates or deletes a consumption and
+	// no query mutates a lot's quantity or expiration. The runtime grants
+	// enforce the same boundary in the database (P07-T01).
+	CreateArenaPassLot(ctx context.Context, arg CreateArenaPassLotParams) (AppArenaPassLot, error)
 	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
 	CreatePasswordCredential(ctx context.Context, arg CreatePasswordCredentialParams) error
@@ -64,6 +75,7 @@ type Querier interface {
 	GetActiveEmailVerificationToken(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
 	GetActivePasswordResetToken(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetActiveSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
+	GetArenaPassLot(ctx context.Context, id pgtype.UUID) (AppArenaPassLot, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
 	// app.profiles with the explicit opt-ins. A missing preferences row resolves
 	// to the conservative default (marketing opt-in false), never to an implicit
@@ -101,6 +113,8 @@ type Querier interface {
 	// needs for negative authorization: the account exists, is active and has a
 	// verified email. It never reads email, credentials or payment identifiers.
 	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
+	ListArenaPassConsumptionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListArenaPassConsumptionsByAccountRow, error)
+	ListArenaPassLotsByAccount(ctx context.Context, accountID pgtype.UUID) ([]AppArenaPassLot, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	// ListWalletStatementPage returns one keyset-paginated page of the account

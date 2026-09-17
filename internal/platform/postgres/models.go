@@ -19,6 +19,28 @@ type AppAccount struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+// Append-only Arena Pass consumptions; one row per published Arena, never updated or deleted at runtime
+type AppArenaPassConsumption struct {
+	ID         pgtype.UUID
+	LotID      pgtype.UUID
+	ArenaID    pgtype.UUID
+	ConsumedAt pgtype.Timestamptz
+}
+
+// Arena Pass lots: origin, granted quantity, optional immutable expiration and stable reference
+type AppArenaPassLot struct {
+	ID        pgtype.UUID
+	AccountID pgtype.UUID
+	Origin    string
+	Quantity  int32
+	// Consumable projection of the lot; over-consumption fails the CHECK constraint
+	RemainingQuantity int32
+	// Optional immutable expiration (NULL never expires); Member lots expire at their period end
+	ExpiresAt pgtype.Timestamptz
+	Reference string
+	CreatedAt pgtype.Timestamptz
+}
+
 // Explicit communication opt-ins per account; marketing defaults to false and is never opted in implicitly
 type AppCommunicationPreference struct {
 	AccountID pgtype.UUID
