@@ -24,6 +24,10 @@ type Querier interface {
 	// creator under the optimistic version check. Reopening does not exist in
 	// the MVP (P08-T05).
 	CloseArena(ctx context.Context, arg CloseArenaParams) (AppArena, error)
+	// ConfirmInitialPosition inserts the initial projection of one account in
+	// one Arena. The primary key (arena_id, account_id) resolves concurrent
+	// confirmations: the loser inserts nothing and re-reads the winner (P09-T03).
+	ConfirmInitialPosition(ctx context.Context, arg ConfirmInitialPositionParams) (AppDebatePosition, error)
 	// ConsumeArenaPassLot atomically decrements a lot that still has passes. The
 	// conditional predicate and the remaining_quantity CHECK together make
 	// over-consumption impossible, even under concurrent consumers (P07-T03).
@@ -51,6 +55,10 @@ type Querier interface {
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
 	CreatePasswordCredential(ctx context.Context, arg CreatePasswordCredentialParams) error
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (AppPasswordResetToken, error)
+	// CreatePositionChange appends one change to the immutable history chain.
+	// The unique (arena_id, account_id, version) constraint resolves concurrent
+	// changes: only the chain tip advances (P09-T04).
+	CreatePositionChange(ctx context.Context, arg CreatePositionChangeParams) (pgtype.UUID, error)
 	// Profile, username history and interface-locale queries for the PostgreSQL
 	// platform adapter.
 	//
@@ -108,6 +116,9 @@ type Querier interface {
 	// to the conservative default (marketing opt-in false), never to an implicit
 	// opt-in.
 	GetCommunicationPreferencesByAccountID(ctx context.Context, accountID pgtype.UUID) (GetCommunicationPreferencesByAccountIDRow, error)
+	// GetDebatePosition returns the private projection of one account in one
+	// Arena.
+	GetDebatePosition(ctx context.Context, arg GetDebatePositionParams) (AppDebatePosition, error)
 	// GetDerivedWalletBalance recomputes both bucket balances exclusively from
 	// the append-only ledger: the source of truth for the cached projection
 	// (P06-T05, REQ-WAL-01).
@@ -195,6 +206,10 @@ type Querier interface {
 	// UpdateArenaDraft replaces the mutable draft fields under an optimistic
 	// version check: a stale expected version affects no row (P08-T03).
 	UpdateArenaDraft(ctx context.Context, arg UpdateArenaDraftParams) (AppArena, error)
+	// UpdateCurrentPosition moves the projection to the change target under the
+	// optimistic version check: zero rows mean the chain moved since it was read
+	// and the whole change transaction must roll back (P09-T04).
+	UpdateCurrentPosition(ctx context.Context, arg UpdateCurrentPositionParams) (int64, error)
 	UpdatePasswordCredential(ctx context.Context, arg UpdatePasswordCredentialParams) error
 	UpdateProfileLocale(ctx context.Context, arg UpdateProfileLocaleParams) (AppProfile, error)
 	UpdateProfileTimezone(ctx context.Context, arg UpdateProfileTimezoneParams) (AppProfile, error)

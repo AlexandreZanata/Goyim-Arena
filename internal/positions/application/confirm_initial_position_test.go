@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -60,16 +61,47 @@ func (f *fakeArenaEligibility) callCount() int {
 	return len(f.calls)
 }
 
+// fakeTx is the transaction-local overlay of the fake repository. Writes
+// land here until the fake unit of work commits them, so overlapping
+// transactions isolate like real database transactions.
+type fakeTx struct {
+	stored  map[string]*domain.DebatePosition
+	changes []domain.PositionChange
+	updates []updateCall
+	inserts int
+}
+
+type fakeTxKey struct{}
+
 type fakePositionRepo struct {
 	mu sync.Mutex
+	// txMu serializes fake transactions, like the row locks of the real
+	// store: a version check inside a transaction sees the committed state
+	// of every transaction that finished before it.
+	txMu sync.Mutex
+	// getBarrier, when set, holds reads until every participant loaded, so
+	// tests can pin concurrent readers to the same version.
+	getBarrier *sync.WaitGroup
 
 	stored  map[string]*domain.DebatePosition
 	inserts int
+	changes []domain.PositionChange
+	updates []updateCall
+	nextID  int
+
+	createErr error
+	updateErr error
 
 	getErr             error
 	firstGetErr        error
 	confirmErr         error
 	confirmNotInserted bool
+}
+
+// updateCall records one projection update attempt of the fake.
+type updateCall struct {
+	change          domain.PositionChange
+	expectedVersion int32
 }
 
 func newFakePositionRepo() *fakePositionRepo {
@@ -80,33 +112,105 @@ func positionKey(arenaID domain.ArenaID, accountID domain.AccountID) string {
 	return arenaID.String() + "|" + accountID.String()
 }
 
-func (r *fakePositionRepo) GetByAccountAndArena(_ context.Context, arenaID domain.ArenaID, accountID domain.AccountID) (*domain.DebatePosition, error) {
+// copyProjection hands out independent entities, like the database adapter
+// does when it reconstitutes a row: use cases mutate the projection they
+// loaded, so sharing the stored pointer would leak the mutation.
+func copyProjection(projection *domain.DebatePosition) *domain.DebatePosition {
+	copied, err := domain.ReconstituteDebatePosition(
+		projection.ArenaID(), projection.AccountID(),
+		projection.InitialPosition(), projection.CurrentPosition(),
+		projection.Version(), projection.CreatedAt(), projection.UpdatedAt(),
+	)
+	if err != nil {
+		panic(err)
+	}
+	return copied
+}
+
+// overlay returns the transaction-local state carried by the context.
+func overlay(ctx context.Context) *fakeTx {
+	tx, _ := ctx.Value(fakeTxKey{}).(*fakeTx)
+	return tx
+}
+
+// effectiveStored resolves the visible projection of a pair: the
+// transaction overlay wins over the committed store.
+func (r *fakePositionRepo) effectiveStored(ctx context.Context, key string) (*domain.DebatePosition, bool) {
+	if tx := overlay(ctx); tx != nil {
+		if stored, ok := tx.stored[key]; ok {
+			return stored, true
+		}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	stored, ok := r.stored[key]
+	return stored, ok
+}
+
+func (r *fakePositionRepo) GetByAccountAndArena(ctx context.Context, arenaID domain.ArenaID, accountID domain.AccountID) (*domain.DebatePosition, error) {
+	r.mu.Lock()
 	if r.firstGetErr != nil {
 		err := r.firstGetErr
 		r.firstGetErr = nil
+		r.mu.Unlock()
 		return nil, err
 	}
 	if r.getErr != nil {
-		return nil, r.getErr
+		err := r.getErr
+		r.mu.Unlock()
+		return nil, err
 	}
-	stored, ok := r.stored[positionKey(arenaID, accountID)]
+	r.mu.Unlock()
+
+	stored, ok := r.effectiveStored(ctx, positionKey(arenaID, accountID))
 	if !ok {
 		return nil, application.ErrPositionNotFound
 	}
-	return stored, nil
+	if r.getBarrier != nil {
+		r.getBarrier.Done()
+		r.getBarrier.Wait()
+	}
+	return copyProjection(stored), nil
 }
 
-func (r *fakePositionRepo) ConfirmInitialPosition(_ context.Context, arenaID domain.ArenaID, accountID domain.AccountID, position domain.Position, at time.Time) (*domain.DebatePosition, bool, error) {
+func (r *fakePositionRepo) ConfirmInitialPosition(ctx context.Context, arenaID domain.ArenaID, accountID domain.AccountID, position domain.Position, at time.Time) (*domain.DebatePosition, bool, error) {
+	key := positionKey(arenaID, accountID)
+
+	if tx := overlay(ctx); tx != nil {
+		r.mu.Lock()
+		confirmErr := r.confirmErr
+		notInserted := r.confirmNotInserted
+		committed, committedOK := r.stored[key]
+		r.mu.Unlock()
+		if confirmErr != nil {
+			return nil, false, confirmErr
+		}
+		if stored, ok := tx.stored[key]; ok {
+			return copyProjection(stored), false, nil
+		}
+		if committedOK {
+			return copyProjection(committed), false, nil
+		}
+		if notInserted {
+			return nil, false, nil
+		}
+		created, err := domain.ConfirmInitialPosition(arenaID, accountID, position, at)
+		if err != nil {
+			return nil, false, err
+		}
+		tx.stored[key] = created
+		return copyProjection(created), true, nil
+	}
+
+	// Direct (autocommit) calls check and insert atomically, like the
+	// unique primary key of the real table.
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.confirmErr != nil {
 		return nil, false, r.confirmErr
 	}
-	key := positionKey(arenaID, accountID)
 	if stored, ok := r.stored[key]; ok {
-		return stored, false, nil
+		return copyProjection(stored), false, nil
 	}
 	if r.confirmNotInserted {
 		return nil, false, nil
@@ -117,7 +221,146 @@ func (r *fakePositionRepo) ConfirmInitialPosition(_ context.Context, arenaID dom
 	}
 	r.stored[key] = created
 	r.inserts++
-	return created, true, nil
+	return copyProjection(created), true, nil
+}
+
+func (r *fakePositionRepo) CreatePositionChange(ctx context.Context, change domain.PositionChange) (string, error) {
+	r.mu.Lock()
+	if r.createErr != nil {
+		err := r.createErr
+		r.mu.Unlock()
+		return "", err
+	}
+	r.nextID++
+	id := fmt.Sprintf("change-%d", r.nextID)
+	r.mu.Unlock()
+
+	if tx := overlay(ctx); tx != nil {
+		tx.changes = append(tx.changes, change)
+	} else {
+		r.mu.Lock()
+		r.changes = append(r.changes, change)
+		r.mu.Unlock()
+	}
+	return id, nil
+}
+
+func (r *fakePositionRepo) UpdateCurrentPosition(ctx context.Context, change domain.PositionChange, expectedVersion int32) error {
+	r.mu.Lock()
+	if r.updateErr != nil {
+		err := r.updateErr
+		r.mu.Unlock()
+		return err
+	}
+	r.mu.Unlock()
+
+	key := positionKey(change.ArenaID(), change.AccountID())
+	stored, ok := r.effectiveStored(ctx, key)
+	if !ok {
+		return application.ErrPositionNotFound
+	}
+	if stored.Version() != expectedVersion {
+		return application.ErrVersionConflict
+	}
+
+	updated, err := domain.ReconstituteDebatePosition(
+		change.ArenaID(), change.AccountID(),
+		stored.InitialPosition(), change.To(),
+		change.Version(), stored.CreatedAt(), change.ChangedAt(),
+	)
+	if err != nil {
+		return err
+	}
+	r.writeStored(ctx, key, updated)
+
+	if tx := overlay(ctx); tx != nil {
+		tx.updates = append(tx.updates, updateCall{change: change, expectedVersion: expectedVersion})
+	} else {
+		r.mu.Lock()
+		r.updates = append(r.updates, updateCall{change: change, expectedVersion: expectedVersion})
+		r.mu.Unlock()
+	}
+	return nil
+}
+
+// writeStored records a projection in the transaction overlay when one is
+// active, otherwise in the committed store.
+func (r *fakePositionRepo) writeStored(ctx context.Context, key string, projection *domain.DebatePosition) {
+	if tx := overlay(ctx); tx != nil {
+		if tx.stored == nil {
+			tx.stored = map[string]*domain.DebatePosition{}
+		}
+		tx.stored[key] = projection
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stored[key] = projection
+	r.inserts++
+}
+
+func (r *fakePositionRepo) changeCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.changes)
+}
+
+func (r *fakePositionRepo) updateCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.updates)
+}
+
+type fakeUnitOfWork struct {
+	mu    sync.Mutex
+	calls int
+	err   error
+	repo  *fakePositionRepo
+}
+
+// newFakeUnitOfWork builds a unit of work that commits the transaction
+// overlay only when the transactional function succeeds.
+func newFakeUnitOfWork(repo *fakePositionRepo) *fakeUnitOfWork {
+	return &fakeUnitOfWork{repo: repo}
+}
+
+func (u *fakeUnitOfWork) WithinTransaction(ctx context.Context, fn func(ctx context.Context) error) error {
+	u.mu.Lock()
+	u.calls++
+	u.mu.Unlock()
+	if u.err != nil {
+		return u.err
+	}
+
+	if u.repo != nil {
+		u.repo.txMu.Lock()
+		defer u.repo.txMu.Unlock()
+	}
+
+	tx := &fakeTx{stored: map[string]*domain.DebatePosition{}}
+	if err := fn(context.WithValue(ctx, fakeTxKey{}, tx)); err != nil {
+		return err
+	}
+	u.repo.commit(tx)
+	return nil
+}
+
+// commit merges one successful transaction overlay into the committed store.
+func (r *fakePositionRepo) commit(tx *fakeTx) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for key, projection := range tx.stored {
+		r.stored[key] = projection
+		r.inserts++
+	}
+	r.changes = append(r.changes, tx.changes...)
+	r.updates = append(r.updates, tx.updates...)
+}
+
+func (u *fakeUnitOfWork) callCount() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.calls
 }
 
 func (r *fakePositionRepo) insertCount() int {
@@ -143,6 +386,13 @@ func (r *fakePositionRepo) storedPosition(t *testing.T, arenaID domain.ArenaID, 
 	return stored
 }
 
+func (r *fakePositionRepo) seed(t *testing.T, projection *domain.DebatePosition) {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stored[positionKey(projection.ArenaID(), projection.AccountID())] = projection
+}
+
 func newConfirmUseCase(repo *fakePositionRepo, accounts *fakeAccountEligibility, arenas *fakeArenaEligibility) *application.ConfirmInitialPositionUseCase {
 	return application.NewConfirmInitialPositionUseCase(repo, accounts, arenas, fixedClock{now: testInstant})
 }
@@ -153,6 +403,33 @@ func confirmCommand(position string) application.ConfirmInitialPositionCommand {
 		ArenaID:   testArenaRaw,
 		Position:  position,
 	}
+}
+
+func mustArenaID(t *testing.T) domain.ArenaID {
+	t.Helper()
+	arenaID, err := domain.ParseArenaID(testArenaRaw)
+	if err != nil {
+		t.Fatalf("ParseArenaID: %v", err)
+	}
+	return arenaID
+}
+
+func mustAccountID(t *testing.T) domain.AccountID {
+	t.Helper()
+	accountID, err := domain.ParseAccountID(testAccountRaw)
+	if err != nil {
+		t.Fatalf("ParseAccountID: %v", err)
+	}
+	return accountID
+}
+
+func mustPosition(t *testing.T, raw string) domain.Position {
+	t.Helper()
+	position, err := domain.ParsePosition(raw)
+	if err != nil {
+		t.Fatalf("ParsePosition(%q): %v", raw, err)
+	}
+	return position
 }
 
 func TestConfirmInitialPositionRecordsTheFirstChoice(t *testing.T) {
@@ -475,31 +752,4 @@ func TestConfirmInitialPositionConcurrentDifferentValues(t *testing.T) {
 	if stored.InitialPosition().String() != winner || stored.Version() != 1 {
 		t.Fatalf("stored winner = %q v%d, want %q v1", stored.InitialPosition().String(), stored.Version(), winner)
 	}
-}
-
-func mustArenaID(t *testing.T) domain.ArenaID {
-	t.Helper()
-	arenaID, err := domain.ParseArenaID(testArenaRaw)
-	if err != nil {
-		t.Fatalf("ParseArenaID: %v", err)
-	}
-	return arenaID
-}
-
-func mustAccountID(t *testing.T) domain.AccountID {
-	t.Helper()
-	accountID, err := domain.ParseAccountID(testAccountRaw)
-	if err != nil {
-		t.Fatalf("ParseAccountID: %v", err)
-	}
-	return accountID
-}
-
-func mustPosition(t *testing.T, raw string) domain.Position {
-	t.Helper()
-	position, err := domain.ParsePosition(raw)
-	if err != nil {
-		t.Fatalf("ParsePosition(%q): %v", raw, err)
-	}
-	return position
 }

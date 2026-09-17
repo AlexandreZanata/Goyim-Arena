@@ -13,6 +13,11 @@ var (
 	// history: later choices go through a recorded change (P09-T04).
 	ErrInitialPositionAlreadySet = errors.New("positions: initial position is already set to a different value")
 
+	// ErrVersionConflict indicates the chain moved since it was read: a
+	// concurrent change advanced the projection, so this change rolled
+	// back instead of diverging the current position from the chain.
+	ErrVersionConflict = errors.New("positions: position version conflict")
+
 	// ErrAccountNotFound indicates the account does not exist.
 	ErrAccountNotFound = errors.New("positions: account not found")
 

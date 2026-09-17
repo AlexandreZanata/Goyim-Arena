@@ -34,7 +34,18 @@ type ArenaEligibility interface {
 	EnsureAcceptsPositions(ctx context.Context, arenaID domain.ArenaID) error
 }
 
-// PositionRepository persists the private position projection.
+// UnitOfWork runs a function inside one database transaction. The change
+// use case uses it so the appended history row and the projection update
+// commit or roll back together; the concrete manager is composed at
+// bootstrap and the module never imports another module's adapters.
+type UnitOfWork interface {
+	// WithinTransaction begins a transaction, makes it available to
+	// participants through the context and commits only when fn returns nil.
+	WithinTransaction(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
+// PositionRepository persists the private position projection and its
+// append-only history.
 type PositionRepository interface {
 	// GetByAccountAndArena returns the stored projection of one account in
 	// one Arena, or ErrPositionNotFound.
@@ -44,4 +55,15 @@ type PositionRepository interface {
 	// inserted is false when the pair already holds a position: the stored
 	// projection is returned so the caller can resolve a replay.
 	ConfirmInitialPosition(ctx context.Context, arenaID domain.ArenaID, accountID domain.AccountID, position domain.Position, at time.Time) (*domain.DebatePosition, bool, error)
+
+	// CreatePositionChange appends one change to the history chain and
+	// returns the stored row identifier, kept for later attribution.
+	// Losing a concurrent append race reports ErrVersionConflict.
+	CreatePositionChange(ctx context.Context, change domain.PositionChange) (string, error)
+
+	// UpdateCurrentPosition moves the projection to the change target under
+	// the optimistic version check. A stale expected version reports
+	// ErrVersionConflict and a missing projection reports
+	// ErrPositionNotFound.
+	UpdateCurrentPosition(ctx context.Context, change domain.PositionChange, expectedVersion int32) error
 }
