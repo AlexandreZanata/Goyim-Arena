@@ -69,6 +69,36 @@ type AppArenaRelation struct {
 	CreatedAt      pgtype.Timestamptz
 }
 
+// Public immutable argument or reply of one Arena: plaintext, canonical content hash, grapheme cost and withdrawal/moderation status
+type AppArgument struct {
+	ID       pgtype.UUID
+	ArenaID  pgtype.UUID
+	AuthorID pgtype.UUID
+	ParentID pgtype.UUID
+	// Declared relation to the Arena statement: support, oppose or context
+	Relation string
+	// Plaintext content as published; never edited after publication
+	Content string
+	// Versioned canonical hash of the content (format owned by the domain)
+	ContentHash string
+	// Grapheme cluster count: the 1 INK per cluster billing unit, at most 3000
+	GraphemeCost int32
+	// published, withdrawn (author) or removed (moderation); transitions are use-case rules
+	Status    string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
+// Structured sources supporting an argument: URL plus optional short description; a source never certifies truth
+type AppArgumentSource struct {
+	ID         pgtype.UUID
+	ArgumentID pgtype.UUID
+	// Absolute http(s) URL, bounded and free of whitespace
+	Url         string
+	Description pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+}
+
 // Editorial Arena categories; seeded by migrations, display names resolve through the versioned i18n catalogs
 type AppCategory struct {
 	Slug         string
