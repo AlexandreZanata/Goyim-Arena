@@ -154,6 +154,33 @@ func (r *Repository) UpdateCurrentPosition(ctx context.Context, change domain.Po
 	return nil
 }
 
+// CountEligiblePositions derives the public aggregate of one Arena. The
+// projection counts only active accounts (BUSINESS_RULES §7) and returns
+// counts only: no account identifier leaves the database.
+func (r *Repository) CountEligiblePositions(ctx context.Context, arenaID domain.ArenaID) (application.PositionDistribution, application.PositionDistribution, error) {
+	arenaParam, ok := uuidParam(arenaID.String())
+	if !ok {
+		return application.PositionDistribution{}, application.PositionDistribution{}, application.ErrArenaNotFound
+	}
+
+	row, err := r.queriesFor(ctx).CountEligiblePositionsByArena(ctx, arenaParam)
+	if err != nil {
+		return application.PositionDistribution{}, application.PositionDistribution{}, fmt.Errorf("count eligible positions: %w", err)
+	}
+
+	initial := application.PositionDistribution{
+		Agree:     row.InitialAgree,
+		Disagree:  row.InitialDisagree,
+		Undecided: row.InitialUndecided,
+	}
+	current := application.PositionDistribution{
+		Agree:     row.CurrentAgree,
+		Disagree:  row.CurrentDisagree,
+		Undecided: row.CurrentUndecided,
+	}
+	return initial, current, nil
+}
+
 // diagnoseProjectionMiss explains why the projection update affected no
 // row: a missing projection or a version that moved since it was read.
 func (r *Repository) diagnoseProjectionMiss(ctx context.Context, arenaParam, accountParam pgtype.UUID) error {

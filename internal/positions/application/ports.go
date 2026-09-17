@@ -67,3 +67,28 @@ type PositionRepository interface {
 	// ErrPositionNotFound.
 	UpdateCurrentPosition(ctx context.Context, change domain.PositionChange, expectedVersion int32) error
 }
+
+// PositionDistribution is the count of one dimension of an aggregate: how
+// many participants confirmed each position. It carries no account
+// identifier by construction.
+type PositionDistribution struct {
+	Agree     int64
+	Disagree  int64
+	Undecided int64
+}
+
+// Total returns the population of the distribution.
+func (d PositionDistribution) Total() int64 {
+	return d.Agree + d.Disagree + d.Undecided
+}
+
+// PositionAggregateRepository is the consumer-oriented port of the public
+// aggregate projection. It returns counts only: account identifiers never
+// leave the database.
+type PositionAggregateRepository interface {
+	// CountEligiblePositions counts the confirmed positions of one Arena
+	// over eligible accounts, split by initial and current choice. The
+	// adapter excludes accounts that are not active, per
+	// docs/BUSINESS_RULES.md §7.
+	CountEligiblePositions(ctx context.Context, arenaID domain.ArenaID) (PositionDistribution, PositionDistribution, error)
+}

@@ -17,6 +17,7 @@ const (
 	CodeInvalidVersion   ErrorCode = "POSITION_INVALID_VERSION"
 	CodeInvalidInstant   ErrorCode = "POSITION_INVALID_INSTANT"
 	CodeBrokenChain      ErrorCode = "POSITION_BROKEN_CHAIN"
+	CodeInvalidPolicy    ErrorCode = "POSITION_INVALID_POLICY"
 )
 
 // DomainError represents an invariant or rule failure in the positions
@@ -73,4 +74,7 @@ var (
 	// ErrBrokenChain indicates a change chain that is not contiguous: a
 	// version gap or a from_position different from the running position.
 	ErrBrokenChain = DomainError{Code: CodeBrokenChain, Message: "position change chain is not contiguous"}
+
+	// ErrInvalidPolicy indicates a malformed aggregate privacy policy.
+	ErrInvalidPolicy = DomainError{Code: CodeInvalidPolicy, Message: "aggregate privacy policy is invalid"}
 )

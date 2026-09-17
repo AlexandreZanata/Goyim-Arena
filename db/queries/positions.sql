@@ -47,3 +47,23 @@ SET current_position = sqlc.arg(current_position)::text,
 WHERE arena_id = sqlc.arg(arena_id)::uuid
   AND account_id = sqlc.arg(account_id)::uuid
   AND version = sqlc.arg(expected_version)::integer;
+
+-- CountEligiblePositionsByArena derives the public aggregate of one Arena:
+-- the initial and current distributions over eligible participants plus the
+-- eligible total. This is the explicitly approved read-only projection of
+-- ARCHITECTURE.md §4 and it follows docs/BUSINESS_RULES.md §7: only active
+-- accounts count, so suspended, pending and deleted accounts (and any future
+-- review invalidation) stay out of the official totals. The result carries
+-- counts only — account identifiers never leave the database (P09-T05).
+-- name: CountEligiblePositionsByArena :one
+SELECT
+    count(*)::bigint AS total,
+    count(*) FILTER (WHERE dp.initial_position = 'agree')::bigint AS initial_agree,
+    count(*) FILTER (WHERE dp.initial_position = 'disagree')::bigint AS initial_disagree,
+    count(*) FILTER (WHERE dp.initial_position = 'undecided')::bigint AS initial_undecided,
+    count(*) FILTER (WHERE dp.current_position = 'agree')::bigint AS current_agree,
+    count(*) FILTER (WHERE dp.current_position = 'disagree')::bigint AS current_disagree,
+    count(*) FILTER (WHERE dp.current_position = 'undecided')::bigint AS current_undecided
+FROM app.debate_positions dp
+JOIN app.accounts a ON a.id = dp.account_id AND a.status = 'active'
+WHERE dp.arena_id = sqlc.arg(arena_id)::uuid;

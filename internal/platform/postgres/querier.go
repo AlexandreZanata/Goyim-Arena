@@ -32,6 +32,14 @@ type Querier interface {
 	// conditional predicate and the remaining_quantity CHECK together make
 	// over-consumption impossible, even under concurrent consumers (P07-T03).
 	ConsumeArenaPassLot(ctx context.Context, id pgtype.UUID) (int64, error)
+	// CountEligiblePositionsByArena derives the public aggregate of one Arena:
+	// the initial and current distributions over eligible participants plus the
+	// eligible total. This is the explicitly approved read-only projection of
+	// ARCHITECTURE.md §4 and it follows docs/BUSINESS_RULES.md §7: only active
+	// accounts count, so suspended, pending and deleted accounts (and any future
+	// review invalidation) stay out of the official totals. The result carries
+	// counts only — account identifiers never leave the database (P09-T05).
+	CountEligiblePositionsByArena(ctx context.Context, arenaID pgtype.UUID) (CountEligiblePositionsByArenaRow, error)
 	// Identity and authentication queries for the PostgreSQL platform adapter.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (AppAccount, error)
 	// Arena draft queries for the PostgreSQL platform adapter.
