@@ -65,6 +65,10 @@ type Querier interface {
 	CreateArgument(ctx context.Context, arg CreateArgumentParams) (CreateArgumentRow, error)
 	// CreateArgumentSource attaches one structured source to an argument.
 	CreateArgumentSource(ctx context.Context, arg CreateArgumentSourceParams) (pgtype.UUID, error)
+	// CreateAttribution records one attribution under the unique
+	// (change, argument) pair: a retry inserts nothing and resolves the replay
+	// (P11-T03).
+	CreateAttribution(ctx context.Context, arg CreateAttributionParams) (pgtype.UUID, error)
 	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
 	CreatePasswordCredential(ctx context.Context, arg CreatePasswordCredentialParams) error
@@ -157,6 +161,12 @@ type Querier interface {
 	GetParentArgument(ctx context.Context, argumentID pgtype.UUID) (GetParentArgumentRow, error)
 	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
+	// GetPositionChangeForAttributor loads one position change scoped to its
+	// account and locks it FOR UPDATE: attribution recording serializes per
+	// change, so the cumulative three-argument limit cannot be bypassed by
+	// concurrent requests (P11-T03). Reading the change row is the approved
+	// read-only projection over the positions schema.
+	GetPositionChangeForAttributor(ctx context.Context, arg GetPositionChangeForAttributorParams) (GetPositionChangeForAttributorRow, error)
 	GetProfileByAccountID(ctx context.Context, accountID pgtype.UUID) (AppProfile, error)
 	// GetPublicArenaBySlug resolves a public Arena address. Drafts are never
 	// addressable and removed Arenas are not found for the public (P08-T07).
@@ -196,6 +206,13 @@ type Querier interface {
 	// skips rows (P07-T06).
 	ListArenaPassConsumptionsPage(ctx context.Context, arg ListArenaPassConsumptionsPageParams) ([]ListArenaPassConsumptionsPageRow, error)
 	ListArenaPassLotsByAccount(ctx context.Context, accountID pgtype.UUID) ([]AppArenaPassLot, error)
+	// ListAttributionArgumentIDs returns the argument identifiers already
+	// credited by one change (P11-T03).
+	ListAttributionArgumentIDs(ctx context.Context, changeID pgtype.UUID) ([]pgtype.UUID, error)
+	// ListAttributionCandidates loads the eligibility inputs of the proposed
+	// arguments: arena, author, creation instant and status. Relation is
+	// deliberately not read: it never restricts eligibility (P11-T02).
+	ListAttributionCandidates(ctx context.Context, argumentIds []pgtype.UUID) ([]ListAttributionCandidatesRow, error)
 	// ListAvailablePassLotsForUpdate locks the consumable lots of an account in
 	// consumption order: nearest expiration first, then lots that never expire.
 	// Expired lots are never candidates, so they can never be consumed (P07-T03).
