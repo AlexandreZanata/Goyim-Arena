@@ -93,6 +93,20 @@ type AppCommunicationPreferenceHistory struct {
 	ChangedAt      pgtype.Timestamptz
 }
 
+// Private projection of one account position in one Arena: immutable initial choice plus current choice and optimistic version
+type AppDebatePosition struct {
+	ArenaID   pgtype.UUID
+	AccountID pgtype.UUID
+	// Immutable first confirmed position; the history chain starts here at version 1
+	InitialPosition string
+	// Derived projection of the chain tip; must equal the last accepted change target
+	CurrentPosition string
+	// Optimistic concurrency version: 1 at confirmation, +1 per accepted change
+	Version   int32
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
 // Single-use cryptographic token hashes for email verification
 type AppEmailVerificationToken struct {
 	ID        pgtype.UUID
@@ -121,6 +135,19 @@ type AppPasswordResetToken struct {
 	ExpiresAt pgtype.Timestamptz
 	UsedAt    pgtype.Timestamptz
 	CreatedAt pgtype.Timestamptz
+}
+
+// Append-only chain of accepted position changes; from_position and to_position always differ
+type AppPositionChange struct {
+	ID           pgtype.UUID
+	ArenaID      pgtype.UUID
+	AccountID    pgtype.UUID
+	FromPosition string
+	ToPosition   string
+	// Resulting projection version after the change; the chain starts at 2
+	Version int32
+	// Instant of the accepted change; ordering authority is version
+	ChangedAt pgtype.Timestamptz
 }
 
 // Account profiles: public username and interface locale, without email or payment identifiers
