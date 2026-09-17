@@ -38,6 +38,53 @@ func (q *Queries) CreateAttribution(ctx context.Context, arg CreateAttributionPa
 	return id, err
 }
 
+const getArgumentAttributionMetrics = `-- name: GetArgumentAttributionMetrics :one
+SELECT
+    count(pa.argument_id)::bigint AS valid_attributions,
+    count(DISTINCT pa.attributor_id)::bigint AS distinct_people
+FROM app.arguments a
+LEFT JOIN app.persuasion_attributions pa
+    ON pa.argument_id = a.id
+   AND pa.status = 'valid'
+   AND EXISTS (
+       SELECT 1
+       FROM app.accounts attributor
+       WHERE attributor.id = pa.attributor_id
+         AND attributor.status = 'active'
+         AND attributor.email_verified_at IS NOT NULL
+   )
+WHERE a.id = $1::uuid
+GROUP BY a.id
+`
+
+type GetArgumentAttributionMetricsRow struct {
+	ValidAttributions int64
+	DistinctPeople    int64
+}
+
+// GetArgumentAttributionMetrics derives the public count facts of one
+// argument (P11-T06; BR §5.1, §6, §7): the valid attribution events it
+// received and the eligible people who credited it, each person counted
+// once per argument. Rules encoded here:
+//  1. Only valid attributions count, exactly as the reputation projection
+//     (BR §6): an invalidated attribution never integrates a valid total.
+//  2. Eligible attributor means an active account with a verified email
+//     (BR §7), the same predicate the professional aggregates use.
+//  3. The LEFT JOIN keeps an argument with no eligible attribution
+//     representable (zeros) while a missing argument still returns no row,
+//     so the adapter can distinguish "no counts" from "no argument".
+//  4. Counts are facts, not state: withdrawing or removing the argument
+//     does not rewrite them (BR §10).
+//
+// The result carries counts only — attributor identities never leave the
+// database.
+func (q *Queries) GetArgumentAttributionMetrics(ctx context.Context, argumentID pgtype.UUID) (GetArgumentAttributionMetricsRow, error) {
+	row := q.db.QueryRow(ctx, getArgumentAttributionMetrics, argumentID)
+	var i GetArgumentAttributionMetricsRow
+	err := row.Scan(&i.ValidAttributions, &i.DistinctPeople)
+	return i, err
+}
+
 const getAttributionForModeration = `-- name: GetAttributionForModeration :one
 SELECT id, position_change_id, attributor_id, argument_id, status, created_at,
        moderation_reason, moderated_by, moderated_at
@@ -320,6 +367,30 @@ func (q *Queries) ListAuthorArenaReputation(ctx context.Context, authorID pgtype
 		return nil, err
 	}
 	return items, nil
+}
+
+const resolveAuthorByUsername = `-- name: ResolveAuthorByUsername :one
+SELECT account_id, username
+FROM app.profiles
+WHERE username_normalized = lower($1::text)
+`
+
+type ResolveAuthorByUsernameRow struct {
+	AccountID pgtype.UUID
+	Username  string
+}
+
+// ResolveAuthorByUsername resolves a public username to the author identity
+// used by the reputation projection (P11-T06). Resolution is read-only over
+// the profiles projection and matches the canonical normalized username,
+// the only authority key of profile lookups (P05-T01): no profile field
+// crosses the port, only the resolved identity does. A username that owns no
+// profile returns no rows, which the adapter reports as ErrProfileNotFound.
+func (q *Queries) ResolveAuthorByUsername(ctx context.Context, username string) (ResolveAuthorByUsernameRow, error) {
+	row := q.db.QueryRow(ctx, resolveAuthorByUsername, username)
+	var i ResolveAuthorByUsernameRow
+	err := row.Scan(&i.AccountID, &i.Username)
+	return i, err
 }
 
 const restoreAttribution = `-- name: RestoreAttribution :one

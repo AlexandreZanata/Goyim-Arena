@@ -1032,6 +1032,56 @@
         }
       }
     },
+    "/api/v1/me/position-changes/{id}/attributions": {
+      "post": {
+        "operationId": "recordAttributions",
+        "summary": "Record influence attributions",
+        "description": "Records the optional, contextual attribution of one confirmed position change: zero to three arguments that contributed to it. The change is loaded scoped to the authenticated account, so a foreign change stays indistinguishable from a missing one, and eligibility (same Arena, published before the change, another author, not invalidated) is enforced before anything is written. An empty selection is a valid skip and never creates a fake attribution. The recording is transactional and idempotent per argument: retrying the same selection resolves the recorded set with Idempotency-Replayed: true. The response echoes only the identifiers the caller already sent and never names who else credited the arguments.",
+        "tags": ["persuasion"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque position change identifier returned when the change was recorded.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AttributionRecordRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Selection recorded.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AttributionRecordResult" }
+              }
+            }
+          },
+          "200": {
+            "description": "Selection already recorded: the response resolves it instead of writing again.",
+            "headers": {
+              "Idempotency-Replayed": { "description": "true on replays.", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AttributionRecordResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
     "/api/v1/arenas/{id}/arguments": {
       "get": {
         "operationId": "listArenaArguments",
@@ -1090,6 +1140,46 @@
           },
           "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
           "400": { "$ref": "#/components/responses/Validation" }
+        }
+      }
+    },
+    "/api/v1/arguments/{id}/attributions": {
+      "get": {
+        "operationId": "getArgumentAttributions",
+        "summary": "Public attribution count of one argument",
+        "description": "Returns the public counts of one argument: the valid attribution events it received and the eligible people who credited it, each person counted once. The attributor identity is private by default, so no endpoint ever returns the list of people behind the count; the document carries counts only. Invalidated attributions never integrate the valid totals, and withdrawing or removing the argument does not rewrite the historical counts. An unknown argument is a plain 404. The response carries an ETag and short public cache headers and may be revalidated with If-None-Match.",
+        "tags": ["persuasion"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque argument identifier.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public counts of the argument.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Short public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArgumentAttributionMetrics" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
     },
@@ -1266,6 +1356,46 @@
               }
             }
           },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/profiles/{username}/reputation": {
+      "get": {
+        "operationId": "getProfileReputation",
+        "summary": "Public factual reputation of a profile",
+        "description": "Returns the public factual reputation of one author, addressed by the canonical username: the headline influenced_people (each participant counted at most once per author in each Arena, so the headline is the sum of the per-Arena distinct counts), the valid attributions received, and the same facts distributed by category, by language and per Arena. There is no universal score and no ranking. Only counts and public identifiers are served: attributor, account and email data never appear, and a username without a profile is a plain 404. The response carries an ETag and short public cache headers and may be revalidated with If-None-Match.",
+        "tags": ["persuasion"],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "description": "Public username, matched case-insensitively.",
+            "schema": { "type": "string", "minLength": 3, "maxLength": 30 }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public reputation of the profile.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Short public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ProfileReputation" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
           "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
@@ -1674,6 +1804,69 @@
           "replayed": { "type": "boolean" }
         }
       },
+      "AttributionRecordRequest": {
+        "type": "object",
+        "description": "Selection of zero to three arguments that contributed to one position change. An empty list is a valid skip and never creates a fake attribution; each argument counts at most once per change.",
+        "required": ["argument_ids"],
+        "properties": {
+          "argument_ids": { "type": "array", "maxItems": 3, "items": { "type": "string", "description": "Opaque argument identifier published in the same Arena before the change and authored by another participant." } }
+        }
+      },
+      "AttributionRecordResult": {
+        "type": "object",
+        "description": "Recorded selection of one change: the credited argument identifiers and whether the call resolved an earlier recording.",
+        "required": ["argument_ids", "replayed"],
+        "properties": {
+          "argument_ids": { "type": "array", "items": { "type": "string" } },
+          "replayed": { "type": "boolean", "description": "True when the call resolved an already recorded selection instead of writing." }
+        }
+      },
+      "ArgumentAttributionMetrics": {
+        "type": "object",
+        "description": "Public counts of one argument: the eligible people who credited it (each counted once per argument) and the valid attribution events it received. Counts only: no attributor, account or email data is ever part of this document.",
+        "required": ["valid_attributions", "distinct_people", "checked_at"],
+        "properties": {
+          "valid_attributions": { "type": "integer", "minimum": 0, "description": "Valid attributions received; fraudulent ones invalidated by moderation are excluded." },
+          "distinct_people": { "type": "integer", "minimum": 0, "description": "Eligible attributors counted once per argument." },
+          "checked_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ReputationArenaSlice": {
+        "type": "object",
+        "description": "Per-Arena facts of a public reputation: eligible people influenced there and valid attributions received there. Arena identifiers are public; attributors are not part of the document.",
+        "required": ["arena_id", "category", "language", "distinct_people", "valid_attributions"],
+        "properties": {
+          "arena_id": { "type": "string" },
+          "category": { "type": "string" },
+          "language": { "type": "string", "enum": ["pt-BR", "en-US"] },
+          "distinct_people": { "type": "integer", "minimum": 0 },
+          "valid_attributions": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ReputationDimension": {
+        "type": "object",
+        "description": "One bucket of a public reputation distribution (category or language), under the same per-Arena counting rule as the headline.",
+        "required": ["label", "distinct_people", "valid_attributions"],
+        "properties": {
+          "label": { "type": "string" },
+          "distinct_people": { "type": "integer", "minimum": 0 },
+          "valid_attributions": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ProfileReputation": {
+        "type": "object",
+        "description": "Public factual reputation of one author, addressed by the canonical username. influenced_people is the headline metric: each participant counts at most once per author in each Arena, so it equals the sum of the per-Arena distinct counts. No score, no ranking and no attributor identity is part of this document.",
+        "required": ["username", "influenced_people", "valid_attributions", "arenas", "by_category", "by_language", "checked_at"],
+        "properties": {
+          "username": { "type": "string" },
+          "influenced_people": { "type": "integer", "minimum": 0 },
+          "valid_attributions": { "type": "integer", "minimum": 0 },
+          "arenas": { "type": "array", "items": { "$ref": "#/components/schemas/ReputationArenaSlice" } },
+          "by_category": { "type": "array", "items": { "$ref": "#/components/schemas/ReputationDimension" } },
+          "by_language": { "type": "array", "items": { "$ref": "#/components/schemas/ReputationDimension" } },
+          "checked_at": { "type": "string", "format": "date-time" }
+        }
+      },
       "HealthStatus": {
         "type": "object",
         "required": ["status"],
@@ -1838,6 +2031,7 @@
     { "name": "wallet", "description": "Authenticated INK balance and statement reads." },
     { "name": "passes", "description": "Authenticated Arena Pass summary and consumption history." },
     { "name": "arenas", "description": "Arena drafts, publication, closing and the public feed." },
-    { "name": "arguments", "description": "Argument publication, replies, withdrawal and the public reads." }
+    { "name": "arguments", "description": "Argument publication, replies, withdrawal and the public reads." },
+    { "name": "persuasion", "description": "Private influence attribution and the public factual counts it feeds." }
   ]
 }

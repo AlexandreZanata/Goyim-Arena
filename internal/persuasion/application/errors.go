@@ -36,4 +36,10 @@ var (
 	// zeroed facts instead of this error: existence belongs to the profile
 	// layer, not to the metric.
 	ErrInvalidAuthorID = errors.New("persuasion: author identifier is invalid")
+
+	// ErrProfileNotFound indicates the public username does not belong to any
+	// profile, so no reputation can be addressed by it. It carries the same
+	// meaning as the profiles module's own lookup failure — a handle that does
+	// not exist is absent, never an empty author.
+	ErrProfileNotFound = errors.New("persuasion: profile not found")
 )

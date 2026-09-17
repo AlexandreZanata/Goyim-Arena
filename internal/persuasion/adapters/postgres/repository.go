@@ -28,6 +28,8 @@ var (
 	_ application.AttributionRepository           = (*Repository)(nil)
 	_ application.AttributionModerationRepository = (*Repository)(nil)
 	_ application.AuthorReputationRepository      = (*Repository)(nil)
+	_ application.ArgumentMetricsRepository       = (*Repository)(nil)
+	_ application.AuthorDirectory                 = (*Repository)(nil)
 )
 
 // NewRepository creates a PostgreSQL repository adapter for persuasion.
@@ -360,6 +362,51 @@ func (r *Repository) ListAuthorArenaReputation(ctx context.Context, authorID dom
 		})
 	}
 	return arenas, nil
+}
+
+// GetArgumentMetrics derives the public count facts of one argument: the
+// eligible people who credited it and the valid attribution events it
+// received. An argument without eligible attributions yields zeroed counts;
+// an identifier that addresses no argument reports ErrArgumentNotFound.
+func (r *Repository) GetArgumentMetrics(ctx context.Context, argumentID domain.ArgumentID) (*application.ArgumentMetrics, error) {
+	param, ok := uuidParam(argumentID.String())
+	if !ok {
+		return nil, application.ErrArgumentNotFound
+	}
+
+	row, err := r.queriesFor(ctx).GetArgumentAttributionMetrics(ctx, param)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrArgumentNotFound
+		}
+		return nil, fmt.Errorf("get argument attribution metrics: %w", err)
+	}
+
+	return &application.ArgumentMetrics{
+		ArgumentID:        argumentID,
+		DistinctPeople:    row.DistinctPeople,
+		ValidAttributions: row.ValidAttributions,
+	}, nil
+}
+
+// ResolveAuthor resolves a public username to the author who owns it,
+// matching the canonical normalized username of the profiles projection. Only
+// the resolved identity leaves the port: the profile fields stay in their
+// owning module.
+func (r *Repository) ResolveAuthor(ctx context.Context, username string) (application.AuthorHandle, error) {
+	row, err := r.queriesFor(ctx).ResolveAuthorByUsername(ctx, username)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.AuthorHandle{}, application.ErrProfileNotFound
+		}
+		return application.AuthorHandle{}, fmt.Errorf("resolve author by username: %w", err)
+	}
+
+	authorID, err := domain.ParseAuthorID(uuidToString(row.AccountID))
+	if err != nil {
+		return application.AuthorHandle{}, fmt.Errorf("stored author id is invalid: %w", err)
+	}
+	return application.AuthorHandle{AuthorID: authorID, Username: row.Username}, nil
 }
 
 // uuidParam parses a canonical UUID string into its database parameter.

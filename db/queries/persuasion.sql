@@ -106,6 +106,50 @@ WHERE a.author_id = sqlc.arg(author_id)::uuid
 GROUP BY ar.id, ar.category, ar.language
 ORDER BY ar.id;
 
+-- ResolveAuthorByUsername resolves a public username to the author identity
+-- used by the reputation projection (P11-T06). Resolution is read-only over
+-- the profiles projection and matches the canonical normalized username,
+-- the only authority key of profile lookups (P05-T01): no profile field
+-- crosses the port, only the resolved identity does. A username that owns no
+-- profile returns no rows, which the adapter reports as ErrProfileNotFound.
+-- name: ResolveAuthorByUsername :one
+SELECT account_id, username
+FROM app.profiles
+WHERE username_normalized = lower(sqlc.arg(username)::text);
+
+-- GetArgumentAttributionMetrics derives the public count facts of one
+-- argument (P11-T06; BR §5.1, §6, §7): the valid attribution events it
+-- received and the eligible people who credited it, each person counted
+-- once per argument. Rules encoded here:
+--   1. Only valid attributions count, exactly as the reputation projection
+--      (BR §6): an invalidated attribution never integrates a valid total.
+--   2. Eligible attributor means an active account with a verified email
+--      (BR §7), the same predicate the professional aggregates use.
+--   3. The LEFT JOIN keeps an argument with no eligible attribution
+--      representable (zeros) while a missing argument still returns no row,
+--      so the adapter can distinguish "no counts" from "no argument".
+--   4. Counts are facts, not state: withdrawing or removing the argument
+--      does not rewrite them (BR §10).
+-- The result carries counts only — attributor identities never leave the
+-- database.
+-- name: GetArgumentAttributionMetrics :one
+SELECT
+    count(pa.argument_id)::bigint AS valid_attributions,
+    count(DISTINCT pa.attributor_id)::bigint AS distinct_people
+FROM app.arguments a
+LEFT JOIN app.persuasion_attributions pa
+    ON pa.argument_id = a.id
+   AND pa.status = 'valid'
+   AND EXISTS (
+       SELECT 1
+       FROM app.accounts attributor
+       WHERE attributor.id = pa.attributor_id
+         AND attributor.status = 'active'
+         AND attributor.email_verified_at IS NOT NULL
+   )
+WHERE a.id = sqlc.arg(argument_id)::uuid
+GROUP BY a.id;
+
 -- RestoreAttribution reverses one invalidation on the same retained row,
 -- recording the restore decision: the row moves back to valid and the
 -- decision record is replaced by the newest one, never erased.

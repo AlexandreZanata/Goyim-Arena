@@ -129,6 +129,22 @@ type Querier interface {
 	// slug, including removed, so the SEO document endpoint can answer 410 for
 	// removed Arenas instead of 404 (P08-T08). Drafts never hold a slug.
 	GetArenaStatusBySlug(ctx context.Context, slug pgtype.Text) (string, error)
+	// GetArgumentAttributionMetrics derives the public count facts of one
+	// argument (P11-T06; BR §5.1, §6, §7): the valid attribution events it
+	// received and the eligible people who credited it, each person counted
+	// once per argument. Rules encoded here:
+	//   1. Only valid attributions count, exactly as the reputation projection
+	//      (BR §6): an invalidated attribution never integrates a valid total.
+	//   2. Eligible attributor means an active account with a verified email
+	//      (BR §7), the same predicate the professional aggregates use.
+	//   3. The LEFT JOIN keeps an argument with no eligible attribution
+	//      representable (zeros) while a missing argument still returns no row,
+	//      so the adapter can distinguish "no counts" from "no argument".
+	//   4. Counts are facts, not state: withdrawing or removing the argument
+	//      does not rewrite them (BR §10).
+	// The result carries counts only — attributor identities never leave the
+	// database.
+	GetArgumentAttributionMetrics(ctx context.Context, argumentID pgtype.UUID) (GetArgumentAttributionMetricsRow, error)
 	// GetArgumentByAuthorAndKey resolves the argument recorded under one
 	// attempt key (P10-T04).
 	GetArgumentByAuthorAndKey(ctx context.Context, arg GetArgumentByAuthorAndKeyParams) (GetArgumentByAuthorAndKeyRow, error)
@@ -287,6 +303,13 @@ type Querier interface {
 	// RemoveArena applies the moderation removal to a published, closed or
 	// restricted Arena under the optimistic version check; removed is terminal.
 	RemoveArena(ctx context.Context, arg RemoveArenaParams) (AppArena, error)
+	// ResolveAuthorByUsername resolves a public username to the author identity
+	// used by the reputation projection (P11-T06). Resolution is read-only over
+	// the profiles projection and matches the canonical normalized username,
+	// the only authority key of profile lookups (P05-T01): no profile field
+	// crosses the port, only the resolved identity does. A username that owns no
+	// profile returns no rows, which the adapter reports as ErrProfileNotFound.
+	ResolveAuthorByUsername(ctx context.Context, username string) (ResolveAuthorByUsernameRow, error)
 	// RestoreAttribution reverses one invalidation on the same retained row,
 	// recording the restore decision: the row moves back to valid and the
 	// decision record is replaced by the newest one, never erased.

@@ -15,6 +15,7 @@ import (
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/persuasion/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/positions/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/profiles/adapters/http"
@@ -102,6 +103,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 			continue
 		}
 		if strings.HasPrefix(route.Path, "/api/v1/me/arguments") || strings.HasPrefix(route.Path, "/api/v1/arguments") {
+			continue
+		}
+		if strings.HasPrefix(route.Path, "/api/v1/me/position-changes") || strings.HasPrefix(route.Path, "/api/v1/profiles/{username}/reputation") {
 			continue
 		}
 		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
@@ -617,6 +621,128 @@ func TestContractArgumentSchemasExposeOnlyAllowedFields(t *testing.T) {
 		"/api/v1/arenas/{id}/arguments",
 		"/api/v1/arguments/{id}/replies",
 		"/api/v1/arguments/{id}",
+	} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		operation := string(operations["get"])
+		if strings.Contains(operation, `"SessionCookie"`) {
+			t.Errorf("%s must stay public", path)
+		}
+		for _, marker := range []string{"ETag", "public, max-age=60", `"304"`, "If-None-Match"} {
+			if !strings.Contains(operation, marker) {
+				t.Errorf("%s operation must document %q", path, marker)
+			}
+		}
+	}
+}
+
+// TestContractPersuasionSchemasExposeOnlyAllowedFields is the contract-level
+// proof of P11-T06: the attribution and reputation documents declare exactly
+// the allowed properties, no schema declares forbidden markers (attributor or
+// account identifiers, email, credentials, moderation or antifraud data), the
+// private recording route requires the session cookie and the two public
+// counts stay public with their ETag revalidation and no way to list people.
+func TestContractPersuasionSchemasExposeOnlyAllowedFields(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"AttributionRecordRequest": {"argument_ids"},
+		"AttributionRecordResult":  {"argument_ids", "replayed"},
+		"ArgumentAttributionMetrics": {
+			"valid_attributions", "distinct_people", "checked_at",
+		},
+		"ReputationArenaSlice": {
+			"arena_id", "category", "language", "distinct_people", "valid_attributions",
+		},
+		"ReputationDimension": {
+			"label", "distinct_people", "valid_attributions",
+		},
+		"ProfileReputation": {
+			"username", "influenced_people", "valid_attributions",
+			"arenas", "by_category", "by_language", "checked_at",
+		},
+	}
+	forbiddenMarkers := []string{
+		"account", "attributor", "email", "user", "password", "credential",
+		"stripe", "billing", "payment", "fraud", "admin", "reason", "actor",
+		"notes", "ip", "user_agent", "voter", "score", "rank",
+	}
+
+	for name, expectedProperties := range expected {
+		raw, ok := document.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", name)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if len(schema.Properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(schema.Properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := schema.Properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range schema.Properties {
+			// Snake-case tokens compare exactly: "influenced_people" must not
+			// match a short marker by substring.
+			for _, token := range strings.Split(strings.ToLower(property), "_") {
+				for _, marker := range forbiddenMarkers {
+					if token == marker {
+						t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+					}
+				}
+			}
+		}
+	}
+
+	// No response document may carry the list of people behind a count: no
+	// declared property names an attributor or account identifier, so the
+	// counting surface stays counts, dimensions and public identifiers
+	// (BR §5.1, REQ-PERS-05).
+	for name, declared := range expected {
+		for _, property := range declared {
+			for _, marker := range []string{"attributor", "account", "email"} {
+				if strings.Contains(property, marker) {
+					t.Errorf("SECURITY VIOLATION: %s declares %q, which names %q", name, property, marker)
+				}
+			}
+		}
+	}
+
+	// The recording route is the only private one and requires the session
+	// cookie; a selection is at most three arguments.
+	recordOperations, ok := document.Paths["/api/v1/me/position-changes/{id}/attributions"]
+	if !ok {
+		t.Fatal("contract is missing /api/v1/me/position-changes/{id}/attributions")
+	}
+	record := string(recordOperations["post"])
+	if !strings.Contains(record, `"SessionCookie"`) {
+		t.Error("POST /api/v1/me/position-changes/{id}/attributions must require the SessionCookie scheme")
+	}
+	if !strings.Contains(record, `"Idempotency-Replayed"`) {
+		t.Error("the recording route must document the replay header")
+	}
+	requestRaw, ok := document.Components.Schemas["AttributionRecordRequest"]
+	if !ok {
+		t.Fatal("components.schemas.AttributionRecordRequest is missing")
+	}
+	if !strings.Contains(string(requestRaw), `"maxItems": 3`) {
+		t.Error("AttributionRecordRequest.argument_ids must cap the selection at three arguments")
+	}
+
+	// The public counts stay public, cacheable and revalidatable.
+	for _, path := range []string{
+		"/api/v1/arguments/{id}/attributions",
+		"/api/v1/profiles/{username}/reputation",
 	} {
 		operations, ok := document.Paths[path]
 		if !ok {

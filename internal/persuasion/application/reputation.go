@@ -48,7 +48,12 @@ type DimensionReputation struct {
 // facts, the derivation instant and nothing else. No attributor, account or
 // payment identifier is part of it by construction, so it is safe to publish.
 type AuthorReputation struct {
-	AuthorID  domain.AuthorID
+	AuthorID domain.AuthorID
+	// Username is the canonical public handle of the author, set when the
+	// query is addressed by username (P11-T06). It is the identity public
+	// documents carry; the internal author identifier never leaves the
+	// module.
+	Username  string
 	Arenas    []ArenaReputation
 	CheckedAt time.Time
 }

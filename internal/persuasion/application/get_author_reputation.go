@@ -35,18 +35,5 @@ func (uc *GetAuthorReputationUseCase) Execute(ctx context.Context, query GetAuth
 		return nil, err
 	}
 
-	arenas, err := uc.reputations.ListAuthorArenaReputation(ctx, authorID)
-	if err != nil {
-		return nil, err
-	}
-
-	reputation := AuthorReputation{
-		AuthorID:  authorID,
-		Arenas:    arenas,
-		CheckedAt: uc.clock.Now().UTC(),
-	}
-	if err := reputation.Validate(); err != nil {
-		return nil, err
-	}
-	return &reputation, nil
+	return deriveAuthorReputation(ctx, uc.reputations, authorID, uc.clock.Now().UTC())
 }
