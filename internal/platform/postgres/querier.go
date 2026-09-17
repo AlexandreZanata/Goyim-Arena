@@ -128,9 +128,6 @@ type Querier interface {
 	// GetArgumentByAuthorAndKey resolves the argument recorded under one
 	// attempt key (P10-T04).
 	GetArgumentByAuthorAndKey(ctx context.Context, arg GetArgumentByAuthorAndKeyParams) (GetArgumentByAuthorAndKeyRow, error)
-	// GetArgumentByID returns one argument; replies resolve their parent
-	// through it (P10-T04).
-	GetArgumentByID(ctx context.Context, argumentID pgtype.UUID) (GetArgumentByIDRow, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
 	// app.profiles with the explicit opt-ins. A missing preferences row resolves
 	// to the conservative default (marketing opt-in false), never to an implicit
@@ -150,6 +147,11 @@ type Querier interface {
 	// GetLastUsernameChangeAt returns the most recent username audit instant for
 	// the account, or NULL when the account has no history yet.
 	GetLastUsernameChangeAt(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error)
+	// GetParentArgument returns one argument together with its derived depth
+	// (0 for a top-level argument). Replies walk the chain through the
+	// recursive CTE, so depth is never denormalized; the depth guard bounds a
+	// corrupted chain defensively (P10-T05).
+	GetParentArgument(ctx context.Context, argumentID pgtype.UUID) (GetParentArgumentRow, error)
 	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetProfileByAccountID(ctx context.Context, accountID pgtype.UUID) (AppProfile, error)

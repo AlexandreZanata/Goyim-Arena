@@ -46,6 +46,7 @@ type PublishArgumentUseCase struct {
 	wallet    InkDebit
 	uow       UnitOfWork
 	counter   domain.GraphemeCounter
+	replies   domain.ReplyPolicy
 	clock     Clock
 }
 
@@ -57,6 +58,7 @@ func NewPublishArgumentUseCase(
 	wallet InkDebit,
 	uow UnitOfWork,
 	counter domain.GraphemeCounter,
+	replies domain.ReplyPolicy,
 	clock Clock,
 ) *PublishArgumentUseCase {
 	return &PublishArgumentUseCase{
@@ -66,12 +68,17 @@ func NewPublishArgumentUseCase(
 		wallet:    wallet,
 		uow:       uow,
 		counter:   counter,
+		replies:   replies,
 		clock:     clock,
 	}
 }
 
 // Execute publishes the argument.
 func (uc *PublishArgumentUseCase) Execute(ctx context.Context, cmd PublishArgumentCommand) (*PublishArgumentResult, error) {
+	if !uc.replies.IsValid() {
+		return nil, domain.ErrInvalidPolicy
+	}
+
 	authorID, err := domain.ParseAccountID(cmd.AccountID)
 	if err != nil {
 		return nil, err
@@ -175,10 +182,11 @@ func (uc *PublishArgumentUseCase) Execute(ctx context.Context, cmd PublishArgume
 	return &PublishArgumentResult{Argument: *created}, nil
 }
 
-// ensureReplyableParent validates that the parent belongs to the same Arena
-// and is still published. Depth rules arrive with P10-T05.
+// ensureReplyableParent validates that the parent belongs to the same Arena,
+// is still published and accepts one more reply level under the domain depth
+// policy. The rule lives here once: replies reuse this same use case.
 func (uc *PublishArgumentUseCase) ensureReplyableParent(ctx context.Context, arenaID domain.ArenaID, parentID domain.ArgumentID) error {
-	parent, err := uc.arguments.GetByID(ctx, parentID)
+	parent, depth, err := uc.arguments.GetParent(ctx, parentID)
 	if err != nil {
 		if errors.Is(err, ErrArgumentNotFound) {
 			return ErrParentNotFound
@@ -187,6 +195,9 @@ func (uc *PublishArgumentUseCase) ensureReplyableParent(ctx context.Context, are
 	}
 	if !parent.ArenaID.Equals(arenaID) || parent.Status != statusPublished {
 		return ErrParentNotAvailable
+	}
+	if !uc.replies.AllowsChildDepth(depth + 1) {
+		return ErrReplyDepthExceeded
 	}
 	return nil
 }

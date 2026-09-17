@@ -160,6 +160,7 @@ func newPublishHarness(t *testing.T) (*pgxpool.Pool, *application.PublishArgumen
 		bridge,
 		platformpg.NewTxManager(pool),
 		text.GraphemeCount,
+		domain.DefaultReplyPolicy(),
 		clock,
 	)
 	return pool, useCase, author, arena, walletRepo
@@ -463,5 +464,91 @@ func TestPublishArgumentConcurrentSameKey(t *testing.T) {
 	}
 	if free, _ := walletBalances(t, ctx, pool, author); free != 977 {
 		t.Fatalf("balance = %d, want a single charge", free)
+	}
+}
+
+// TestPublishArgumentBoundedRepliesEndToEnd is the P10-T05 proof on real
+// PostgreSQL: another eligible account replies to a top-level argument, the
+// derived depth query reports the chain, a reply to a reply exceeds the
+// single recursion level and a removed parent accepts nothing.
+func TestPublishArgumentBoundedRepliesEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	pool, useCase, author, arena, walletRepo := newPublishHarness(t)
+	seedWalletCredit(t, ctx, walletRepo, author, walletdomain.BucketFree, walletdomain.OperationCreditFree, 1000, "free:2026-09", "seed:free")
+
+	topCommand := publishArgumentCommand(author, arena, "reply-top-1")
+	top, err := useCase.Execute(ctx, topCommand)
+	if err != nil {
+		t.Fatalf("top-level Execute() error = %v", err)
+	}
+	if !top.Argument.ParentID.IsZero() {
+		t.Fatal("a top-level argument must have no parent")
+	}
+
+	// Authorization: replying never requires owning the parent.
+	replier := mustArgumentAuthor(t, ctx, platformpg.New(pool), "arguments-replier@arena.example.com")
+	seedWalletCredit(t, ctx, walletRepo, replier, walletdomain.BucketFree, walletdomain.OperationCreditFree, 1000, "free:2026-09", "seed:replier")
+
+	replyCommand := publishArgumentCommand(replier, arena, "reply-1")
+	replyCommand.ParentID = top.Argument.ID.String()
+	replyCommand.Content = "Resposta direta ao argumento principal"
+	reply, err := useCase.Execute(ctx, replyCommand)
+	if err != nil {
+		t.Fatalf("reply Execute() error = %v", err)
+	}
+	if !reply.Argument.ParentID.Equals(top.Argument.ID) || reply.Argument.AuthorID.String() != uuidText(replier) {
+		t.Fatalf("reply = %+v, want the other account replying to the top-level argument", reply.Argument)
+	}
+
+	// The derived depth query reports the chain without denormalization.
+	argumentsRepo := postgres.NewRepository(pool)
+	_, topDepth, err := argumentsRepo.GetParent(ctx, top.Argument.ID)
+	if err != nil {
+		t.Fatalf("GetParent(top) error = %v", err)
+	}
+	_, replyDepth, err := argumentsRepo.GetParent(ctx, reply.Argument.ID)
+	if err != nil {
+		t.Fatalf("GetParent(reply) error = %v", err)
+	}
+	if topDepth != 0 || replyDepth != 1 {
+		t.Fatalf("depths = %d/%d, want 0/1", topDepth, replyDepth)
+	}
+
+	// A reply to the reply exceeds the single recursion level and charges
+	// nothing.
+	freeBefore, purchasedBefore := walletBalances(t, ctx, pool, author)
+	deepCommand := publishArgumentCommand(author, arena, "reply-deep-1")
+	deepCommand.ParentID = reply.Argument.ID.String()
+	deepCommand.Content = "Resposta a uma resposta"
+	if _, err := useCase.Execute(ctx, deepCommand); !errors.Is(err, application.ErrReplyDepthExceeded) {
+		t.Fatalf("deep reply error = %v, want ErrReplyDepthExceeded", err)
+	}
+	if free, purchased := walletBalances(t, ctx, pool, author); free != freeBefore || purchased != purchasedBefore {
+		t.Fatal("a refused deep reply must not charge")
+	}
+
+	// A removed parent accepts no replies either.
+	removedCommand := publishArgumentCommand(author, arena, "reply-removed-parent")
+	removedCommand.Content = "Argumento que será removido pela moderação"
+	removed, err := useCase.Execute(ctx, removedCommand)
+	if err != nil {
+		t.Fatalf("removed parent Execute() error = %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE app.arguments SET status = 'removed' WHERE id = $1`, removed.Argument.ID.String()); err != nil {
+		t.Fatalf("remove argument: %v", err)
+	}
+	replyToRemoved := publishArgumentCommand(replier, arena, "reply-to-removed")
+	replyToRemoved.ParentID = removed.Argument.ID.String()
+	if _, err := useCase.Execute(ctx, replyToRemoved); !errors.Is(err, application.ErrParentNotAvailable) {
+		t.Fatalf("removed parent error = %v, want ErrParentNotAvailable", err)
+	}
+
+	// Only the accepted publications exist: top, reply and the removed
+	// parent.
+	if count := argumentRowCount(t, ctx, pool, author); count != 2 {
+		t.Fatalf("author arguments = %d, want the top-level and the removed parent", count)
+	}
+	if count := argumentRowCount(t, ctx, pool, replier); count != 1 {
+		t.Fatalf("replier arguments = %d, want the single accepted reply", count)
 	}
 }

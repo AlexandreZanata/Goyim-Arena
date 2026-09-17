@@ -15,6 +15,10 @@ var (
 	// replies: it belongs to another Arena or is no longer published.
 	ErrParentNotAvailable = errors.New("arguments: parent argument is not available for replies")
 
+	// ErrReplyDepthExceeded indicates the reply would exceed the depth
+	// policy of the domain (REQ-ARG-02: one recursion level in the MVP).
+	ErrReplyDepthExceeded = errors.New("arguments: reply depth exceeds the accepted limit")
+
 	// ErrDuplicateIdempotencyKey is the internal signal of a concurrent
 	// attempt with the same key: the use case resolves it into a replay.
 	ErrDuplicateIdempotencyKey = errors.New("arguments: idempotency key already used")

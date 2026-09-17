@@ -27,6 +27,7 @@ const (
 	CodeInvalidArenaID           ErrorCode = "ARGUMENT_INVALID_ARENA_ID"
 	CodeEmptyAccountID           ErrorCode = "ARGUMENT_EMPTY_ACCOUNT_ID"
 	CodeInvalidAccountID         ErrorCode = "ARGUMENT_INVALID_ACCOUNT_ID"
+	CodeInvalidPolicy            ErrorCode = "ARGUMENT_INVALID_POLICY"
 )
 
 // DomainError represents an invariant or rule failure in the arguments
@@ -117,4 +118,7 @@ var (
 
 	// ErrInvalidAccountID indicates a malformed account identifier.
 	ErrInvalidAccountID = DomainError{Code: CodeInvalidAccountID, Message: "account identifier format is invalid"}
+
+	// ErrInvalidPolicy indicates a malformed reply depth policy.
+	ErrInvalidPolicy = DomainError{Code: CodeInvalidPolicy, Message: "reply depth policy is invalid"}
 )

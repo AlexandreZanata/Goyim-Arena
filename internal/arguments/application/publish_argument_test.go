@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -177,15 +178,35 @@ func (r *fakeArgumentRepo) GetByAuthorAndIdempotencyKey(_ context.Context, autho
 	return stored, nil
 }
 
-func (r *fakeArgumentRepo) GetByID(_ context.Context, argumentID domain.ArgumentID) (*application.PublishedArgument, error) {
+func (r *fakeArgumentRepo) GetParent(_ context.Context, argumentID domain.ArgumentID) (*application.PublishedArgument, int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, stored := range r.arguments {
+		if !stored.ID.Equals(argumentID) {
+			continue
+		}
+		depth := 0
+		current := stored
+		for !current.ParentID.IsZero() && depth < 100 {
+			parent, ok := r.findByIDLocked(current.ParentID)
+			if !ok {
+				break
+			}
+			depth++
+			current = parent
+		}
+		return stored, depth, nil
+	}
+	return nil, 0, application.ErrArgumentNotFound
+}
+
+func (r *fakeArgumentRepo) findByIDLocked(argumentID domain.ArgumentID) (*application.PublishedArgument, bool) {
+	for _, stored := range r.arguments {
 		if stored.ID.Equals(argumentID) {
-			return stored, nil
+			return stored, true
 		}
 	}
-	return nil, application.ErrArgumentNotFound
+	return nil, false
 }
 
 func (r *fakeArgumentRepo) seed(t *testing.T, argument *application.PublishedArgument, key string) {
@@ -323,7 +344,11 @@ func mustArgumentID(t *testing.T, raw string) domain.ArgumentID {
 }
 
 func newPublishUseCase(repo *fakeArgumentRepo, accounts *fakeAccountEligibility, arenas *fakeArenaEligibility, wallet *fakeInkDebit, uow *fakeUnitOfWork) *application.PublishArgumentUseCase {
-	return application.NewPublishArgumentUseCase(repo, accounts, arenas, wallet, uow, runeCounter, fixedClock{now: testInstant})
+	return newPublishUseCaseWithPolicy(repo, accounts, arenas, wallet, uow, domain.DefaultReplyPolicy())
+}
+
+func newPublishUseCaseWithPolicy(repo *fakeArgumentRepo, accounts *fakeAccountEligibility, arenas *fakeArenaEligibility, wallet *fakeInkDebit, uow *fakeUnitOfWork, policy domain.ReplyPolicy) *application.PublishArgumentUseCase {
+	return application.NewPublishArgumentUseCase(repo, accounts, arenas, wallet, uow, runeCounter, policy, fixedClock{now: testInstant})
 }
 
 func publishCommand() application.PublishArgumentCommand {
@@ -426,6 +451,12 @@ func TestPublishArgumentValidatesParent(t *testing.T) {
 		AuthorID: mustAccount(t, "018f6b2a-0000-7000-8000-0000000000aa"),
 		Status:   "published",
 	}
+	removed := &application.PublishedArgument{
+		ID:       parentID,
+		ArenaID:  mustArena(t, testArenaRaw),
+		AuthorID: mustAccount(t, "018f6b2a-0000-7000-8000-0000000000aa"),
+		Status:   "removed",
+	}
 
 	tests := []struct {
 		name   string
@@ -435,6 +466,7 @@ func TestPublishArgumentValidatesParent(t *testing.T) {
 		{name: "missing parent", parent: nil, want: application.ErrParentNotFound},
 		{name: "cross arena parent", parent: crossArena, want: application.ErrParentNotAvailable},
 		{name: "withdrawn parent", parent: withdrawn, want: application.ErrParentNotAvailable},
+		{name: "removed parent", parent: removed, want: application.ErrParentNotAvailable},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -647,4 +679,129 @@ func TestPublishArgumentPropagatesEligibilityAndStorageFailures(t *testing.T) {
 			t.Fatal("a failed insert must roll the debit back")
 		}
 	})
+}
+
+// TestPublishArgumentAcceptsRepliesToOtherAuthors is the P10-T05
+// authorization proof: replying does not require owning the parent, only an
+// eligible account and an available parent.
+func TestPublishArgumentAcceptsRepliesToOtherAuthors(t *testing.T) {
+	repo := newFakeArgumentRepo()
+	parentID := mustArgumentID(t, testParentRaw)
+	repo.seed(t, &application.PublishedArgument{
+		ID:       parentID,
+		ArenaID:  mustArena(t, testArenaRaw),
+		AuthorID: mustAccount(t, "018f6b2a-0000-7000-8000-0000000000aa"),
+		Status:   "published",
+	}, "parent-key")
+
+	wallet := newFakeInkDebit()
+	useCase := newPublishUseCase(repo, &fakeAccountEligibility{}, &fakeArenaEligibility{}, wallet, newFakeUnitOfWork(repo, wallet))
+
+	command := publishCommand()
+	command.ParentID = testParentRaw
+	command.Content = "Resposta de outra pessoa ao argumento"
+	result, err := useCase.Execute(context.Background(), command)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !result.Argument.ParentID.Equals(parentID) || result.Argument.AuthorID.String() != testAccountRaw {
+		t.Fatalf("reply = %+v, want the authenticated author replying to the other author", result.Argument)
+	}
+}
+
+// TestPublishArgumentRejectsDeepReplies is the P10-T05 depth proof: the
+// domain policy accepts one recursion level, so a reply to a reply is
+// refused without debiting.
+func TestPublishArgumentRejectsDeepReplies(t *testing.T) {
+	topID := mustArgumentID(t, testParentRaw)
+	replyID := mustArgumentID(t, "018f6b2a-0000-7000-8000-000000000005")
+	author := mustAccount(t, testAccountRaw)
+
+	tests := []struct {
+		name        string
+		parentDepth int
+	}{
+		{name: "reply to a reply", parentDepth: 1},
+		{name: "reply to a deep chain", parentDepth: 5},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newFakeArgumentRepo()
+			// Build a chain of test.parentDepth arguments: each one replies
+			// to the previous, so the last has exactly that depth.
+			current := &application.PublishedArgument{
+				ID:       topID,
+				ArenaID:  mustArena(t, testArenaRaw),
+				AuthorID: author,
+				Status:   "published",
+			}
+			repo.seed(t, current, "chain-0")
+			for depth := 1; depth <= test.parentDepth; depth++ {
+				parent := current
+				current = &application.PublishedArgument{
+					ID:       replyID,
+					ArenaID:  mustArena(t, testArenaRaw),
+					AuthorID: author,
+					ParentID: parent.ID,
+					Status:   "published",
+				}
+				repo.seed(t, current, fmt.Sprintf("chain-%d", depth))
+			}
+
+			wallet := newFakeInkDebit()
+			uow := newFakeUnitOfWork(repo, wallet)
+			useCase := newPublishUseCase(repo, &fakeAccountEligibility{}, &fakeArenaEligibility{}, wallet, uow)
+
+			command := publishCommand()
+			command.ParentID = current.ID.String()
+			if _, err := useCase.Execute(context.Background(), command); !errors.Is(err, application.ErrReplyDepthExceeded) {
+				t.Fatalf("error = %v, want ErrReplyDepthExceeded", err)
+			}
+			if wallet.requestCount() != 0 || uow.callCount() != 0 {
+				t.Fatal("a too-deep reply must not debit or open a transaction")
+			}
+		})
+	}
+}
+
+// TestPublishArgumentRejectsRestrictedArenaReplies proves the Arena gate is
+// enforced before the parent rules: a restricted Arena accepts no reply.
+func TestPublishArgumentRejectsRestrictedArenaReplies(t *testing.T) {
+	repo := newFakeArgumentRepo()
+	parentID := mustArgumentID(t, testParentRaw)
+	repo.seed(t, &application.PublishedArgument{
+		ID:       parentID,
+		ArenaID:  mustArena(t, testArenaRaw),
+		AuthorID: mustAccount(t, testAccountRaw),
+		Status:   "published",
+	}, "parent-key")
+
+	wallet := newFakeInkDebit()
+	uow := newFakeUnitOfWork(repo, wallet)
+	arenas := &fakeArenaEligibility{err: application.ErrArenaNotOpen}
+	useCase := newPublishUseCase(repo, &fakeAccountEligibility{}, arenas, wallet, uow)
+
+	command := publishCommand()
+	command.ParentID = testParentRaw
+	if _, err := useCase.Execute(context.Background(), command); !errors.Is(err, application.ErrArenaNotOpen) {
+		t.Fatalf("error = %v, want ErrArenaNotOpen", err)
+	}
+	if wallet.requestCount() != 0 || uow.callCount() != 0 {
+		t.Fatal("a restricted Arena must not debit or open a transaction")
+	}
+}
+
+func TestPublishArgumentRejectsInvalidReplyPolicy(t *testing.T) {
+	repo := newFakeArgumentRepo()
+	wallet := newFakeInkDebit()
+	uow := newFakeUnitOfWork(repo, wallet)
+	useCase := newPublishUseCaseWithPolicy(repo, &fakeAccountEligibility{}, &fakeArenaEligibility{}, wallet, uow,
+		domain.ReplyPolicy{Version: "", MaxDepth: 1})
+
+	if _, err := useCase.Execute(context.Background(), publishCommand()); !errors.Is(err, domain.ErrInvalidPolicy) {
+		t.Fatalf("error = %v, want ErrInvalidPolicy", err)
+	}
+	if wallet.requestCount() != 0 || uow.callCount() != 0 || repo.argumentCount() != 0 {
+		t.Fatal("an invalid policy must not touch any port")
+	}
 }

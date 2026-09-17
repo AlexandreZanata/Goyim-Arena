@@ -98,6 +98,8 @@ type ArgumentRepository interface {
 	// key, or ErrArgumentNotFound.
 	GetByAuthorAndIdempotencyKey(ctx context.Context, authorID domain.AccountID, key domain.IdempotencyKey) (*PublishedArgument, error)
 
-	// GetByID returns one argument, or ErrArgumentNotFound.
-	GetByID(ctx context.Context, argumentID domain.ArgumentID) (*PublishedArgument, error)
+	// GetParent returns the parent argument together with its derived depth
+	// (0 for a top-level argument), or ErrArgumentNotFound. Depth is walked
+	// from the chain, never denormalized.
+	GetParent(ctx context.Context, argumentID domain.ArgumentID) (*PublishedArgument, int, error)
 }

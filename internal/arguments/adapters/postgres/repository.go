@@ -135,21 +135,25 @@ func (r *Repository) GetByAuthorAndIdempotencyKey(ctx context.Context, authorID 
 	return mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time)
 }
 
-// GetByID returns one argument.
-func (r *Repository) GetByID(ctx context.Context, argumentID domain.ArgumentID) (*application.PublishedArgument, error) {
+// GetParent returns one argument together with its derived depth.
+func (r *Repository) GetParent(ctx context.Context, argumentID domain.ArgumentID) (*application.PublishedArgument, int, error) {
 	argumentParam, ok := uuidParam(argumentID.String())
 	if !ok {
-		return nil, application.ErrArgumentNotFound
+		return nil, 0, application.ErrArgumentNotFound
 	}
 
-	row, err := r.queriesFor(ctx).GetArgumentByID(ctx, argumentParam)
+	row, err := r.queriesFor(ctx).GetParentArgument(ctx, argumentParam)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, application.ErrArgumentNotFound
+			return nil, 0, application.ErrArgumentNotFound
 		}
-		return nil, fmt.Errorf("get argument by id: %w", err)
+		return nil, 0, fmt.Errorf("get parent argument: %w", err)
 	}
-	return mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time)
+	parent, err := mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time)
+	if err != nil {
+		return nil, 0, err
+	}
+	return parent, int(row.Depth), nil
 }
 
 // mapArgument rebuilds the stored projection from row fields, validating

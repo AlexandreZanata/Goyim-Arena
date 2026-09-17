@@ -168,13 +168,26 @@ func (q *Queries) GetArgumentByAuthorAndKey(ctx context.Context, arg GetArgument
 	return i, err
 }
 
-const getArgumentByID = `-- name: GetArgumentByID :one
-SELECT id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at
-FROM app.arguments
-WHERE id = $1::uuid
+const getParentArgument = `-- name: GetParentArgument :one
+WITH RECURSIVE chain AS (
+    SELECT id, parent_id, 0::integer AS depth
+    FROM app.arguments
+    WHERE id = $1::uuid
+    UNION ALL
+    SELECT parent.id, parent.parent_id, chain.depth + 1
+    FROM app.arguments parent
+    JOIN chain ON parent.id = chain.parent_id
+    WHERE chain.depth < 1000
+)
+SELECT
+    a.id, a.arena_id, a.author_id, a.parent_id, a.relation, a.content,
+    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at,
+    (SELECT max(chain.depth) FROM chain)::integer AS depth
+FROM app.arguments a
+WHERE a.id = $1::uuid
 `
 
-type GetArgumentByIDRow struct {
+type GetParentArgumentRow struct {
 	ID           pgtype.UUID
 	ArenaID      pgtype.UUID
 	AuthorID     pgtype.UUID
@@ -186,13 +199,16 @@ type GetArgumentByIDRow struct {
 	Status       string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+	Depth        int32
 }
 
-// GetArgumentByID returns one argument; replies resolve their parent
-// through it (P10-T04).
-func (q *Queries) GetArgumentByID(ctx context.Context, argumentID pgtype.UUID) (GetArgumentByIDRow, error) {
-	row := q.db.QueryRow(ctx, getArgumentByID, argumentID)
-	var i GetArgumentByIDRow
+// GetParentArgument returns one argument together with its derived depth
+// (0 for a top-level argument). Replies walk the chain through the
+// recursive CTE, so depth is never denormalized; the depth guard bounds a
+// corrupted chain defensively (P10-T05).
+func (q *Queries) GetParentArgument(ctx context.Context, argumentID pgtype.UUID) (GetParentArgumentRow, error) {
+	row := q.db.QueryRow(ctx, getParentArgument, argumentID)
+	var i GetParentArgumentRow
 	err := row.Scan(
 		&i.ID,
 		&i.ArenaID,
@@ -205,6 +221,7 @@ func (q *Queries) GetArgumentByID(ctx context.Context, argumentID pgtype.UUID) (
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Depth,
 	)
 	return i, err
 }
