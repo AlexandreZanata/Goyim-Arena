@@ -410,6 +410,87 @@ func TestRepository_GetPrivateProfileProjection(t *testing.T) {
 	}
 }
 
+func TestRepository_CommunicationPreferencesDefaultsAndAudit(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := profilespg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := createEligibleAccount(t, ctx, q, "preferences-repo@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+	if _, err := repo.CreateProfileWithUsernameHistory(ctx, accountID, mustUsername(t, "PreferenceUser"), mustLocale(t, "pt-BR"), time.Now().UTC()); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	// No stored opt-in row yet: the read resolves to the conservative default.
+	defaults, err := repo.PreferencesFor(ctx, accountID)
+	if err != nil {
+		t.Fatalf("PreferencesFor() error = %v", err)
+	}
+	if defaults.MarketingOptIn {
+		t.Fatal("marketing opt-in must default to false")
+	}
+	if defaults.InterfaceLocale.String() != domain.LocaleBrazilianPortuguese {
+		t.Errorf("InterfaceLocale = %q, want pt-BR", defaults.InterfaceLocale)
+	}
+
+	// Explicit opt-in updates the row and appends exactly one audit entry.
+	changedAt := time.Now().UTC().Truncate(time.Microsecond)
+	optedIn, err := repo.SetMarketingOptIn(ctx, accountID, true, changedAt)
+	if err != nil {
+		t.Fatalf("SetMarketingOptIn(true) error = %v", err)
+	}
+	if !optedIn.MarketingOptIn {
+		t.Fatal("marketing opt-in should be true after the explicit command")
+	}
+	reread, err := repo.PreferencesFor(ctx, accountID)
+	if err != nil {
+		t.Fatalf("PreferencesFor() after opt-in error = %v", err)
+	}
+	if !reread.MarketingOptIn {
+		t.Fatal("stored marketing opt-in should be true")
+	}
+
+	history, err := q.ListCommunicationPreferenceHistoryByAccountID(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("list history: %v", err)
+	}
+	if len(history) != 1 || !history[0].MarketingOptIn {
+		t.Fatalf("history = %+v, want one opt-in entry", history)
+	}
+	if !history[0].ChangedAt.Time.Equal(changedAt) {
+		t.Errorf("audit changed_at = %v, want %v", history[0].ChangedAt.Time, changedAt)
+	}
+
+	// Explicit opt-out updates the same row and appends a second entry.
+	if _, err := repo.SetMarketingOptIn(ctx, accountID, false, changedAt.Add(time.Minute)); err != nil {
+		t.Fatalf("SetMarketingOptIn(false) error = %v", err)
+	}
+	history, err = q.ListCommunicationPreferenceHistoryByAccountID(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("list history after opt-out: %v", err)
+	}
+	if len(history) != 2 || history[0].MarketingOptIn {
+		t.Fatalf("history = %+v, want opt-out as the newest entry", history)
+	}
+	var preferenceRows int
+	_ = pool.QueryRow(ctx, "SELECT count(*) FROM app.communication_preferences WHERE account_id = $1", acc.ID).Scan(&preferenceRows)
+	if preferenceRows != 1 {
+		t.Fatalf("preferences rows = %d, want 1 (upsert, never duplicate)", preferenceRows)
+	}
+
+	// Accounts without a profile have no preferences to read or write.
+	withoutProfile := createEligibleAccount(t, ctx, q, "preferences-missing@arena.example.com")
+	missingID := domain.AccountID(uuidString(withoutProfile.ID))
+	if _, err := repo.PreferencesFor(ctx, missingID); !errors.Is(err, application.ErrProfileNotFound) {
+		t.Fatalf("missing profile read error = %v, want ErrProfileNotFound", err)
+	}
+	if _, err := repo.SetMarketingOptIn(ctx, missingID, true, changedAt); !errors.Is(err, application.ErrProfileNotFound) {
+		t.Fatalf("missing profile write error = %v, want ErrProfileNotFound", err)
+	}
+}
+
 func TestRepository_UpdateProfileLocale(t *testing.T) {
 	ctx := context.Background()
 	testDB := dbtest.New(t)

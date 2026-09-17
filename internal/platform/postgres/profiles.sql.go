@@ -11,6 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createCommunicationPreferenceHistoryEntry = `-- name: CreateCommunicationPreferenceHistoryEntry :exec
+INSERT INTO app.communication_preference_history (account_id, marketing_opt_in, changed_at)
+VALUES ($1, $2, $3)
+`
+
+type CreateCommunicationPreferenceHistoryEntryParams struct {
+	AccountID      pgtype.UUID
+	MarketingOptIn bool
+	ChangedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error {
+	_, err := q.db.Exec(ctx, createCommunicationPreferenceHistoryEntry, arg.AccountID, arg.MarketingOptIn, arg.ChangedAt)
+	return err
+}
+
 const createProfile = `-- name: CreateProfile :one
 
 INSERT INTO app.profiles (account_id, username, username_normalized, interface_locale)
@@ -71,6 +87,32 @@ func (q *Queries) CreateUsernameHistoryEntry(ctx context.Context, arg CreateUser
 		arg.ChangedAt,
 	)
 	return err
+}
+
+const getCommunicationPreferencesByAccountID = `-- name: GetCommunicationPreferencesByAccountID :one
+SELECT p.account_id,
+       p.interface_locale,
+       COALESCE(cp.marketing_opt_in, false)::boolean AS marketing_opt_in
+FROM app.profiles p
+LEFT JOIN app.communication_preferences cp ON cp.account_id = p.account_id
+WHERE p.account_id = $1
+`
+
+type GetCommunicationPreferencesByAccountIDRow struct {
+	AccountID       pgtype.UUID
+	InterfaceLocale string
+	MarketingOptIn  bool
+}
+
+// GetCommunicationPreferencesByAccountID joins the interface locale owned by
+// app.profiles with the explicit opt-ins. A missing preferences row resolves
+// to the conservative default (marketing opt-in false), never to an implicit
+// opt-in.
+func (q *Queries) GetCommunicationPreferencesByAccountID(ctx context.Context, accountID pgtype.UUID) (GetCommunicationPreferencesByAccountIDRow, error) {
+	row := q.db.QueryRow(ctx, getCommunicationPreferencesByAccountID, accountID)
+	var i GetCommunicationPreferencesByAccountIDRow
+	err := row.Scan(&i.AccountID, &i.InterfaceLocale, &i.MarketingOptIn)
+	return i, err
 }
 
 const getLastUsernameChangeAt = `-- name: GetLastUsernameChangeAt :one
@@ -144,6 +186,38 @@ func (q *Queries) IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUI
 	var eligible pgtype.Bool
 	err := row.Scan(&eligible)
 	return eligible, err
+}
+
+const listCommunicationPreferenceHistoryByAccountID = `-- name: ListCommunicationPreferenceHistoryByAccountID :many
+SELECT id, account_id, marketing_opt_in, changed_at
+FROM app.communication_preference_history
+WHERE account_id = $1
+ORDER BY changed_at DESC, id DESC
+`
+
+func (q *Queries) ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error) {
+	rows, err := q.db.Query(ctx, listCommunicationPreferenceHistoryByAccountID, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppCommunicationPreferenceHistory{}
+	for rows.Next() {
+		var i AppCommunicationPreferenceHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.MarketingOptIn,
+			&i.ChangedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listUsernameHistoryByAccountID = `-- name: ListUsernameHistoryByAccountID :many
@@ -226,6 +300,32 @@ func (q *Queries) UpdateProfileUsername(ctx context.Context, arg UpdateProfileUs
 		&i.Username,
 		&i.UsernameNormalized,
 		&i.InterfaceLocale,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertCommunicationPreferences = `-- name: UpsertCommunicationPreferences :one
+INSERT INTO app.communication_preferences (account_id, marketing_opt_in, updated_at)
+VALUES ($1, $2, now())
+ON CONFLICT (account_id) DO UPDATE
+SET marketing_opt_in = EXCLUDED.marketing_opt_in,
+    updated_at = now()
+RETURNING account_id, marketing_opt_in, created_at, updated_at
+`
+
+type UpsertCommunicationPreferencesParams struct {
+	AccountID      pgtype.UUID
+	MarketingOptIn bool
+}
+
+func (q *Queries) UpsertCommunicationPreferences(ctx context.Context, arg UpsertCommunicationPreferencesParams) (AppCommunicationPreference, error) {
+	row := q.db.QueryRow(ctx, upsertCommunicationPreferences, arg.AccountID, arg.MarketingOptIn)
+	var i AppCommunicationPreference
+	err := row.Scan(
+		&i.AccountID,
+		&i.MarketingOptIn,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

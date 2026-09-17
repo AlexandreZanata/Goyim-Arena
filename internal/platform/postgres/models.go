@@ -19,6 +19,23 @@ type AppAccount struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+// Explicit communication opt-ins per account; marketing defaults to false and is never opted in implicitly
+type AppCommunicationPreference struct {
+	AccountID pgtype.UUID
+	// Explicit marketing consent; false by default and only the account owner may change it
+	MarketingOptIn bool
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
+// Append-only audit trail of every explicit communication preference change
+type AppCommunicationPreferenceHistory struct {
+	ID             pgtype.UUID
+	AccountID      pgtype.UUID
+	MarketingOptIn bool
+	ChangedAt      pgtype.Timestamptz
+}
+
 // Single-use cryptographic token hashes for email verification
 type AppEmailVerificationToken struct {
 	ID        pgtype.UUID

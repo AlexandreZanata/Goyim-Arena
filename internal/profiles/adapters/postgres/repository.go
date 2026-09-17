@@ -31,9 +31,10 @@ type Repository struct {
 }
 
 var (
-	_ application.ProfileRepository      = (*Repository)(nil)
-	_ application.ProfileQueryRepository = (*Repository)(nil)
-	_ application.AccountEligibility     = (*Repository)(nil)
+	_ application.ProfileRepository                  = (*Repository)(nil)
+	_ application.ProfileQueryRepository             = (*Repository)(nil)
+	_ application.CommunicationPreferencesRepository = (*Repository)(nil)
+	_ application.AccountEligibility                 = (*Repository)(nil)
 )
 
 // NewRepository creates a PostgreSQL repository adapter for profiles.
@@ -232,6 +233,83 @@ func (r *Repository) GetPrivateProfileByAccountID(ctx context.Context, accountID
 		InterfaceLocale: row.InterfaceLocale,
 		CreatedAt:       row.CreatedAt.Time.UTC(),
 		UpdatedAt:       row.UpdatedAt.Time.UTC(),
+	}, nil
+}
+
+// PreferencesFor returns the explicit communication preferences of the
+// account: the interface locale owned by app.profiles joined with the stored
+// opt-ins. A missing opt-in row resolves to the conservative default (false).
+func (r *Repository) PreferencesFor(ctx context.Context, accountID domain.AccountID) (*application.CommunicationPreferences, error) {
+	pgUUID, err := pgUUIDFromAccountID(accountID)
+	if err != nil {
+		return nil, application.ErrProfileNotFound
+	}
+
+	row, err := r.queries.GetCommunicationPreferencesByAccountID(ctx, pgUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrProfileNotFound
+		}
+		return nil, fmt.Errorf("get communication preferences: %w", err)
+	}
+	return mapCommunicationPreferences(row.AccountID, row.InterfaceLocale, row.MarketingOptIn)
+}
+
+// SetMarketingOptIn atomically upserts the explicit marketing consent and
+// appends its audit entry.
+func (r *Repository) SetMarketingOptIn(ctx context.Context, accountID domain.AccountID, optIn bool, changedAt time.Time) (*application.CommunicationPreferences, error) {
+	pgUUID, err := pgUUIDFromAccountID(accountID)
+	if err != nil {
+		return nil, application.ErrProfileNotFound
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := r.queries.WithTx(tx)
+
+	if _, err := qtx.UpsertCommunicationPreferences(ctx, platformpg.UpsertCommunicationPreferencesParams{
+		AccountID:      pgUUID,
+		MarketingOptIn: optIn,
+	}); err != nil {
+		return nil, fmt.Errorf("upsert communication preferences: %w", err)
+	}
+
+	if err := qtx.CreateCommunicationPreferenceHistoryEntry(ctx, platformpg.CreateCommunicationPreferenceHistoryEntryParams{
+		AccountID:      pgUUID,
+		MarketingOptIn: optIn,
+		ChangedAt:      timestamptz(changedAt),
+	}); err != nil {
+		return nil, fmt.Errorf("create communication preference history entry: %w", err)
+	}
+
+	row, err := qtx.GetCommunicationPreferencesByAccountID(ctx, pgUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrProfileNotFound
+		}
+		return nil, fmt.Errorf("reload communication preferences: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return mapCommunicationPreferences(row.AccountID, row.InterfaceLocale, row.MarketingOptIn)
+}
+
+func mapCommunicationPreferences(accountID pgtype.UUID, interfaceLocale string, marketingOptIn bool) (*application.CommunicationPreferences, error) {
+	locale, err := domain.ParseLocale(interfaceLocale)
+	if err != nil {
+		return nil, fmt.Errorf("stored interface locale is invalid: %w", err)
+	}
+	return &application.CommunicationPreferences{
+		AccountID:       domain.AccountID(uuidToString(accountID)),
+		InterfaceLocale: locale,
+		MarketingOptIn:  marketingOptIn,
 	}, nil
 }
 

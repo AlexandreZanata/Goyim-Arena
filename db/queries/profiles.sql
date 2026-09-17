@@ -60,3 +60,33 @@ WHERE account_id = $1;
 SELECT (status = 'active' AND email_verified_at IS NOT NULL) AS eligible
 FROM app.accounts
 WHERE id = $1;
+
+-- GetCommunicationPreferencesByAccountID joins the interface locale owned by
+-- app.profiles with the explicit opt-ins. A missing preferences row resolves
+-- to the conservative default (marketing opt-in false), never to an implicit
+-- opt-in.
+-- name: GetCommunicationPreferencesByAccountID :one
+SELECT p.account_id,
+       p.interface_locale,
+       COALESCE(cp.marketing_opt_in, false)::boolean AS marketing_opt_in
+FROM app.profiles p
+LEFT JOIN app.communication_preferences cp ON cp.account_id = p.account_id
+WHERE p.account_id = $1;
+
+-- name: UpsertCommunicationPreferences :one
+INSERT INTO app.communication_preferences (account_id, marketing_opt_in, updated_at)
+VALUES ($1, $2, now())
+ON CONFLICT (account_id) DO UPDATE
+SET marketing_opt_in = EXCLUDED.marketing_opt_in,
+    updated_at = now()
+RETURNING account_id, marketing_opt_in, created_at, updated_at;
+
+-- name: CreateCommunicationPreferenceHistoryEntry :exec
+INSERT INTO app.communication_preference_history (account_id, marketing_opt_in, changed_at)
+VALUES ($1, $2, $3);
+
+-- name: ListCommunicationPreferenceHistoryByAccountID :many
+SELECT id, account_id, marketing_opt_in, changed_at
+FROM app.communication_preference_history
+WHERE account_id = $1
+ORDER BY changed_at DESC, id DESC;

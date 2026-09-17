@@ -13,6 +13,7 @@ import (
 type Querier interface {
 	// Identity and authentication queries for the PostgreSQL platform adapter.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (AppAccount, error)
+	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
 	CreatePasswordCredential(ctx context.Context, arg CreatePasswordCredentialParams) error
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (AppPasswordResetToken, error)
@@ -34,6 +35,11 @@ type Querier interface {
 	GetActiveEmailVerificationToken(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
 	GetActivePasswordResetToken(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetActiveSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
+	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
+	// app.profiles with the explicit opt-ins. A missing preferences row resolves
+	// to the conservative default (marketing opt-in false), never to an implicit
+	// opt-in.
+	GetCommunicationPreferencesByAccountID(ctx context.Context, accountID pgtype.UUID) (GetCommunicationPreferencesByAccountIDRow, error)
 	GetEmailVerificationTokenByHash(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
 	// Health metadata and connectivity queries for the PostgreSQL platform adapter.
 	// GetHealthMetadata retrieves the latest applied migration metadata from app.schema_metadata.
@@ -55,6 +61,7 @@ type Querier interface {
 	// needs for negative authorization: the account exists, is active and has a
 	// verified email. It never reads email, credentials or payment identifiers.
 	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
+	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
@@ -69,6 +76,7 @@ type Querier interface {
 	UpdateProfileLocale(ctx context.Context, arg UpdateProfileLocaleParams) (AppProfile, error)
 	UpdateProfileUsername(ctx context.Context, arg UpdateProfileUsernameParams) (AppProfile, error)
 	UpdateSessionLastSeen(ctx context.Context, id pgtype.UUID) error
+	UpsertCommunicationPreferences(ctx context.Context, arg UpsertCommunicationPreferencesParams) (AppCommunicationPreference, error)
 }
 
 var _ Querier = (*Queries)(nil)
