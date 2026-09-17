@@ -64,6 +64,10 @@ type Querier interface {
 	// to the conservative default (marketing opt-in false), never to an implicit
 	// opt-in.
 	GetCommunicationPreferencesByAccountID(ctx context.Context, accountID pgtype.UUID) (GetCommunicationPreferencesByAccountIDRow, error)
+	// GetDerivedWalletBalance recomputes both bucket balances exclusively from
+	// the append-only ledger: the source of truth for the cached projection
+	// (P06-T05, REQ-WAL-01).
+	GetDerivedWalletBalance(ctx context.Context, accountID pgtype.UUID) (GetDerivedWalletBalanceRow, error)
 	GetEmailVerificationTokenByHash(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
 	// Health metadata and connectivity queries for the PostgreSQL platform adapter.
 	// GetHealthMetadata retrieves the latest applied migration metadata from app.schema_metadata.
@@ -93,6 +97,10 @@ type Querier interface {
 	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
+	// ListWalletStatementPage returns one keyset-paginated page of the account
+	// statement, newest first. NULL after_* parameters select the first page;
+	// the (created_at, id) tuple comparison never duplicates or skips rows.
+	ListWalletStatementPage(ctx context.Context, arg ListWalletStatementPageParams) ([]ListWalletStatementPageRow, error)
 	ListWalletTransactionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListWalletTransactionsByAccountRow, error)
 	ListWalletTransactionsByOperationID(ctx context.Context, operationID pgtype.UUID) ([]AppWalletTransaction, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)

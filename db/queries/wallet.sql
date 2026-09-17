@@ -73,6 +73,33 @@ FROM app.wallet_transactions
 WHERE operation_id = $1
 ORDER BY bucket;
 
+-- GetDerivedWalletBalance recomputes both bucket balances exclusively from
+-- the append-only ledger: the source of truth for the cached projection
+-- (P06-T05, REQ-WAL-01).
+-- name: GetDerivedWalletBalance :one
+SELECT
+    COALESCE(sum(t.amount) FILTER (WHERE t.bucket = 'FREE_INK'), 0)::bigint AS balance_free,
+    COALESCE(sum(t.amount) FILTER (WHERE t.bucket = 'PURCHASED_INK'), 0)::bigint AS balance_purchased
+FROM app.wallet_transactions t
+JOIN app.wallet_operations o ON o.id = t.operation_id
+WHERE o.account_id = $1;
+
+-- ListWalletStatementPage returns one keyset-paginated page of the account
+-- statement, newest first. NULL after_* parameters select the first page;
+-- the (created_at, id) tuple comparison never duplicates or skips rows.
+-- name: ListWalletStatementPage :many
+SELECT t.id, t.operation_id, t.bucket, t.amount, t.created_at,
+       o.operation_type, o.reference
+FROM app.wallet_transactions t
+JOIN app.wallet_operations o ON o.id = t.operation_id
+WHERE o.account_id = sqlc.arg(account_id)
+  AND (
+      sqlc.arg(after_created_at)::timestamptz IS NULL
+      OR (t.created_at, t.id) < (sqlc.arg(after_created_at)::timestamptz, sqlc.arg(after_id)::uuid)
+  )
+ORDER BY t.created_at DESC, t.id DESC
+LIMIT sqlc.arg(page_limit);
+
 -- name: CreateWalletOperation :one
 INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference)
 VALUES ($1, $2, $3, $4)

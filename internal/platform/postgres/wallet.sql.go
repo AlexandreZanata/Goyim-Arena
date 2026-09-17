@@ -228,6 +228,30 @@ func (q *Queries) EnsureWalletAccount(ctx context.Context, accountID pgtype.UUID
 	return err
 }
 
+const getDerivedWalletBalance = `-- name: GetDerivedWalletBalance :one
+SELECT
+    COALESCE(sum(t.amount) FILTER (WHERE t.bucket = 'FREE_INK'), 0)::bigint AS balance_free,
+    COALESCE(sum(t.amount) FILTER (WHERE t.bucket = 'PURCHASED_INK'), 0)::bigint AS balance_purchased
+FROM app.wallet_transactions t
+JOIN app.wallet_operations o ON o.id = t.operation_id
+WHERE o.account_id = $1
+`
+
+type GetDerivedWalletBalanceRow struct {
+	BalanceFree      int64
+	BalancePurchased int64
+}
+
+// GetDerivedWalletBalance recomputes both bucket balances exclusively from
+// the append-only ledger: the source of truth for the cached projection
+// (P06-T05, REQ-WAL-01).
+func (q *Queries) GetDerivedWalletBalance(ctx context.Context, accountID pgtype.UUID) (GetDerivedWalletBalanceRow, error) {
+	row := q.db.QueryRow(ctx, getDerivedWalletBalance, accountID)
+	var i GetDerivedWalletBalanceRow
+	err := row.Scan(&i.BalanceFree, &i.BalancePurchased)
+	return i, err
+}
+
 const getWalletAccount = `-- name: GetWalletAccount :one
 SELECT account_id, balance_free, balance_purchased, created_at, updated_at
 FROM app.wallet_accounts
@@ -288,6 +312,73 @@ func (q *Queries) GetWalletOperationByIdempotencyKey(ctx context.Context, idempo
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listWalletStatementPage = `-- name: ListWalletStatementPage :many
+SELECT t.id, t.operation_id, t.bucket, t.amount, t.created_at,
+       o.operation_type, o.reference
+FROM app.wallet_transactions t
+JOIN app.wallet_operations o ON o.id = t.operation_id
+WHERE o.account_id = $1
+  AND (
+      $2::timestamptz IS NULL
+      OR (t.created_at, t.id) < ($2::timestamptz, $3::uuid)
+  )
+ORDER BY t.created_at DESC, t.id DESC
+LIMIT $4
+`
+
+type ListWalletStatementPageParams struct {
+	AccountID      pgtype.UUID
+	AfterCreatedAt pgtype.Timestamptz
+	AfterID        pgtype.UUID
+	PageLimit      int32
+}
+
+type ListWalletStatementPageRow struct {
+	ID            pgtype.UUID
+	OperationID   pgtype.UUID
+	Bucket        string
+	Amount        int64
+	CreatedAt     pgtype.Timestamptz
+	OperationType string
+	Reference     string
+}
+
+// ListWalletStatementPage returns one keyset-paginated page of the account
+// statement, newest first. NULL after_* parameters select the first page;
+// the (created_at, id) tuple comparison never duplicates or skips rows.
+func (q *Queries) ListWalletStatementPage(ctx context.Context, arg ListWalletStatementPageParams) ([]ListWalletStatementPageRow, error) {
+	rows, err := q.db.Query(ctx, listWalletStatementPage,
+		arg.AccountID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWalletStatementPageRow{}
+	for rows.Next() {
+		var i ListWalletStatementPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OperationID,
+			&i.Bucket,
+			&i.Amount,
+			&i.CreatedAt,
+			&i.OperationType,
+			&i.Reference,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listWalletTransactionsByAccount = `-- name: ListWalletTransactionsByAccount :many

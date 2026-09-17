@@ -2,8 +2,11 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -817,4 +820,221 @@ func TestRepository_ApplyDebitConcurrentNoDoubleSpend(t *testing.T) {
 		t.Fatal("no successful debit produced an operation")
 	}
 	assertAllocation(t, winner.Allocation, 10000, 0)
+}
+
+// TestRepository_DerivedBalanceMatchesProjectionAfterRandomSequence drives a
+// deterministic pseudo-random mix of credits and debits and proves the
+// ledger-derived balance equals both the SQL sum and the cached projection.
+func TestRepository_DerivedBalanceMatchesProjectionAfterRandomSequence(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "balance-derived@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	rng := rand.New(rand.NewSource(42))
+	var expectedFree, expectedPurchased int64
+	operations := 0
+
+	for i := 0; i < 60; i++ {
+		key := fmt.Sprintf("random-sequence:%d", i)
+		switch rng.Intn(3) {
+		case 0:
+			amount := int64(rng.Intn(5000) + 1)
+			if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+				t, accountID, domain.BucketFree, domain.OperationCreditFree, amount, fmt.Sprintf("free:%d", i), key,
+			)); err != nil {
+				t.Fatalf("free credit %d error = %v", i, err)
+			}
+			expectedFree += amount
+		case 1:
+			amount := int64(rng.Intn(5000) + 1)
+			if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+				t, accountID, domain.BucketPurchased, domain.OperationCreditPurchase, amount, fmt.Sprintf("stripe:evt_%d", i), key,
+			)); err != nil {
+				t.Fatalf("purchased credit %d error = %v", i, err)
+			}
+			expectedPurchased += amount
+		case 2:
+			total := expectedFree + expectedPurchased
+			if total == 0 {
+				continue
+			}
+			amount := int64(rng.Intn(int(total)) + 1)
+			if _, err := repo.ApplyDebit(ctx, mustDebitRequest(
+				t, accountID, domain.OperationDebitArgument, amount, fmt.Sprintf("argument:%d", i), key,
+			)); err != nil {
+				t.Fatalf("debit %d error = %v", i, err)
+			}
+			if amount <= expectedFree {
+				expectedFree -= amount
+			} else {
+				expectedPurchased -= amount - expectedFree
+				expectedFree = 0
+			}
+		}
+		operations++
+	}
+
+	if expectedFree < 0 || expectedPurchased < 0 {
+		t.Fatalf("test model produced negative expectation: %d/%d", expectedFree, expectedPurchased)
+	}
+
+	derived, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, accountID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if derived.Free.Int64() != expectedFree || derived.Purchased.Int64() != expectedPurchased {
+		t.Fatalf("derived balance = %d/%d, want %d/%d",
+			derived.Free.Int64(), derived.Purchased.Int64(), expectedFree, expectedPurchased)
+	}
+
+	cached, err := q.GetWalletAccount(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("cached projection error = %v", err)
+	}
+	if cached.BalanceFree != derived.Free.Int64() || cached.BalancePurchased != derived.Purchased.Int64() {
+		t.Fatalf("cached projection = %d/%d, derived = %d/%d (projection drifted from the ledger)",
+			cached.BalanceFree, cached.BalancePurchased, derived.Free.Int64(), derived.Purchased.Int64())
+	}
+
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", acc.ID); got != operations {
+		t.Fatalf("operations = %d, want %d", got, operations)
+	}
+}
+
+// TestRepository_StatementIsPaginatedAndOwnerScoped proves the cursor pages
+// never duplicate or skip entries and that the account filter is independent
+// of the cursor: another account's history is unreachable even with a
+// syntactically valid cursor.
+func TestRepository_StatementIsPaginatedAndOwnerScoped(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	owner := mustWalletAccount(t, ctx, q, "statement-owner@arena.example.com")
+	other := mustWalletAccount(t, ctx, q, "statement-other@arena.example.com")
+	ownerID := domain.AccountID(uuidString(owner.ID))
+	otherID := domain.AccountID(uuidString(other.ID))
+
+	const ownerEntries = 12
+	const otherEntries = 5
+
+	// Interleave both histories so the owner cursor positions itself inside
+	// the other account's timeline: a foreign cursor must filter, never
+	// widen, the account scope.
+	for i := 0; i < ownerEntries; i++ {
+		bucket := domain.BucketFree
+		operationType := domain.OperationCreditFree
+		reference := fmt.Sprintf("owner-reference:%d", i)
+		if i%2 == 1 {
+			bucket = domain.BucketPurchased
+			operationType = domain.OperationCreditPurchase
+		}
+		if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+			t, ownerID, bucket, operationType, int64(100+i), reference, fmt.Sprintf("owner-key:%d", i),
+		)); err != nil {
+			t.Fatalf("owner credit %d error = %v", i, err)
+		}
+
+		if i < otherEntries {
+			if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+				t, otherID, domain.BucketFree, domain.OperationCreditFree, 50,
+				fmt.Sprintf("other-reference:%d", i), fmt.Sprintf("other-key:%d", i),
+			)); err != nil {
+				t.Fatalf("other credit %d error = %v", i, err)
+			}
+		}
+	}
+
+	useCase := application.NewGetWalletStatementUseCase(repo)
+	seen := make(map[string]bool, ownerEntries)
+	cursor := ""
+	pages := 0
+	for {
+		statement, err := useCase.Execute(ctx, ownerID, cursor, 5)
+		if err != nil {
+			t.Fatalf("statement page %d error = %v", pages, err)
+		}
+		pages++
+		for _, entry := range statement.Entries {
+			if entry.TransactionID == "" || entry.OperationID == "" {
+				t.Fatalf("entry without identifiers: %+v", entry)
+			}
+			if seen[entry.TransactionID] {
+				t.Fatalf("duplicate entry %q across pages", entry.TransactionID)
+			}
+			seen[entry.TransactionID] = true
+			if !entry.OperationType.IsValid() || !entry.Bucket.IsValid() || entry.Reference.IsZero() {
+				t.Fatalf("entry with invalid decoded values: %+v", entry)
+			}
+			if strings.HasPrefix(entry.Reference.String(), "other-reference:") {
+				t.Fatalf("SECURITY VIOLATION: owner statement leaked %q", entry.Reference)
+			}
+		}
+		if statement.NextCursor == "" {
+			break
+		}
+		cursor = statement.NextCursor
+		if pages > 10 {
+			t.Fatal("pagination did not terminate")
+		}
+	}
+	if len(seen) != ownerEntries {
+		t.Fatalf("owner entries delivered = %d, want %d", len(seen), ownerEntries)
+	}
+	if pages < 2 {
+		t.Fatalf("pages = %d, want multiple pages for limit 5 and %d entries", pages, ownerEntries)
+	}
+
+	otherStatement, err := useCase.Execute(ctx, otherID, "", 100)
+	if err != nil {
+		t.Fatalf("other statement error = %v", err)
+	}
+	if len(otherStatement.Entries) != otherEntries {
+		t.Fatalf("other entries = %d, want %d", len(otherStatement.Entries), otherEntries)
+	}
+	for _, entry := range otherStatement.Entries {
+		if strings.HasPrefix(entry.Reference.String(), "owner-reference:") {
+			t.Fatalf("SECURITY VIOLATION: other statement leaked %q", entry.Reference)
+		}
+	}
+
+	// A cursor positions the window; it never changes the account scope.
+	foreignCursor := firstCursor(t, useCase, ctx, ownerID)
+	foreign, err := useCase.Execute(ctx, otherID, foreignCursor, 100)
+	if err != nil {
+		t.Fatalf("foreign cursor error = %v", err)
+	}
+	if len(foreign.Entries) == 0 {
+		t.Fatal("foreign cursor filtered every entry: the scope assertion would pass vacuously")
+	}
+	for _, entry := range foreign.Entries {
+		if strings.HasPrefix(entry.Reference.String(), "owner-reference:") {
+			t.Fatalf("SECURITY VIOLATION: foreign cursor leaked %q", entry.Reference)
+		}
+	}
+
+	// Malformed cursors are rejected, never reflected.
+	if _, err := useCase.Execute(ctx, ownerID, "%%not-base64%%", 5); !errors.Is(err, application.ErrInvalidCursor) {
+		t.Fatalf("malformed cursor error = %v, want ErrInvalidCursor", err)
+	}
+	badUUID := base64.RawURLEncoding.EncodeToString([]byte("v1|2026-09-17T12:00:00Z|not-a-uuid"))
+	if _, err := useCase.Execute(ctx, ownerID, badUUID, 5); !errors.Is(err, application.ErrInvalidCursor) {
+		t.Fatalf("bad uuid cursor error = %v, want ErrInvalidCursor", err)
+	}
+}
+
+func firstCursor(t *testing.T, useCase *application.GetWalletStatementUseCase, ctx context.Context, accountID domain.AccountID) string {
+	t.Helper()
+	statement, err := useCase.Execute(ctx, accountID, "", 1)
+	if err != nil {
+		t.Fatalf("first cursor error = %v", err)
+	}
+	return statement.NextCursor
 }

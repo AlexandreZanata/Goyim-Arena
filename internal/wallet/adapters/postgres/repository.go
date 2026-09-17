@@ -27,8 +27,9 @@ type Repository struct {
 }
 
 var (
-	_ application.CreditRepository = (*Repository)(nil)
-	_ application.DebitRepository  = (*Repository)(nil)
+	_ application.CreditRepository      = (*Repository)(nil)
+	_ application.DebitRepository       = (*Repository)(nil)
+	_ application.WalletQueryRepository = (*Repository)(nil)
 )
 
 // NewRepository creates a PostgreSQL repository adapter for the wallet.
@@ -292,6 +293,86 @@ func reconstructAllocation(ctx context.Context, qtx *platformpg.Queries, operati
 	}
 
 	return domain.NewAllocation(fromFree, fromPurchased), nil
+}
+
+// DerivedBalance recomputes both bucket balances from the append-only
+// ledger: the projection is never trusted as the source of truth.
+func (r *Repository) DerivedBalance(ctx context.Context, accountID domain.AccountID) (*application.WalletBalance, error) {
+	pgUUID, err := pgUUIDFromAccountID(accountID)
+	if err != nil {
+		return nil, fmt.Errorf("derived balance: %w", err)
+	}
+
+	row, err := r.queries.GetDerivedWalletBalance(ctx, pgUUID)
+	if err != nil {
+		return nil, fmt.Errorf("get derived wallet balance: %w", err)
+	}
+
+	free, err := domain.NewInk(row.BalanceFree)
+	if err != nil {
+		return nil, fmt.Errorf("derived free balance is invalid: %w", err)
+	}
+	purchased, err := domain.NewInk(row.BalancePurchased)
+	if err != nil {
+		return nil, fmt.Errorf("derived purchased balance is invalid: %w", err)
+	}
+
+	return &application.WalletBalance{Free: free, Purchased: purchased}, nil
+}
+
+// ListStatementPage returns one keyset page of the account statement, newest
+// first. The account filter is applied on every page; the cursor only
+// positions the window inside that account's own history.
+func (r *Repository) ListStatementPage(ctx context.Context, accountID domain.AccountID, after *application.StatementPosition, limit int) ([]application.StatementEntry, error) {
+	pgUUID, err := pgUUIDFromAccountID(accountID)
+	if err != nil {
+		return nil, fmt.Errorf("list statement page: %w", err)
+	}
+
+	params := platformpg.ListWalletStatementPageParams{
+		AccountID: pgUUID,
+		PageLimit: int32(limit),
+	}
+	if after != nil {
+		var afterID pgtype.UUID
+		if err := afterID.Scan(after.TransactionID); err != nil {
+			return nil, application.ErrInvalidCursor
+		}
+		params.AfterCreatedAt = pgtype.Timestamptz{Time: after.CreatedAt, Valid: true}
+		params.AfterID = afterID
+	}
+
+	rows, err := r.queries.ListWalletStatementPage(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("list wallet statement page: %w", err)
+	}
+
+	entries := make([]application.StatementEntry, 0, len(rows))
+	for _, row := range rows {
+		operationType, err := domain.ParseOperationType(row.OperationType)
+		if err != nil {
+			return nil, fmt.Errorf("stored operation type is invalid: %w", err)
+		}
+		reference, err := domain.ParseReference(row.Reference)
+		if err != nil {
+			return nil, fmt.Errorf("stored reference is invalid: %w", err)
+		}
+		bucket, err := domain.ParseBucket(row.Bucket)
+		if err != nil {
+			return nil, fmt.Errorf("stored bucket is invalid: %w", err)
+		}
+
+		entries = append(entries, application.StatementEntry{
+			TransactionID: uuidToString(row.ID),
+			OperationID:   uuidToString(row.OperationID),
+			OperationType: operationType,
+			Reference:     reference,
+			Bucket:        bucket,
+			Amount:        row.Amount,
+			CreatedAt:     row.CreatedAt.Time.UTC(),
+		})
+	}
+	return entries, nil
 }
 
 // creditBalance adds the signed delta to the balance projection of the

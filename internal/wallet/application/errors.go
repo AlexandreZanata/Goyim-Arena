@@ -6,7 +6,11 @@ import "errors"
 
 var (
 	// ErrIdempotencyMismatch indicates the idempotency key was already used
-	// by a different account. Replaying another account's operation is
+	// by another account. Replaying another account's operation is
 	// refused instead of leaking its reference.
 	ErrIdempotencyMismatch = errors.New("application: idempotency key was already used by another account")
+
+	// ErrInvalidCursor indicates a malformed, foreign or version-mismatched
+	// statement cursor. Unknown values are never reflected back to callers.
+	ErrInvalidCursor = errors.New("application: statement cursor is invalid")
 )
