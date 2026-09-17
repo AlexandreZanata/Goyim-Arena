@@ -18,6 +18,24 @@ jobs:
   verify:
     name: Foundation verification
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18.4
+        env:
+          POSTGRES_USER: arena
+          POSTGRES_PASSWORD: arena-local-dev
+          POSTGRES_DB: arena
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+          POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U arena -d arena"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      ARENA_DATABASE_URL: postgres://arena:arena-local-dev@127.0.0.1:54329/arena?sslmode=disable
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,10 +44,8 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
-          # The Go module currently has zero external dependencies (there is
-          # no go.sum yet), so module caching would fail on the missing
-          # dependency file. Enable it when go.sum appears.
-          cache: false
+          cache: true
+          cache-dependency-path: go.sum
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -37,6 +53,12 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      # Keep the generator version aligned with the checked-in file headers.
+      # A fixed version prevents a new sqlc release from changing generated
+      # code or CI behavior without a reviewed repository change.
+      - name: Install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0
 
       - name: Verify
         run: make verify
