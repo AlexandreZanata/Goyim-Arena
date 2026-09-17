@@ -29,7 +29,7 @@ VALUES (
     $9::timestamptz
 )
 ON CONFLICT (author_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-RETURNING id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at
+RETURNING id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at, withdrawn_at
 `
 
 type CreateArgumentParams struct {
@@ -56,6 +56,7 @@ type CreateArgumentRow struct {
 	Status       string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+	WithdrawnAt  pgtype.Timestamptz
 }
 
 // CreateArgument inserts one argument under the author idempotency key. The
@@ -86,6 +87,7 @@ func (q *Queries) CreateArgument(ctx context.Context, arg CreateArgumentParams) 
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WithdrawnAt,
 	)
 	return i, err
 }
@@ -122,7 +124,7 @@ func (q *Queries) CreateArgumentSource(ctx context.Context, arg CreateArgumentSo
 }
 
 const getArgumentByAuthorAndKey = `-- name: GetArgumentByAuthorAndKey :one
-SELECT id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at
+SELECT id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at, withdrawn_at
 FROM app.arguments
 WHERE author_id = $1::uuid
   AND idempotency_key = $2::text
@@ -145,6 +147,7 @@ type GetArgumentByAuthorAndKeyRow struct {
 	Status       string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+	WithdrawnAt  pgtype.Timestamptz
 }
 
 // GetArgumentByAuthorAndKey resolves the argument recorded under one
@@ -164,6 +167,56 @@ func (q *Queries) GetArgumentByAuthorAndKey(ctx context.Context, arg GetArgument
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WithdrawnAt,
+	)
+	return i, err
+}
+
+const getArgumentForAuthor = `-- name: GetArgumentForAuthor :one
+SELECT id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at, withdrawn_at
+FROM app.arguments
+WHERE id = $1::uuid
+  AND author_id = $2::uuid
+`
+
+type GetArgumentForAuthorParams struct {
+	ArgumentID pgtype.UUID
+	AuthorID   pgtype.UUID
+}
+
+type GetArgumentForAuthorRow struct {
+	ID           pgtype.UUID
+	ArenaID      pgtype.UUID
+	AuthorID     pgtype.UUID
+	ParentID     pgtype.UUID
+	Relation     string
+	Content      string
+	ContentHash  string
+	GraphemeCost int32
+	Status       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	WithdrawnAt  pgtype.Timestamptz
+}
+
+// GetArgumentForAuthor returns one argument scoped to its author. A foreign
+// argument is deliberately indistinguishable from a missing one (P10-T06).
+func (q *Queries) GetArgumentForAuthor(ctx context.Context, arg GetArgumentForAuthorParams) (GetArgumentForAuthorRow, error) {
+	row := q.db.QueryRow(ctx, getArgumentForAuthor, arg.ArgumentID, arg.AuthorID)
+	var i GetArgumentForAuthorRow
+	err := row.Scan(
+		&i.ID,
+		&i.ArenaID,
+		&i.AuthorID,
+		&i.ParentID,
+		&i.Relation,
+		&i.Content,
+		&i.ContentHash,
+		&i.GraphemeCost,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WithdrawnAt,
 	)
 	return i, err
 }
@@ -181,7 +234,7 @@ WITH RECURSIVE chain AS (
 )
 SELECT
     a.id, a.arena_id, a.author_id, a.parent_id, a.relation, a.content,
-    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at,
+    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at, a.withdrawn_at,
     (SELECT max(chain.depth) FROM chain)::integer AS depth
 FROM app.arguments a
 WHERE a.id = $1::uuid
@@ -199,6 +252,7 @@ type GetParentArgumentRow struct {
 	Status       string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+	WithdrawnAt  pgtype.Timestamptz
 	Depth        int32
 }
 
@@ -221,7 +275,63 @@ func (q *Queries) GetParentArgument(ctx context.Context, argumentID pgtype.UUID)
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.WithdrawnAt,
 		&i.Depth,
+	)
+	return i, err
+}
+
+const withdrawArgument = `-- name: WithdrawArgument :one
+UPDATE app.arguments
+SET status = 'withdrawn',
+    withdrawn_at = COALESCE(withdrawn_at, $1::timestamptz),
+    updated_at = $1::timestamptz
+WHERE id = $2::uuid
+  AND author_id = $3::uuid
+  AND status = 'published'
+RETURNING id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at, withdrawn_at
+`
+
+type WithdrawArgumentParams struct {
+	WithdrawnAt pgtype.Timestamptz
+	ArgumentID  pgtype.UUID
+	AuthorID    pgtype.UUID
+}
+
+type WithdrawArgumentRow struct {
+	ID           pgtype.UUID
+	ArenaID      pgtype.UUID
+	AuthorID     pgtype.UUID
+	ParentID     pgtype.UUID
+	Relation     string
+	Content      string
+	ContentHash  string
+	GraphemeCost int32
+	Status       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	WithdrawnAt  pgtype.Timestamptz
+}
+
+// WithdrawArgument moves a published argument out of the display under the
+// author scope, recording the withdrawal instant once. Zero rows mean the
+// status moved concurrently: the caller re-reads and resolves (P10-T06).
+func (q *Queries) WithdrawArgument(ctx context.Context, arg WithdrawArgumentParams) (WithdrawArgumentRow, error) {
+	row := q.db.QueryRow(ctx, withdrawArgument, arg.WithdrawnAt, arg.ArgumentID, arg.AuthorID)
+	var i WithdrawArgumentRow
+	err := row.Scan(
+		&i.ID,
+		&i.ArenaID,
+		&i.AuthorID,
+		&i.ParentID,
+		&i.Relation,
+		&i.Content,
+		&i.ContentHash,
+		&i.GraphemeCost,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WithdrawnAt,
 	)
 	return i, err
 }

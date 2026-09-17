@@ -84,7 +84,7 @@ func (r *Repository) CreateArgument(ctx context.Context, request application.Cre
 		return nil, false, fmt.Errorf("create argument: %w", err)
 	}
 
-	created, err := mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time)
+	created, err := mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time, row.WithdrawnAt)
 	if err != nil {
 		return nil, false, err
 	}
@@ -132,7 +132,7 @@ func (r *Repository) GetByAuthorAndIdempotencyKey(ctx context.Context, authorID 
 		}
 		return nil, fmt.Errorf("get argument by key: %w", err)
 	}
-	return mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time)
+	return mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time, row.WithdrawnAt)
 }
 
 // GetParent returns one argument together with its derived depth.
@@ -149,11 +149,66 @@ func (r *Repository) GetParent(ctx context.Context, argumentID domain.ArgumentID
 		}
 		return nil, 0, fmt.Errorf("get parent argument: %w", err)
 	}
-	parent, err := mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time)
+	parent, err := mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time, row.WithdrawnAt)
 	if err != nil {
 		return nil, 0, err
 	}
 	return parent, int(row.Depth), nil
+}
+
+// GetForAuthor returns one argument scoped to its author.
+func (r *Repository) GetForAuthor(ctx context.Context, argumentID domain.ArgumentID, authorID domain.AccountID) (*application.PublishedArgument, error) {
+	argumentParam, ok := uuidParam(argumentID.String())
+	if !ok {
+		return nil, application.ErrArgumentNotFound
+	}
+	authorParam, ok := uuidParam(authorID.String())
+	if !ok {
+		return nil, application.ErrArgumentNotFound
+	}
+
+	row, err := r.queriesFor(ctx).GetArgumentForAuthor(ctx, platformpg.GetArgumentForAuthorParams{
+		ArgumentID: argumentParam,
+		AuthorID:   authorParam,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrArgumentNotFound
+		}
+		return nil, fmt.Errorf("get argument for author: %w", err)
+	}
+	return mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time, row.WithdrawnAt)
+}
+
+// WithdrawArgument moves a published argument to withdrawn under the author
+// scope, recording the withdrawal instant once.
+func (r *Repository) WithdrawArgument(ctx context.Context, argumentID domain.ArgumentID, authorID domain.AccountID, at time.Time) (*application.PublishedArgument, bool, error) {
+	argumentParam, ok := uuidParam(argumentID.String())
+	if !ok {
+		return nil, false, application.ErrArgumentNotFound
+	}
+	authorParam, ok := uuidParam(authorID.String())
+	if !ok {
+		return nil, false, application.ErrArgumentNotFound
+	}
+
+	row, err := r.queriesFor(ctx).WithdrawArgument(ctx, platformpg.WithdrawArgumentParams{
+		ArgumentID:  argumentParam,
+		AuthorID:    authorParam,
+		WithdrawnAt: pgtype.Timestamptz{Time: at.UTC(), Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The status moved concurrently: the caller re-reads.
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("withdraw argument: %w", err)
+	}
+	updated, err := mapArgument(row.ID, row.ArenaID, row.AuthorID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time, row.WithdrawnAt)
+	if err != nil {
+		return nil, false, err
+	}
+	return updated, true, nil
 }
 
 // mapArgument rebuilds the stored projection from row fields, validating
@@ -164,6 +219,7 @@ func mapArgument(
 	graphemeCost int32,
 	status string,
 	createdAt time.Time,
+	withdrawnAt pgtype.Timestamptz,
 ) (*application.PublishedArgument, error) {
 	argumentID, err := domain.ParseArgumentID(uuidToString(id))
 	if err != nil {
@@ -197,15 +253,22 @@ func mapArgument(
 		return nil, fmt.Errorf("stored content is invalid: %w", err)
 	}
 
+	var withdrawn *time.Time
+	if withdrawnAt.Valid {
+		instant := withdrawnAt.Time
+		withdrawn = &instant
+	}
+
 	return &application.PublishedArgument{
-		ID:        argumentID,
-		ArenaID:   arena,
-		AuthorID:  author,
-		ParentID:  parent,
-		Relation:  storedRelation,
-		Content:   storedContent,
-		Status:    status,
-		CreatedAt: createdAt,
+		ID:          argumentID,
+		ArenaID:     arena,
+		AuthorID:    author,
+		ParentID:    parent,
+		Relation:    storedRelation,
+		Content:     storedContent,
+		Status:      status,
+		CreatedAt:   createdAt,
+		WithdrawnAt: withdrawn,
 	}, nil
 }
 

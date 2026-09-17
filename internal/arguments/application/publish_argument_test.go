@@ -113,6 +113,10 @@ type fakeArgumentRepo struct {
 	createErr         error
 	sourceErr         map[string]error
 	createNotInserted bool
+	// withdrawNotTransitioned simulates a lost status race; firstGetStatus
+	// overrides the status seen by the first owner-scoped read.
+	withdrawNotTransitioned bool
+	firstGetStatus          string
 }
 
 func newFakeArgumentRepo() *fakeArgumentRepo {
@@ -198,6 +202,47 @@ func (r *fakeArgumentRepo) GetParent(_ context.Context, argumentID domain.Argume
 		return stored, depth, nil
 	}
 	return nil, 0, application.ErrArgumentNotFound
+}
+
+func (r *fakeArgumentRepo) GetForAuthor(_ context.Context, argumentID domain.ArgumentID, authorID domain.AccountID) (*application.PublishedArgument, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stored, ok := r.findByIDLocked(argumentID)
+	if !ok || !stored.AuthorID.Equals(authorID) {
+		return nil, application.ErrArgumentNotFound
+	}
+	if r.firstGetStatus != "" {
+		overridden := *stored
+		overridden.Status = r.firstGetStatus
+		r.firstGetStatus = ""
+		return &overridden, nil
+	}
+	return stored, nil
+}
+
+func (r *fakeArgumentRepo) WithdrawArgument(_ context.Context, argumentID domain.ArgumentID, authorID domain.AccountID, at time.Time) (*application.PublishedArgument, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stored, ok := r.findByIDLocked(argumentID)
+	if !ok || !stored.AuthorID.Equals(authorID) || stored.Status != "published" || r.withdrawNotTransitioned {
+		return nil, false, nil
+	}
+	updated := *stored
+	updated.Status = "withdrawn"
+	instant := at
+	updated.WithdrawnAt = &instant
+	r.replaceLocked(stored, &updated)
+	return &updated, true, nil
+}
+
+// replaceLocked swaps one stored pointer for its updated copy.
+func (r *fakeArgumentRepo) replaceLocked(previous, updated *application.PublishedArgument) {
+	for key, stored := range r.arguments {
+		if stored == previous {
+			r.arguments[key] = updated
+			return
+		}
+	}
 }
 
 func (r *fakeArgumentRepo) findByIDLocked(argumentID domain.ArgumentID) (*application.PublishedArgument, bool) {

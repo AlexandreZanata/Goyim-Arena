@@ -267,3 +267,69 @@ func TestArgumentRuntimeGrants(t *testing.T) {
 		}
 	}
 }
+
+// TestArgumentWithdrawnAtConstraints covers migration 00017 (P10-T06): the
+// withdrawal instant only exists for withdrawn or removed arguments, the
+// runtime may record it, and the content stays immutable.
+func TestArgumentWithdrawnAtConstraints(t *testing.T) {
+	db := newTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	pool := db.Pool.Pool()
+	q := postgres.New(db.Pool)
+	creator := mustArenaCreator(t, ctx, q, "argument-withdrawn@arena.example.com")
+	arenaID := insertDraftArena(t, ctx, pool, creator, "Afirmação do instante de retirada", "culture", "pt-BR")
+	publishArena(t, ctx, pool, arenaID, "argument-withdrawn-arena", time.Now().UTC())
+
+	insertArgument := func(statement string) pgtype.UUID {
+		t.Helper()
+		var id pgtype.UUID
+		if err := pool.QueryRow(ctx, `
+			INSERT INTO app.arguments (arena_id, author_id, relation, content, content_hash, grapheme_cost)
+			VALUES ($1, $2, 'context', $3, $4, 30)
+			RETURNING id`, arenaID, creator, statement, validArgumentHash).Scan(&id); err != nil {
+			t.Fatalf("insert argument: %v", err)
+		}
+		return id
+	}
+
+	// A published argument cannot carry a withdrawal instant.
+	published := insertArgument("Argumento ainda publicado")
+	_, err := pool.Exec(ctx, "UPDATE app.arguments SET withdrawn_at = now() WHERE id = $1", published)
+	assertPgCode(t, err, "23514")
+
+	// The owner records the withdrawal: status and instant move together.
+	if _, err := pool.Exec(ctx, `
+		UPDATE app.arguments SET status = 'withdrawn', withdrawn_at = now(), updated_at = now()
+		WHERE id = $1`, published); err != nil {
+		t.Fatalf("withdrawal update rejected: %v", err)
+	}
+
+	// The runtime records the withdrawal too, and still cannot rewrite the
+	// historical content.
+	second := insertArgument("Argumento retirado pelo runtime")
+	withAppRole(t, pool, func(ctx context.Context, tx pgx.Tx) {
+		if _, err := tx.Exec(ctx, `
+			UPDATE app.arguments SET status = 'withdrawn', withdrawn_at = now(), updated_at = now()
+			WHERE id = $1`, second); err != nil {
+			t.Fatalf("runtime withdrawal rejected: %v", err)
+		}
+		_, err := tx.Exec(ctx, "UPDATE app.arguments SET content = 'Edição silenciosa' WHERE id = $1", second)
+		assertPgCode(t, err, "23514")
+	})
+
+	// The moderation path may turn a withdrawn argument into removed: the
+	// withdrawal instant stays as the audit fact.
+	if _, err := pool.Exec(ctx, `
+		UPDATE app.arguments SET status = 'removed', updated_at = now() WHERE id = $1`, published); err != nil {
+		t.Fatalf("moderation removal after withdrawal rejected: %v", err)
+	}
+	var withdrawnAt *time.Time
+	if err := pool.QueryRow(ctx, `SELECT withdrawn_at FROM app.arguments WHERE id = $1`, published).Scan(&withdrawnAt); err != nil {
+		t.Fatalf("read withdrawn_at: %v", err)
+	}
+	if withdrawnAt == nil {
+		t.Fatal("the withdrawal instant must survive a later moderation removal")
+	}
+}

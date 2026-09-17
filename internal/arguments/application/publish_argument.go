@@ -202,8 +202,13 @@ func (uc *PublishArgumentUseCase) ensureReplyableParent(ctx context.Context, are
 	return nil
 }
 
-// statusPublished is the only status a parent may have to receive replies.
-const statusPublished = "published"
+// Argument statuses owned by the use cases; the schema enforces the closed
+// vocabulary and the immutability trigger protects the historical content.
+const (
+	statusPublished = "published"
+	statusWithdrawn = "withdrawn"
+	statusRemoved   = "removed"
+)
 
 // parseSources validates every requested source, preserving order.
 func parseSources(commands []SourceCommand) ([]domain.Source, error) {

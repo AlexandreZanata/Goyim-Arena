@@ -552,3 +552,131 @@ func TestPublishArgumentBoundedRepliesEndToEnd(t *testing.T) {
 		t.Fatalf("replier arguments = %d, want the single accepted reply", count)
 	}
 }
+
+func TestWithdrawArgumentEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	pool, publishUseCase, author, arena, walletRepo := newPublishHarness(t)
+	seedWalletCredit(t, ctx, walletRepo, author, walletdomain.BucketFree, walletdomain.OperationCreditFree, 1000, "free:2026-09", "seed:free")
+
+	published, err := publishUseCase.Execute(ctx, publishArgumentCommand(author, arena, "withdraw-1"))
+	if err != nil {
+		t.Fatalf("publish Execute() error = %v", err)
+	}
+
+	withdraw := application.NewWithdrawArgumentUseCase(postgres.NewRepository(pool), clockseed.NewClock())
+	command := application.WithdrawArgumentCommand{
+		AccountID:  uuidText(author),
+		ArgumentID: published.Argument.ID.String(),
+	}
+	result, err := withdraw.Execute(ctx, command)
+	if err != nil {
+		t.Fatalf("withdraw Execute() error = %v", err)
+	}
+	if result.Replayed || result.Argument.Status != "withdrawn" || result.Argument.WithdrawnAt == nil {
+		t.Fatalf("result = %+v, want a fresh audited withdrawal", result)
+	}
+
+	// The historical content survives and the withdrawal instant is stored.
+	var content, status string
+	var cost int32
+	var withdrawnAt time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT content, grapheme_cost, status, withdrawn_at FROM app.arguments WHERE id = $1`,
+		published.Argument.ID.String()).Scan(&content, &cost, &status, &withdrawnAt); err != nil {
+		t.Fatalf("read withdrawn argument: %v", err)
+	}
+	if content != published.Argument.Content.String() || cost != 23 || status != "withdrawn" || withdrawnAt.IsZero() {
+		t.Fatalf("stored withdrawal = %q/%d/%s/%v, want the preserved content and recorded instant", content, cost, status, withdrawnAt)
+	}
+	recordedInstant := result.Argument.WithdrawnAt.UTC()
+
+	// Repeat resolves the recorded withdrawal with the original instant.
+	retry, err := withdraw.Execute(ctx, command)
+	if err != nil {
+		t.Fatalf("retry Execute() error = %v", err)
+	}
+	if !retry.Replayed || retry.Argument.WithdrawnAt == nil || !retry.Argument.WithdrawnAt.UTC().Equal(recordedInstant) {
+		t.Fatalf("retry = %+v, want the recorded withdrawal replayed", retry)
+	}
+
+	// A foreign author never reaches the argument.
+	other := mustArgumentAuthor(t, ctx, platformpg.New(pool), "arguments-withdraw-other@arena.example.com")
+	foreign := command
+	foreign.AccountID = uuidText(other)
+	if _, err := withdraw.Execute(ctx, foreign); !errors.Is(err, application.ErrArgumentNotFound) {
+		t.Fatalf("foreign withdrawal error = %v, want ErrArgumentNotFound", err)
+	}
+
+	// Withdrawal never refunds: the single debit stands.
+	if free, _ := walletBalances(t, ctx, pool, author); free != 977 {
+		t.Fatalf("balance = %d, want the debit untouched (no automatic refund)", free)
+	}
+
+	// Moderation removal is never overridden by the author.
+	removed, err := publishUseCase.Execute(ctx, publishArgumentCommand(author, arena, "withdraw-removed"))
+	if err != nil {
+		t.Fatalf("publish removed candidate: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE app.arguments SET status = 'removed' WHERE id = $1`, removed.Argument.ID.String()); err != nil {
+		t.Fatalf("remove argument: %v", err)
+	}
+	removeCommand := application.WithdrawArgumentCommand{
+		AccountID:  uuidText(author),
+		ArgumentID: removed.Argument.ID.String(),
+	}
+	if _, err := withdraw.Execute(ctx, removeCommand); !errors.Is(err, application.ErrArgumentNotWithdrawable) {
+		t.Fatalf("removed withdrawal error = %v, want ErrArgumentNotWithdrawable", err)
+	}
+}
+
+// TestWithdrawArgumentKeepsRepliesCoherent proves the withdrawal only moves
+// the author status: replies and the historical content stay stored, so
+// derived metrics and reply chains never diverge from the placeholder.
+func TestWithdrawArgumentKeepsRepliesCoherent(t *testing.T) {
+	ctx := context.Background()
+	pool, publishUseCase, author, arena, walletRepo := newPublishHarness(t)
+	seedWalletCredit(t, ctx, walletRepo, author, walletdomain.BucketFree, walletdomain.OperationCreditFree, 1000, "free:2026-09", "seed:free")
+
+	parent, err := publishUseCase.Execute(ctx, publishArgumentCommand(author, arena, "coherent-parent"))
+	if err != nil {
+		t.Fatalf("publish parent: %v", err)
+	}
+	replier := mustArgumentAuthor(t, ctx, platformpg.New(pool), "arguments-coherent-replier@arena.example.com")
+	seedWalletCredit(t, ctx, walletRepo, replier, walletdomain.BucketFree, walletdomain.OperationCreditFree, 1000, "free:2026-09", "seed:replier")
+	replyCommand := publishArgumentCommand(replier, arena, "coherent-reply")
+	replyCommand.ParentID = parent.Argument.ID.String()
+	replyCommand.Content = "Resposta que permanece coerente"
+	reply, err := publishUseCase.Execute(ctx, replyCommand)
+	if err != nil {
+		t.Fatalf("publish reply: %v", err)
+	}
+
+	withdraw := application.NewWithdrawArgumentUseCase(postgres.NewRepository(pool), clockseed.NewClock())
+	if _, err := withdraw.Execute(ctx, application.WithdrawArgumentCommand{
+		AccountID:  uuidText(author),
+		ArgumentID: parent.Argument.ID.String(),
+	}); err != nil {
+		t.Fatalf("withdraw parent: %v", err)
+	}
+
+	var replyStatus, replyContent, replyParent string
+	if err := pool.QueryRow(ctx, `
+		SELECT status, content, parent_id FROM app.arguments WHERE id = $1`,
+		reply.Argument.ID.String()).Scan(&replyStatus, &replyContent, &replyParent); err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+	if replyStatus != "published" || replyContent != replyCommand.Content || replyParent != parent.Argument.ID.String() {
+		t.Fatalf("reply = %s/%q/%s, want it untouched by the parent withdrawal", replyStatus, replyContent, replyParent)
+	}
+
+	// The withdrawn parent keeps its historical content internally.
+	var parentContent, parentStatus string
+	if err := pool.QueryRow(ctx, `
+		SELECT content, status FROM app.arguments WHERE id = $1`,
+		parent.Argument.ID.String()).Scan(&parentContent, &parentStatus); err != nil {
+		t.Fatalf("read parent: %v", err)
+	}
+	if parentStatus != "withdrawn" || parentContent != parent.Argument.Content.String() {
+		t.Fatalf("parent = %s/%q, want the preserved content under withdrawn status", parentStatus, parentContent)
+	}
+}

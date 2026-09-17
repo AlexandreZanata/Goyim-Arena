@@ -19,12 +19,12 @@ VALUES (
     sqlc.arg(created_at)::timestamptz
 )
 ON CONFLICT (author_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-RETURNING id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at;
+RETURNING id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at, withdrawn_at;
 
 -- GetArgumentByAuthorAndKey resolves the argument recorded under one
 -- attempt key (P10-T04).
 -- name: GetArgumentByAuthorAndKey :one
-SELECT id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at
+SELECT id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at, withdrawn_at
 FROM app.arguments
 WHERE author_id = sqlc.arg(author_id)::uuid
   AND idempotency_key = sqlc.arg(idempotency_key)::text;
@@ -46,7 +46,7 @@ WITH RECURSIVE chain AS (
 )
 SELECT
     a.id, a.arena_id, a.author_id, a.parent_id, a.relation, a.content,
-    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at,
+    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at, a.withdrawn_at,
     (SELECT max(chain.depth) FROM chain)::integer AS depth
 FROM app.arguments a
 WHERE a.id = sqlc.arg(argument_id)::uuid;
@@ -61,3 +61,24 @@ VALUES (
     sqlc.arg(created_at)::timestamptz
 )
 RETURNING id;
+
+-- GetArgumentForAuthor returns one argument scoped to its author. A foreign
+-- argument is deliberately indistinguishable from a missing one (P10-T06).
+-- name: GetArgumentForAuthor :one
+SELECT id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at, withdrawn_at
+FROM app.arguments
+WHERE id = sqlc.arg(argument_id)::uuid
+  AND author_id = sqlc.arg(author_id)::uuid;
+
+-- WithdrawArgument moves a published argument out of the display under the
+-- author scope, recording the withdrawal instant once. Zero rows mean the
+-- status moved concurrently: the caller re-reads and resolves (P10-T06).
+-- name: WithdrawArgument :one
+UPDATE app.arguments
+SET status = 'withdrawn',
+    withdrawn_at = COALESCE(withdrawn_at, sqlc.arg(withdrawn_at)::timestamptz),
+    updated_at = sqlc.arg(withdrawn_at)::timestamptz
+WHERE id = sqlc.arg(argument_id)::uuid
+  AND author_id = sqlc.arg(author_id)::uuid
+  AND status = 'published'
+RETURNING id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at, withdrawn_at;

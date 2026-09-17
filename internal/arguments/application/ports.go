@@ -71,6 +71,9 @@ type PublishedArgument struct {
 	Content   domain.Content
 	Status    string
 	CreatedAt time.Time
+	// WithdrawnAt is the author withdrawal instant, or nil while the
+	// argument was never withdrawn.
+	WithdrawnAt *time.Time
 }
 
 // CreateArgumentRequest is a validated argument ready to persist.
@@ -102,4 +105,14 @@ type ArgumentRepository interface {
 	// (0 for a top-level argument), or ErrArgumentNotFound. Depth is walked
 	// from the chain, never denormalized.
 	GetParent(ctx context.Context, argumentID domain.ArgumentID) (*PublishedArgument, int, error)
+
+	// GetForAuthor returns one argument scoped to its author. A foreign
+	// argument is deliberately indistinguishable from a missing one.
+	GetForAuthor(ctx context.Context, argumentID domain.ArgumentID, authorID domain.AccountID) (*PublishedArgument, error)
+
+	// WithdrawArgument moves a published argument to withdrawn under the
+	// author scope, recording the withdrawal instant once. transitioned is
+	// false when the status moved concurrently: the caller re-reads and
+	// resolves.
+	WithdrawArgument(ctx context.Context, argumentID domain.ArgumentID, authorID domain.AccountID, at time.Time) (*PublishedArgument, bool, error)
 }

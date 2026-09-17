@@ -89,6 +89,8 @@ type AppArgument struct {
 	UpdatedAt pgtype.Timestamptz
 	// Client attempt key, unique per author: a retry resolves the recorded argument instead of debiting INK again
 	IdempotencyKey pgtype.Text
+	// Instant of the author withdrawal; kept as the audit fact of the retraction, never a deletion
+	WithdrawnAt pgtype.Timestamptz
 }
 
 // Structured sources supporting an argument: URL plus optional short description; a source never certifies truth

@@ -23,6 +23,11 @@ var (
 	// attempt with the same key: the use case resolves it into a replay.
 	ErrDuplicateIdempotencyKey = errors.New("arguments: idempotency key already used")
 
+	// ErrArgumentNotWithdrawable indicates the argument cannot be withdrawn
+	// in its current state: a moderation removal is never overridden by the
+	// author.
+	ErrArgumentNotWithdrawable = errors.New("arguments: argument cannot be withdrawn in its current state")
+
 	// ErrInsufficientInk indicates the author cannot pay the publication
 	// cost: the wallet debit was refused and nothing was written.
 	ErrInsufficientInk = errors.New("arguments: insufficient ink for the publication cost")

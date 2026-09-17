@@ -128,6 +128,9 @@ type Querier interface {
 	// GetArgumentByAuthorAndKey resolves the argument recorded under one
 	// attempt key (P10-T04).
 	GetArgumentByAuthorAndKey(ctx context.Context, arg GetArgumentByAuthorAndKeyParams) (GetArgumentByAuthorAndKeyRow, error)
+	// GetArgumentForAuthor returns one argument scoped to its author. A foreign
+	// argument is deliberately indistinguishable from a missing one (P10-T06).
+	GetArgumentForAuthor(ctx context.Context, arg GetArgumentForAuthorParams) (GetArgumentForAuthorRow, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
 	// app.profiles with the explicit opt-ins. A missing preferences row resolves
 	// to the conservative default (marketing opt-in false), never to an implicit
@@ -241,6 +244,10 @@ type Querier interface {
 	UpdateProfileUsername(ctx context.Context, arg UpdateProfileUsernameParams) (AppProfile, error)
 	UpdateSessionLastSeen(ctx context.Context, id pgtype.UUID) error
 	UpsertCommunicationPreferences(ctx context.Context, arg UpsertCommunicationPreferencesParams) (AppCommunicationPreference, error)
+	// WithdrawArgument moves a published argument out of the display under the
+	// author scope, recording the withdrawal instant once. Zero rows mean the
+	// status moved concurrently: the caller re-reads and resolves (P10-T06).
+	WithdrawArgument(ctx context.Context, arg WithdrawArgumentParams) (WithdrawArgumentRow, error)
 }
 
 var _ Querier = (*Queries)(nil)
