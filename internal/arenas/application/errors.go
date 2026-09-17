@@ -12,4 +12,16 @@ var (
 	// ErrVersionConflict indicates the optimistic version check failed: the
 	// Arena changed since the caller read it.
 	ErrVersionConflict = errors.New("application: arena version conflict")
+
+	// ErrNoPassAvailable indicates the creator holds no valid Arena Pass, so
+	// the publication cannot consume one.
+	ErrNoPassAvailable = errors.New("application: no arena pass available")
+
+	// ErrArenaAlreadyConsumed indicates the consumption for this Arena
+	// belongs to another account; passes are never transferable.
+	ErrArenaAlreadyConsumed = errors.New("application: arena pass was already consumed by another account")
+
+	// ErrSlugConflict indicates the derived public slug is already taken by
+	// another Arena.
+	ErrSlugConflict = errors.New("application: arena slug is already taken")
 )

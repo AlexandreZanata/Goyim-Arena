@@ -158,6 +158,10 @@ type Querier interface {
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.
 	PingHealth(ctx context.Context) (int32, error)
+	// PublishArenaDraft performs the draft→published transition under the
+	// optimistic version check inside the publication transaction, so the Arena
+	// row and the consumed Arena Pass commit together (P08-T04).
+	PublishArenaDraft(ctx context.Context, arg PublishArenaDraftParams) (AppArena, error)
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
 	RevokeSession(ctx context.Context, tokenHash []byte) error
 	SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAccount, error)

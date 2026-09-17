@@ -26,6 +26,9 @@ type fakeArenaRepo struct {
 	updateRequests []application.DraftUpdate
 	updateErr      error
 
+	publishRequests []publishCall
+	publishErr      error
+
 	deleteCalls []domain.ArenaID
 	deleteErr   error
 }
@@ -97,6 +100,36 @@ func (r *fakeArenaRepo) UpdateArenaDraft(_ context.Context, arenaID domain.Arena
 		return nil, err
 	}
 	return arena, nil
+}
+
+func (r *fakeArenaRepo) PublishArenaDraft(_ context.Context, arenaID domain.ArenaID, _ domain.CreatorID, slug domain.Slug, publishedAt time.Time, expectedVersion int32) (*domain.Arena, error) {
+	r.publishRequests = append(r.publishRequests, publishCall{slug: slug, publishedAt: publishedAt, expectedVersion: expectedVersion})
+	if r.publishErr != nil {
+		return nil, r.publishErr
+	}
+	arena, ok := r.arenas[arenaID]
+	if !ok {
+		return nil, application.ErrArenaNotFound
+	}
+	if arena.Version() != expectedVersion {
+		return nil, application.ErrVersionConflict
+	}
+	publishedAtCopy := publishedAt
+	published, err := domain.ReconstituteArena(
+		arena.ID(), arena.CreatorID(), arena.Statement(), arena.Context(), arena.Category(), arena.Language(),
+		domain.ArenaStatusPublished, slug, arena.Version()+1, arena.CreatedAt(), &publishedAtCopy, nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+	r.arenas[arenaID] = published
+	return published, nil
+}
+
+type publishCall struct {
+	slug            domain.Slug
+	publishedAt     time.Time
+	expectedVersion int32
 }
 
 func (r *fakeArenaRepo) DeleteArenaDraft(_ context.Context, arenaID domain.ArenaID, _ domain.CreatorID) error {

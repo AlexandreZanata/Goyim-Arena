@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"time"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
 )
@@ -48,4 +49,11 @@ type ArenaRepository interface {
 	// ErrArenaNotFound when the draft is missing or foreign and
 	// domain.ErrArenaNotDraft when the Arena already left the draft state.
 	DeleteArenaDraft(ctx context.Context, arenaID domain.ArenaID, creatorID domain.CreatorID) error
+
+	// PublishArenaDraft performs the draft→published transition under the
+	// optimistic version check. It returns ErrSlugConflict when the slug is
+	// already taken, ErrArenaNotFound when the draft is missing or foreign,
+	// domain.ErrArenaNotDraft when the Arena left the draft state and
+	// ErrVersionConflict when the version moved.
+	PublishArenaDraft(ctx context.Context, arenaID domain.ArenaID, creatorID domain.CreatorID, slug domain.Slug, publishedAt time.Time, expectedVersion int32) (*domain.Arena, error)
 }

@@ -36,6 +36,18 @@ RETURNING id, creator_id, slug, statement, context, category, language, status, 
 DELETE FROM app.arenas
 WHERE id = $1 AND creator_id = $2 AND status = 'draft';
 
+-- PublishArenaDraft performs the draft→published transition under the
+-- optimistic version check inside the publication transaction, so the Arena
+-- row and the consumed Arena Pass commit together (P08-T04).
+-- name: PublishArenaDraft :one
+UPDATE app.arenas
+SET status = 'published',
+    slug = $3,
+    published_at = $4,
+    version = version + 1
+WHERE id = $1 AND creator_id = $2 AND status = 'draft' AND version = $5
+RETURNING id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at;
+
 -- GetArenaStateForCreator diagnoses why a scoped draft write affected no
 -- row: missing or foreign arena, non-draft status, or stale version.
 -- name: GetArenaStateForCreator :one

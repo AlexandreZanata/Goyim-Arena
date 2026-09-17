@@ -2,7 +2,16 @@
 // consumer-oriented ports of the arenas module.
 package application
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+// Clock exposes wall-clock time to arenas use cases, keeping them
+// deterministic under test (ADR-012).
+type Clock interface {
+	Now() time.Time
+}
 
 // UnitOfWork runs a function inside one database transaction. Publication
 // uses it so the Arena row and the consumed Arena Pass commit or roll back

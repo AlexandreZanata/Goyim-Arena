@@ -171,6 +171,53 @@ func (q *Queries) ListArenaDraftsForCreator(ctx context.Context, creatorID pgtyp
 	return items, nil
 }
 
+const publishArenaDraft = `-- name: PublishArenaDraft :one
+UPDATE app.arenas
+SET status = 'published',
+    slug = $3,
+    published_at = $4,
+    version = version + 1
+WHERE id = $1 AND creator_id = $2 AND status = 'draft' AND version = $5
+RETURNING id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
+`
+
+type PublishArenaDraftParams struct {
+	ID          pgtype.UUID
+	CreatorID   pgtype.UUID
+	Slug        pgtype.Text
+	PublishedAt pgtype.Timestamptz
+	Version     int32
+}
+
+// PublishArenaDraft performs the draft→published transition under the
+// optimistic version check inside the publication transaction, so the Arena
+// row and the consumed Arena Pass commit together (P08-T04).
+func (q *Queries) PublishArenaDraft(ctx context.Context, arg PublishArenaDraftParams) (AppArena, error) {
+	row := q.db.QueryRow(ctx, publishArenaDraft,
+		arg.ID,
+		arg.CreatorID,
+		arg.Slug,
+		arg.PublishedAt,
+		arg.Version,
+	)
+	var i AppArena
+	err := row.Scan(
+		&i.ID,
+		&i.CreatorID,
+		&i.Slug,
+		&i.Statement,
+		&i.Context,
+		&i.Category,
+		&i.Language,
+		&i.Status,
+		&i.Version,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.ClosesAt,
+	)
+	return i, err
+}
+
 const updateArenaDraft = `-- name: UpdateArenaDraft :one
 UPDATE app.arenas
 SET statement = $3,

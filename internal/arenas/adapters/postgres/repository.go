@@ -12,12 +12,18 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
 	platformpg "github.com/AlexandreZanata/Goyim-Arena/internal/platform/postgres"
+)
+
+const (
+	pgUniqueViolation    = "23505"
+	slugUniqueConstraint = "arenas_slug_unique"
 )
 
 // Repository implements the arenas application ports using PostgreSQL.
@@ -36,6 +42,17 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	}
 }
 
+// queriesFor binds the queries to the caller transaction when one is
+// carried by the context (P07-T05): the publication runs the pass
+// consumption and the Arena transition in one transaction. Without a shared
+// transaction the repository stays autocommit, one statement per call.
+func (r *Repository) queriesFor(ctx context.Context) *platformpg.Queries {
+	if tx, ok := platformpg.TxFromContext(ctx); ok {
+		return r.queries.WithTx(tx)
+	}
+	return r.queries
+}
+
 // CreateArena stores a new private draft.
 func (r *Repository) CreateArena(ctx context.Context, request application.CreateArenaRequest) (*domain.Arena, error) {
 	creatorUUID, err := pgUUIDFromCreatorID(request.CreatorID)
@@ -43,7 +60,7 @@ func (r *Repository) CreateArena(ctx context.Context, request application.Create
 		return nil, fmt.Errorf("create arena: %w", err)
 	}
 
-	row, err := r.queries.CreateArena(ctx, platformpg.CreateArenaParams{
+	row, err := r.queriesFor(ctx).CreateArena(ctx, platformpg.CreateArenaParams{
 		CreatorID: creatorUUID,
 		Statement: request.Statement.String(),
 		Context:   textFromContext(request.Context),
@@ -64,7 +81,7 @@ func (r *Repository) GetArenaForCreator(ctx context.Context, arenaID domain.Aren
 		return nil, err
 	}
 
-	row, err := r.queries.GetArenaForCreator(ctx, platformpg.GetArenaForCreatorParams{
+	row, err := r.queriesFor(ctx).GetArenaForCreator(ctx, platformpg.GetArenaForCreatorParams{
 		ID:        arenaUUID,
 		CreatorID: creatorUUID,
 	})
@@ -84,7 +101,7 @@ func (r *Repository) ListArenaDraftsForCreator(ctx context.Context, creatorID do
 		return nil, fmt.Errorf("list arena drafts: %w", err)
 	}
 
-	rows, err := r.queries.ListArenaDraftsForCreator(ctx, creatorUUID)
+	rows, err := r.queriesFor(ctx).ListArenaDraftsForCreator(ctx, creatorUUID)
 	if err != nil {
 		return nil, fmt.Errorf("list arena drafts: %w", err)
 	}
@@ -108,7 +125,7 @@ func (r *Repository) UpdateArenaDraft(ctx context.Context, arenaID domain.ArenaI
 		return nil, err
 	}
 
-	row, err := r.queries.UpdateArenaDraft(ctx, platformpg.UpdateArenaDraftParams{
+	row, err := r.queriesFor(ctx).UpdateArenaDraft(ctx, platformpg.UpdateArenaDraftParams{
 		ID:        arenaUUID,
 		CreatorID: creatorUUID,
 		Statement: update.Statement.String(),
@@ -133,7 +150,7 @@ func (r *Repository) DeleteArenaDraft(ctx context.Context, arenaID domain.ArenaI
 		return err
 	}
 
-	rows, err := r.queries.DeleteArenaDraft(ctx, platformpg.DeleteArenaDraftParams{
+	rows, err := r.queriesFor(ctx).DeleteArenaDraft(ctx, platformpg.DeleteArenaDraftParams{
 		ID:        arenaUUID,
 		CreatorID: creatorUUID,
 	})
@@ -146,10 +163,67 @@ func (r *Repository) DeleteArenaDraft(ctx context.Context, arenaID domain.ArenaI
 	return r.diagnoseDraftMiss(ctx, arenaUUID, creatorUUID, 0)
 }
 
+// PublishArenaDraft transitions the draft to published under the optimistic
+// version check. It runs inside the publication transaction so the Arena row
+// and the consumed pass commit together.
+func (r *Repository) PublishArenaDraft(ctx context.Context, arenaID domain.ArenaID, creatorID domain.CreatorID, slug domain.Slug, publishedAt time.Time, expectedVersion int32) (*domain.Arena, error) {
+	arenaUUID, creatorUUID, err := arenaScope(arenaID, creatorID)
+	if err != nil {
+		return nil, err
+	}
+
+	row, err := r.queriesFor(ctx).PublishArenaDraft(ctx, platformpg.PublishArenaDraftParams{
+		ID:          arenaUUID,
+		CreatorID:   creatorUUID,
+		Slug:        pgtype.Text{String: slug.String(), Valid: true},
+		PublishedAt: pgtype.Timestamptz{Time: publishedAt.UTC(), Valid: true},
+		Version:     expectedVersion,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation && pgErr.ConstraintName == slugUniqueConstraint {
+			return nil, application.ErrSlugConflict
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, r.diagnosePublishMiss(ctx, arenaUUID, creatorUUID, expectedVersion)
+		}
+		return nil, fmt.Errorf("publish arena draft: %w", err)
+	}
+	return mapArenaRow(row)
+}
+
+// diagnosePublishMiss explains why the publication affected no row: missing
+// or foreign Arena, a non-draft state, or a concurrent publication/version
+// change.
+func (r *Repository) diagnosePublishMiss(ctx context.Context, arenaUUID, creatorUUID pgtype.UUID, expectedVersion int32) error {
+	state, err := r.queriesFor(ctx).GetArenaStateForCreator(ctx, platformpg.GetArenaStateForCreatorParams{
+		ID:        arenaUUID,
+		CreatorID: creatorUUID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ErrArenaNotFound
+		}
+		return fmt.Errorf("diagnose arena publication: %w", err)
+	}
+
+	if state.Status == string(domain.ArenaStatusPublished) {
+		// A concurrent publication won: the retry resolves the replay.
+		return application.ErrVersionConflict
+	}
+	if state.Status != string(domain.ArenaStatusDraft) {
+		return domain.ErrInvalidStatusChange
+	}
+	if state.Version != expectedVersion {
+		return application.ErrVersionConflict
+	}
+	return application.ErrVersionConflict
+}
+
 // diagnoseDraftMiss explains why a scoped draft write affected no row:
 // missing or foreign Arena, a non-draft state or a concurrent change.
 func (r *Repository) diagnoseDraftMiss(ctx context.Context, arenaUUID, creatorUUID pgtype.UUID, expectedVersion int32) error {
-	state, err := r.queries.GetArenaStateForCreator(ctx, platformpg.GetArenaStateForCreatorParams{
+	state, err := r.queriesFor(ctx).GetArenaStateForCreator(ctx, platformpg.GetArenaStateForCreatorParams{
 		ID:        arenaUUID,
 		CreatorID: creatorUUID,
 	})
