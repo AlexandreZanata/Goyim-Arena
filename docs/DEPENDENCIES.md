@@ -4,7 +4,7 @@
 
 **Referência arquitetural:** [ADR-011](adr/ADR-011-dependency-admission-policy.md) · [STACK.md](STACK.md) · [ARCHITECTURE.md](ARCHITECTURE.md)
 
-**Última revisão:** 2026-09-16
+**Última revisão:** 2026-09-17
 
 ---
 
@@ -61,7 +61,7 @@ Cada dependência admitida no projeto possui uma classe clara, um owner respons�
 | `github.com/resend/resend-go` | Runtime Backend (Adapter) | `internal/notifications/adapters/out/email` | Envio de emails transacionais e operacionais via API Resend | MIT |
 | `github.com/getsentry/sentry-go` | Runtime Backend (Adapter) | `internal/platform/adapters/out/observability` | Monitoramento e captura de exceções em produção | Apache-2.0 |
 | `github.com/posthog/posthog-go` | Runtime Backend (Adapter) | `internal/platform/adapters/out/observability` | Telemetria e métricas de produto sem dados sensíveis | MIT |
-| Biblioteca Unicode (ex: `uniseg`) | Runtime Backend (Platform) | `internal/platform/text` | Segmentação e contagem correta de grapheme clusters em texto | MIT / BSD |
+| `github.com/rivo/uniseg` v0.4.7 | Runtime Backend (Platform) | `internal/platform/text` | Segmentação e contagem de grapheme clusters (UAX #29) para o limite de 3.000 clusters e a tarifação de 1 INK por cluster (ADR-013) | MIT |
 | `golangci-lint` | Dev / Quality Tooling | Pipeline de CI e `Makefile` | Análise estática e checagem de regras de código Go | GPL-3.0 (CLI externa) |
 | `govulncheck` | Dev / Security Tooling | Pipeline de CI e `Makefile` | Verificação oficial de vulnerabilidades conhecidas em Go | BSD-3-Clause |
 | `testcontainers-go` | Test Tooling | `tests/integration` | Subida de contêineres efêmeros de PostgreSQL para testes | MIT |

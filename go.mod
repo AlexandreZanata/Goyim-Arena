@@ -5,6 +5,7 @@ go 1.27.1
 require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/pressly/goose/v3 v3.28.0
+	github.com/rivo/uniseg v0.4.7
 	golang.org/x/crypto v0.57.0
 )
 

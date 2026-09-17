@@ -44,7 +44,10 @@ var forbiddenStdlib = map[string]string{
 
 // forbiddenExternal prefixes are dependencies not approved for domain and
 // application layers. Approved adapters (pgx, sqlc, goose, x/crypto, Stripe,
-// Resend, Sentry, PostHog) live exclusively in adapter packages.
+// Resend, Sentry, PostHog) live exclusively in adapter packages. The
+// grapheme segmentation library is approved by ADR-013 for the platform
+// owner internal/platform/text only: domain and application stay
+// standard-library only and consume it through ports.
 var forbiddenExternal = []string{
 	"github.com/golang/",
 	"github.com/getsentry/",
@@ -52,6 +55,7 @@ var forbiddenExternal = []string{
 	"github.com/posthog/",
 	"github.com/pressly/",
 	"github.com/resend/",
+	"github.com/rivo/",
 	"github.com/sqlc-dev/",
 	"github.com/stripe/",
 	"golang.org/x/",

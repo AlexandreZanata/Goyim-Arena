@@ -25,3 +25,5 @@ Cada decisão arquitetural relevante recebe um arquivo numerado contendo:
 - [ADR-009 — Frontend TypeScript nativo e CSS nativo](ADR-009-native-typescript-frontend.md)
 - [ADR-010 — Backend API-first com ports and adapters](ADR-010-api-first-ports-adapters.md)
 - [ADR-011 — Política de admissão de dependências](ADR-011-dependency-admission-policy.md)
+- [ADR-012 — Ports de clock, aleatoriedade e identificadores](ADR-012-clock-random-ids-ports.md)
+- [ADR-013 — Segmentação de grapheme clusters com `rivo/uniseg`](ADR-013-unicode-grapheme-segmentation.md)
