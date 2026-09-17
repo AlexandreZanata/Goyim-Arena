@@ -126,6 +126,10 @@ type Querier interface {
 	// Expired lots are never candidates, so they can never be consumed (P07-T03).
 	ListAvailablePassLotsForUpdate(ctx context.Context, arg ListAvailablePassLotsForUpdateParams) ([]AppArenaPassLot, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
+	// ListExpiredArenaPassLots derives the expired lots that still hold passes.
+	// Expiration is never written back: the predicate is evaluated at read time,
+	// so the sweep is a pure derivation and repeated runs are identical (P07-T04).
+	ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredArenaPassLotsParams) ([]AppArenaPassLot, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	// ListWalletStatementPage returns one keyset-paginated page of the account
 	// statement, newest first. NULL after_* parameters select the first page;

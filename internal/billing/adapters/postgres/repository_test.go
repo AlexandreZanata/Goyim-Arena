@@ -691,6 +691,169 @@ func TestRepository_ConsumeArenaPassCrossAccountRefused(t *testing.T) {
 	}
 }
 
+func TestRepository_PassSummaryExcludesExpiredLotsAtBoundaries(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustBillingAccount(t, ctx, q, "summary-owner@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	expiredEnd := now.Add(-time.Hour)
+	if _, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 2, "member:expired", &expiredEnd)); err != nil {
+		t.Fatalf("expired grant: %v", err)
+	}
+	boundaryEnd := now
+	if _, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 1, "member:boundary", &boundaryEnd)); err != nil {
+		t.Fatalf("boundary grant: %v", err)
+	}
+	soonEnd := now.Add(time.Hour)
+	if _, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 1, "member:soon", &soonEnd)); err != nil {
+		t.Fatalf("soon grant: %v", err)
+	}
+	if _, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginPurchase, 3, "stripe:evt_summary", nil)); err != nil {
+		t.Fatalf("purchase grant: %v", err)
+	}
+	consumedLot, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginPurchase, 1, "stripe:evt_summary_consumed", nil))
+	if err != nil {
+		t.Fatalf("consumed grant: %v", err)
+	}
+	if _, err := repo.ConsumeArenaPass(ctx, mustConsumeRequest(t, accountID, mustArenaID(t, 500), now)); err != nil {
+		t.Fatalf("consume: %v", err)
+	}
+	_ = consumedLot
+
+	useCase := application.NewGetArenaPassSummaryUseCase(repo, fixedClock{now: now})
+	summary, err := useCase.Execute(ctx, accountID)
+	if err != nil {
+		t.Fatalf("summary error = %v", err)
+	}
+	if summary.AvailableTotal != 4 {
+		t.Fatalf("AvailableTotal = %d, want 4 (1 expiring soon + 3 purchased)", summary.AvailableTotal)
+	}
+	if len(summary.Lots) != 5 {
+		t.Fatalf("breakdown entries = %d, want 5 (expired lots stay in history)", len(summary.Lots))
+	}
+
+	flags := map[string]bool{}
+	counted := map[string]bool{}
+	for _, entry := range summary.Lots {
+		flags[entry.Lot.Reference().String()] = entry.Expired
+	}
+	if !flags["member:expired"] {
+		t.Error("expired lot must be flagged")
+	}
+	if !flags["member:boundary"] {
+		t.Error("the expiration instant itself must already be expired")
+	}
+	if flags["member:soon"] || flags["stripe:evt_summary"] || flags["stripe:evt_summary_consumed"] {
+		t.Error("non-expired lots must not be flagged")
+	}
+	for _, entry := range summary.Lots {
+		counted[entry.Lot.Reference().String()] = !entry.Expired
+	}
+	if !counted["member:soon"] || !counted["stripe:evt_summary"] || counted["member:expired"] || counted["member:boundary"] {
+		t.Errorf("available counting is wrong: %+v", counted)
+	}
+}
+
+func TestRepository_ExpireJobIsIdempotentAndNeverMutatesLots(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustBillingAccount(t, ctx, q, "expiry-job@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	older := now.Add(-48 * time.Hour)
+	if _, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 5, "member:expired-old", &older)); err != nil {
+		t.Fatalf("older grant: %v", err)
+	}
+	recent := now.Add(-time.Hour)
+	if _, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 1, "member:expired-recent", &recent)); err != nil {
+		t.Fatalf("recent grant: %v", err)
+	}
+	// A fully consumed expired lot holds nothing and must not be reported.
+	consumed, err := q.CreateArenaPassLot(ctx, platformpg.CreateArenaPassLotParams{
+		AccountID:         acc.ID,
+		Origin:            "MEMBER",
+		Quantity:          1,
+		RemainingQuantity: 0,
+		ExpiresAt:         pgtype.Timestamptz{Time: older, Valid: true},
+		Reference:         "member:expired-consumed",
+	})
+	if err != nil {
+		t.Fatalf("consumed grant: %v", err)
+	}
+	// A valid lot is never part of the expiry report.
+	future := now.Add(24 * time.Hour)
+	if _, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 1, "member:future", &future)); err != nil {
+		t.Fatalf("future grant: %v", err)
+	}
+
+	var beforeCount, beforeRemaining int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(sum(remaining_quantity), 0)::int
+		FROM app.arena_pass_lots WHERE account_id = $1`, acc.ID).Scan(&beforeCount, &beforeRemaining); err != nil {
+		t.Fatalf("snapshot before: %v", err)
+	}
+
+	job := application.NewExpireArenaPassLotsUseCase(repo, fixedClock{now: now})
+	first, err := job.Execute(ctx)
+	if err != nil {
+		t.Fatalf("sweep error = %v", err)
+	}
+	if first.ExpiredPasses != 6 {
+		t.Fatalf("ExpiredPasses = %d, want 6 (5 older + 1 recent)", first.ExpiredPasses)
+	}
+	references := map[string]int32{}
+	for _, lot := range first.ExpiredLots {
+		references[lot.Reference().String()] = lot.Remaining()
+	}
+	if references["member:expired-old"] != 5 || references["member:expired-recent"] != 1 {
+		t.Fatalf("expired report = %+v", references)
+	}
+	if _, ok := references["member:expired-consumed"]; ok {
+		t.Error("a fully consumed expired lot holds no passes and must not be reported")
+	}
+	if _, ok := references["member:future"]; ok {
+		t.Error("a valid lot must never be reported as expired")
+	}
+
+	// Repeated sweep: same report, no writes anywhere.
+	second, err := job.Execute(ctx)
+	if err != nil {
+		t.Fatalf("second sweep error = %v", err)
+	}
+	if second.ExpiredPasses != first.ExpiredPasses || len(second.ExpiredLots) != len(first.ExpiredLots) {
+		t.Fatalf("repeated sweep diverged: %+v vs %+v", second, first)
+	}
+
+	var afterCount, afterRemaining int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(sum(remaining_quantity), 0)::int
+		FROM app.arena_pass_lots WHERE account_id = $1`, acc.ID).Scan(&afterCount, &afterRemaining); err != nil {
+		t.Fatalf("snapshot after: %v", err)
+	}
+	if afterCount != beforeCount || afterRemaining != beforeRemaining {
+		t.Fatalf("sweep mutated lots: %d/%d -> %d/%d", beforeCount, beforeRemaining, afterCount, afterRemaining)
+	}
+
+	stored, err := q.GetArenaPassLot(ctx, consumed.ID)
+	if err != nil {
+		t.Fatalf("reload consumed lot: %v", err)
+	}
+	if stored.RemainingQuantity != 0 {
+		t.Fatalf("consumed lot remaining = %d, want 0", stored.RemainingQuantity)
+	}
+}
+
 func TestRepository_ConsumeArenaPassUseCaseEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	testDB := dbtest.New(t)

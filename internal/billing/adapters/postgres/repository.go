@@ -30,8 +30,9 @@ type Repository struct {
 const pgUniqueViolation = "23505"
 
 var (
-	_ application.PassLotRepository = (*Repository)(nil)
-	_ application.ArenaPassConsumer = (*Repository)(nil)
+	_ application.PassLotRepository      = (*Repository)(nil)
+	_ application.ArenaPassConsumer      = (*Repository)(nil)
+	_ application.PassLotQueryRepository = (*Repository)(nil)
 )
 
 // NewRepository creates a PostgreSQL repository adapter for billing.
@@ -225,6 +226,52 @@ func findArenaPassConsumption(
 		Remaining: lotRow.RemainingQuantity,
 		Replayed:  true,
 	}, true, nil
+}
+
+// ListAccountPassLots returns every lot of the account in canonical order
+// (nearest expiration first, non-expiring lots last).
+func (r *Repository) ListAccountPassLots(ctx context.Context, accountID domain.AccountID) ([]domain.PassLot, error) {
+	pgUUID, err := pgUUIDFromAccountID(accountID)
+	if err != nil {
+		return nil, fmt.Errorf("list account pass lots: %w", err)
+	}
+
+	rows, err := r.queries.ListArenaPassLotsByAccount(ctx, pgUUID)
+	if err != nil {
+		return nil, fmt.Errorf("list arena pass lots: %w", err)
+	}
+
+	lots := make([]domain.PassLot, 0, len(rows))
+	for _, row := range rows {
+		lot, err := mapPassLotRow(row)
+		if err != nil {
+			return nil, err
+		}
+		lots = append(lots, *lot)
+	}
+	return lots, nil
+}
+
+// ListExpiredPassLots derives the expired lots that still hold passes at the
+// instant, bounded by limit.
+func (r *Repository) ListExpiredPassLots(ctx context.Context, at time.Time, limit int) ([]domain.PassLot, error) {
+	rows, err := r.queries.ListExpiredArenaPassLots(ctx, platformpg.ListExpiredArenaPassLotsParams{
+		At:        pgtype.Timestamptz{Time: at.UTC(), Valid: true},
+		PageLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list expired arena pass lots: %w", err)
+	}
+
+	lots := make([]domain.PassLot, 0, len(rows))
+	for _, row := range rows {
+		lot, err := mapPassLotRow(row)
+		if err != nil {
+			return nil, err
+		}
+		lots = append(lots, *lot)
+	}
+	return lots, nil
 }
 
 func mapPassLotRow(row platformpg.AppArenaPassLot) (*domain.PassLot, error) {

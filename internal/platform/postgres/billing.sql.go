@@ -331,3 +331,50 @@ func (q *Queries) ListAvailablePassLotsForUpdate(ctx context.Context, arg ListAv
 	}
 	return items, nil
 }
+
+const listExpiredArenaPassLots = `-- name: ListExpiredArenaPassLots :many
+SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
+FROM app.arena_pass_lots
+WHERE expires_at IS NOT NULL
+  AND expires_at <= $1::timestamptz
+  AND remaining_quantity > 0
+ORDER BY expires_at ASC, id ASC
+LIMIT $2
+`
+
+type ListExpiredArenaPassLotsParams struct {
+	At        pgtype.Timestamptz
+	PageLimit int32
+}
+
+// ListExpiredArenaPassLots derives the expired lots that still hold passes.
+// Expiration is never written back: the predicate is evaluated at read time,
+// so the sweep is a pure derivation and repeated runs are identical (P07-T04).
+func (q *Queries) ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredArenaPassLotsParams) ([]AppArenaPassLot, error) {
+	rows, err := q.db.Query(ctx, listExpiredArenaPassLots, arg.At, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppArenaPassLot{}
+	for rows.Next() {
+		var i AppArenaPassLot
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.Origin,
+			&i.Quantity,
+			&i.RemainingQuantity,
+			&i.ExpiresAt,
+			&i.Reference,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

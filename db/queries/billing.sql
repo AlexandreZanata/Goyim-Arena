@@ -59,6 +59,18 @@ SELECT id, lot_id, arena_id, consumed_at
 FROM app.arena_pass_consumptions
 WHERE arena_id = $1;
 
+-- ListExpiredArenaPassLots derives the expired lots that still hold passes.
+-- Expiration is never written back: the predicate is evaluated at read time,
+-- so the sweep is a pure derivation and repeated runs are identical (P07-T04).
+-- name: ListExpiredArenaPassLots :many
+SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
+FROM app.arena_pass_lots
+WHERE expires_at IS NOT NULL
+  AND expires_at <= sqlc.arg(at)::timestamptz
+  AND remaining_quantity > 0
+ORDER BY expires_at ASC, id ASC
+LIMIT sqlc.arg(page_limit);
+
 -- name: CreateArenaPassConsumption :one
 INSERT INTO app.arena_pass_consumptions (lot_id, arena_id)
 VALUES ($1, $2)
