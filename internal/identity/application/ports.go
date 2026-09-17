@@ -150,3 +150,11 @@ type SessionRepository interface {
 	// RevokeAllAccountSessions revokes all active sessions for a given account.
 	RevokeAllAccountSessions(ctx context.Context, accountID domain.AccountID) error
 }
+
+// RateLimiter evaluates whether an operation identified by key is allowed.
+// A definitive rate limiting policy arrives in later plan phases; this port
+// provides the extension hook required by P04-T08.
+type RateLimiter interface {
+	// Allow reports whether an action identified by key is currently permitted.
+	Allow(ctx context.Context, key string) (bool, error)
+}

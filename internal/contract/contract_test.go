@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 )
 
@@ -71,10 +72,10 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		t.Fatal("contract declares no routes; the comparison would pass vacuously")
 	}
 	for _, route := range contractRoutes {
-		if route.Path == "/health/live" || route.Path == "/health/ready" {
+		if route.Path == "/health/live" || route.Path == "/health/ready" || strings.HasPrefix(route.Path, "/api/v1/auth/") {
 			continue
 		}
-		t.Errorf("contract declares %s but only health endpoints are implemented in this stage", route.String())
+		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
 	}
 }
 

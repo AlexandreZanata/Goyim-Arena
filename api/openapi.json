@@ -54,10 +54,259 @@
           }
         }
       }
+    },
+    "/api/v1/auth/register": {
+      "post": {
+        "operationId": "authRegister",
+        "summary": "Register a new account",
+        "description": "Registers a new account. Prevents user enumeration by returning a uniform confirmation.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Account registration initiated.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/RegisterResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/auth/verify": {
+      "get": {
+        "operationId": "authVerify",
+        "summary": "Verify account email",
+        "description": "Verifies an account email using the single-use cryptographic verification token.",
+        "tags": ["auth"],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "description": "Single-use raw verification token.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Email verified successfully.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StatusResponse" }
+              },
+              "text/html": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" }
+        }
+      }
+    },
+    "/api/v1/auth/login": {
+      "post": {
+        "operationId": "authLogin",
+        "summary": "Authenticate and create session",
+        "description": "Authenticates credentials and establishes a new session, setting the arena_session cookie.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Authenticated successfully.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LoginResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "operationId": "authLogout",
+        "summary": "Revoke active session",
+        "description": "Revokes the active session and clears the arena_session cookie.",
+        "tags": ["auth"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "Logged out successfully.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StatusResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password-reset/request": {
+      "post": {
+        "operationId": "authRequestPasswordReset",
+        "summary": "Request password recovery",
+        "description": "Requests a password reset token. Anti-enumeration: returns 200 regardless of account existence.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PasswordResetRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset email dispatched if account exists.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StatusResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/auth/password-reset": {
+      "get": {
+        "operationId": "authViewPasswordReset",
+        "summary": "Password reset landing page",
+        "description": "Renders the password reset HTML form for email recovery links.",
+        "tags": ["auth"],
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "required": true,
+            "description": "Password recovery token.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HTML form rendered.",
+            "content": {
+              "text/html": {
+                "schema": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/auth/password-reset/confirm": {
+      "post": {
+        "operationId": "authConfirmPasswordReset",
+        "summary": "Complete password reset",
+        "description": "Consumes the password recovery token, updates the credential, and revokes all active sessions.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PasswordResetConfirm" }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/PasswordResetConfirm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password reset complete.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/StatusResponse" }
+              },
+              "text/html": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 }
+        }
+      },
+      "RegisterResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["pending_verification"] }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string" }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "required": ["status", "account_id"],
+        "properties": {
+          "status": { "type": "string", "enum": ["authenticated"] },
+          "account_id": { "type": "string" }
+        }
+      },
+      "PasswordResetRequest": {
+        "type": "object",
+        "required": ["email"],
+        "properties": {
+          "email": { "type": "string", "format": "email" }
+        }
+      },
+      "PasswordResetConfirm": {
+        "type": "object",
+        "required": ["token", "password"],
+        "properties": {
+          "token": { "type": "string" },
+          "password": { "type": "string", "minLength": 8 }
+        }
+      },
+      "StatusResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string" }
+        }
+      },
       "HealthStatus": {
         "type": "object",
         "required": ["status"],
@@ -216,6 +465,7 @@
   },
   "security": [],
   "tags": [
-    { "name": "health", "description": "Process probes consumed by the supervisor." }
+    { "name": "health", "description": "Process probes consumed by the supervisor." },
+    { "name": "auth", "description": "Authentication, registration, session management and recovery." }
   ]
 }

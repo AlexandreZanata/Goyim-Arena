@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 )
 
 // Route is one registered endpoint.
@@ -28,6 +29,18 @@ func (route Route) String() string {
 	return route.Method + " " + route.Path
 }
 
+var (
+	routeProvidersMu sync.Mutex
+	routeProviders   []func() []Route
+)
+
+// RegisterRouteProvider records a route provider for dynamic module aggregation.
+func RegisterRouteProvider(provider func() []Route) {
+	routeProvidersMu.Lock()
+	defer routeProvidersMu.Unlock()
+	routeProviders = append(routeProviders, provider)
+}
+
 // HealthRoutes lists the platform health endpoints registered by the
 // process. Future route groups (API v1) extend the registry in their own
 // package and are aggregated at composition time.
@@ -40,8 +53,17 @@ func HealthRoutes() []Route {
 
 // RegisteredRoutes returns every route the process registers, sorted in
 // canonical "METHOD /path" order, so comparisons are deterministic.
-func RegisteredRoutes() []Route {
+func RegisteredRoutes(extra ...[]Route) []Route {
+	routeProvidersMu.Lock()
+	defer routeProvidersMu.Unlock()
+
 	routes := append([]Route{}, HealthRoutes()...)
+	for _, provider := range routeProviders {
+		routes = append(routes, provider()...)
+	}
+	for _, group := range extra {
+		routes = append(routes, group...)
+	}
 	sort.Slice(routes, func(i, j int) bool {
 		return routes[i].String() < routes[j].String()
 	})
