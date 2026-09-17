@@ -16,6 +16,10 @@ const (
 	CodeAccountDeleted           ErrorCode = "AUTH_ACCOUNT_DELETED"
 	CodeAccountAlreadyVerified   ErrorCode = "AUTH_ACCOUNT_ALREADY_VERIFIED"
 	CodeAccountNotActive         ErrorCode = "AUTH_ACCOUNT_NOT_ACTIVE"
+	CodeEmptySessionID           ErrorCode = "AUTH_EMPTY_SESSION_ID"
+	CodeEmptySessionToken        ErrorCode = "AUTH_EMPTY_SESSION_TOKEN"
+	CodeSessionRevoked           ErrorCode = "AUTH_SESSION_REVOKED"
+	CodeSessionExpired           ErrorCode = "AUTH_SESSION_EXPIRED"
 )
 
 // DomainError represents an invariant or rule failure in the identity domain.
@@ -47,4 +51,8 @@ var (
 	ErrAccountDeleted           = DomainError{Code: CodeAccountDeleted, Message: "account is deleted"}
 	ErrAccountAlreadyVerified   = DomainError{Code: CodeAccountAlreadyVerified, Message: "account email is already verified"}
 	ErrAccountNotActive         = DomainError{Code: CodeAccountNotActive, Message: "account is not in active state"}
+	ErrEmptySessionID           = DomainError{Code: CodeEmptySessionID, Message: "session identifier cannot be empty"}
+	ErrEmptySessionToken        = DomainError{Code: CodeEmptySessionToken, Message: "session token hash cannot be empty"}
+	ErrSessionRevoked           = DomainError{Code: CodeSessionRevoked, Message: "session has been revoked"}
+	ErrSessionExpired           = DomainError{Code: CodeSessionExpired, Message: "session has expired"}
 )

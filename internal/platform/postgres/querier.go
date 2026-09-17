@@ -30,6 +30,7 @@ type Querier interface {
 	// GetHealthMetadata retrieves the latest applied migration metadata from app.schema_metadata.
 	GetHealthMetadata(ctx context.Context) (GetHealthMetadataRow, error)
 	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
+	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) error
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) error
@@ -38,6 +39,7 @@ type Querier interface {
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
 	RevokeSession(ctx context.Context, tokenHash []byte) error
 	SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAccount, error)
+	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateAccountStatus(ctx context.Context, arg UpdateAccountStatusParams) (AppAccount, error)
 	UpdatePasswordCredential(ctx context.Context, arg UpdatePasswordCredentialParams) error
 	UpdateSessionLastSeen(ctx context.Context, id pgtype.UUID) error

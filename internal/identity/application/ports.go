@@ -87,3 +87,38 @@ type EmailSender interface {
 	// SendVerificationEmail delivers or enqueues an email containing the unhashed verification token.
 	SendVerificationEmail(ctx context.Context, email domain.Email, token string) error
 }
+
+// PasswordCredentialRecord represents a stored password credential.
+type PasswordCredentialRecord struct {
+	AccountID    domain.AccountID
+	PasswordHash string
+	Algorithm    string
+	Version      int32
+}
+
+// PasswordCredentialRepository manages storage and updates of password credentials.
+type PasswordCredentialRepository interface {
+	// GetPasswordCredential retrieves the password credential record for an account.
+	GetPasswordCredential(ctx context.Context, accountID domain.AccountID) (*PasswordCredentialRecord, error)
+
+	// UpdatePasswordCredential updates the stored hash (e.g. during transparent rehash).
+	UpdatePasswordCredential(ctx context.Context, accountID domain.AccountID, passwordHash string, algorithm string, version int32) error
+}
+
+// SessionRepository manages persistence, retrieval, and revocation of opaque user sessions.
+type SessionRepository interface {
+	// CreateSession stores a newly created session record and returns the reconstituted domain Session.
+	CreateSession(ctx context.Context, accountID domain.AccountID, tokenHash []byte, expiresAt time.Time, ipAddress, userAgent string) (*domain.Session, error)
+
+	// GetSessionByTokenHash retrieves a session by its SHA-256 token hash (including expired or revoked).
+	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (*domain.Session, error)
+
+	// TouchSession updates the last_seen_at and expires_at timestamps of an active session.
+	TouchSession(ctx context.Context, id domain.SessionID, lastSeenAt, expiresAt time.Time) error
+
+	// RevokeSession marks a single session as revoked by its token hash.
+	RevokeSession(ctx context.Context, tokenHash []byte) error
+
+	// RevokeAllAccountSessions revokes all active sessions for a given account.
+	RevokeAllAccountSessions(ctx context.Context, accountID domain.AccountID) error
+}

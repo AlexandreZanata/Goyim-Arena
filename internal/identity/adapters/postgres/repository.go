@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,15 +17,17 @@ import (
 	platformpg "github.com/AlexandreZanata/Goyim-Arena/internal/platform/postgres"
 )
 
-// Repository implements application.AccountRepository and application.VerificationTokenRepository.
+// Repository implements identity application repositories using PostgreSQL.
 type Repository struct {
 	pool    *pgxpool.Pool
 	queries *platformpg.Queries
 }
 
 var (
-	_ application.AccountRepository           = (*Repository)(nil)
-	_ application.VerificationTokenRepository = (*Repository)(nil)
+	_ application.AccountRepository            = (*Repository)(nil)
+	_ application.PasswordCredentialRepository = (*Repository)(nil)
+	_ application.VerificationTokenRepository  = (*Repository)(nil)
+	_ application.SessionRepository            = (*Repository)(nil)
 )
 
 // NewRepository creates a PostgreSQL repository adapter for identity.
@@ -188,6 +191,135 @@ func (r *Repository) InvalidateActiveTokens(ctx context.Context, accountID domai
 	return nil
 }
 
+// GetPasswordCredential retrieves the password credential record for an account.
+func (r *Repository) GetPasswordCredential(ctx context.Context, accountID domain.AccountID) (*application.PasswordCredentialRecord, error) {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(accountID.String()); err != nil {
+		return nil, fmt.Errorf("invalid account id format: %w", err)
+	}
+
+	row, err := r.queries.GetPasswordCredentialByAccountID(ctx, pgUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrCredentialNotFound
+		}
+		return nil, fmt.Errorf("get password credential: %w", err)
+	}
+
+	return &application.PasswordCredentialRecord{
+		AccountID:    domain.AccountID(uuidToString(row.AccountID)),
+		PasswordHash: row.PasswordHash,
+		Algorithm:    row.Algorithm,
+		Version:      row.Version,
+	}, nil
+}
+
+// UpdatePasswordCredential updates the stored hash (e.g. during transparent rehash).
+func (r *Repository) UpdatePasswordCredential(ctx context.Context, accountID domain.AccountID, passwordHash string, algorithm string, version int32) error {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(accountID.String()); err != nil {
+		return fmt.Errorf("invalid account id format: %w", err)
+	}
+
+	err := r.queries.UpdatePasswordCredential(ctx, platformpg.UpdatePasswordCredentialParams{
+		AccountID:    pgUUID,
+		PasswordHash: passwordHash,
+		Algorithm:    algorithm,
+		Version:      version,
+	})
+	if err != nil {
+		return fmt.Errorf("update password credential: %w", err)
+	}
+	return nil
+}
+
+// CreateSession stores a newly created session record and returns the reconstituted domain Session.
+func (r *Repository) CreateSession(
+	ctx context.Context,
+	accountID domain.AccountID,
+	tokenHash []byte,
+	expiresAt time.Time,
+	ipAddress, userAgent string,
+) (*domain.Session, error) {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(accountID.String()); err != nil {
+		return nil, fmt.Errorf("invalid account id format: %w", err)
+	}
+
+	var ipText, uaText pgtype.Text
+	if strings.TrimSpace(ipAddress) != "" {
+		ipText = pgtype.Text{String: strings.TrimSpace(ipAddress), Valid: true}
+	}
+	if strings.TrimSpace(userAgent) != "" {
+		uaText = pgtype.Text{String: strings.TrimSpace(userAgent), Valid: true}
+	}
+
+	row, err := r.queries.CreateSession(ctx, platformpg.CreateSessionParams{
+		AccountID: pgUUID,
+		TokenHash: tokenHash,
+		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
+		IpAddress: ipText,
+		UserAgent: uaText,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("create session in postgres: %w", err)
+	}
+
+	return mapSessionRow(row)
+}
+
+// GetSessionByTokenHash retrieves a session by its SHA-256 token hash (including expired or revoked).
+func (r *Repository) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (*domain.Session, error) {
+	row, err := r.queries.GetSessionByTokenHash(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrSessionNotFound
+		}
+		return nil, fmt.Errorf("get session by token hash: %w", err)
+	}
+
+	return mapSessionRow(row)
+}
+
+// TouchSession updates the last_seen_at and expires_at timestamps of an active session.
+func (r *Repository) TouchSession(ctx context.Context, id domain.SessionID, lastSeenAt, expiresAt time.Time) error {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id.String()); err != nil {
+		return fmt.Errorf("invalid session id format: %w", err)
+	}
+
+	err := r.queries.TouchSession(ctx, platformpg.TouchSessionParams{
+		ID:         pgUUID,
+		LastSeenAt: pgtype.Timestamptz{Time: lastSeenAt, Valid: true},
+		ExpiresAt:  pgtype.Timestamptz{Time: expiresAt, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("touch session: %w", err)
+	}
+	return nil
+}
+
+// RevokeSession marks a single session as revoked by its token hash.
+func (r *Repository) RevokeSession(ctx context.Context, tokenHash []byte) error {
+	if err := r.queries.RevokeSession(ctx, tokenHash); err != nil {
+		return fmt.Errorf("revoke session: %w", err)
+	}
+	return nil
+}
+
+// RevokeAllAccountSessions revokes all active sessions for a given account.
+func (r *Repository) RevokeAllAccountSessions(ctx context.Context, accountID domain.AccountID) error {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(accountID.String()); err != nil {
+		return fmt.Errorf("invalid account id format: %w", err)
+	}
+
+	if err := r.queries.RevokeAllAccountSessions(ctx, pgUUID); err != nil {
+		return fmt.Errorf("revoke all account sessions: %w", err)
+	}
+	return nil
+}
+
 func mapAccountRow(row platformpg.AppAccount) (*domain.Account, error) {
 	email, err := domain.ParseEmail(row.Email)
 	if err != nil {
@@ -207,6 +339,35 @@ func mapAccountRow(row platformpg.AppAccount) (*domain.Account, error) {
 		verifiedAt,
 		row.CreatedAt.Time,
 		row.UpdatedAt.Time,
+	)
+}
+
+func mapSessionRow(row platformpg.AppSession) (*domain.Session, error) {
+	var revokedAt *time.Time
+	if row.RevokedAt.Valid {
+		t := row.RevokedAt.Time
+		revokedAt = &t
+	}
+
+	ip := ""
+	if row.IpAddress.Valid {
+		ip = row.IpAddress.String
+	}
+	ua := ""
+	if row.UserAgent.Valid {
+		ua = row.UserAgent.String
+	}
+
+	return domain.ReconstituteSession(
+		domain.SessionID(uuidToString(row.ID)),
+		domain.AccountID(uuidToString(row.AccountID)),
+		row.TokenHash,
+		row.CreatedAt.Time,
+		row.ExpiresAt.Time,
+		row.LastSeenAt.Time,
+		revokedAt,
+		ip,
+		ua,
 	)
 }
 

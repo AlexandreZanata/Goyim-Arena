@@ -97,9 +97,19 @@ SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked
 FROM app.sessions
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now();
 
+-- name: GetSessionByTokenHash :one
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+FROM app.sessions
+WHERE token_hash = $1;
+
 -- name: UpdateSessionLastSeen :exec
 UPDATE app.sessions
 SET last_seen_at = now()
+WHERE id = $1 AND revoked_at IS NULL;
+
+-- name: TouchSession :exec
+UPDATE app.sessions
+SET last_seen_at = $2, expires_at = $3
 WHERE id = $1 AND revoked_at IS NULL;
 
 -- name: RevokeSession :exec

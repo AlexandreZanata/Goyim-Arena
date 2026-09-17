@@ -326,6 +326,29 @@ func (q *Queries) GetPasswordCredentialByAccountID(ctx context.Context, accountI
 	return i, err
 }
 
+const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+FROM app.sessions
+WHERE token_hash = $1
+`
+
+func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error) {
+	row := q.db.QueryRow(ctx, getSessionByTokenHash, tokenHash)
+	var i AppSession
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.TokenHash,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastSeenAt,
+		&i.RevokedAt,
+		&i.IpAddress,
+		&i.UserAgent,
+	)
+	return i, err
+}
+
 const invalidateActiveEmailVerificationTokens = `-- name: InvalidateActiveEmailVerificationTokens :exec
 UPDATE app.email_verification_tokens
 SET used_at = now()
@@ -400,6 +423,23 @@ func (q *Queries) SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAcco
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const touchSession = `-- name: TouchSession :exec
+UPDATE app.sessions
+SET last_seen_at = $2, expires_at = $3
+WHERE id = $1 AND revoked_at IS NULL
+`
+
+type TouchSessionParams struct {
+	ID         pgtype.UUID
+	LastSeenAt pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+}
+
+func (q *Queries) TouchSession(ctx context.Context, arg TouchSessionParams) error {
+	_, err := q.db.Exec(ctx, touchSession, arg.ID, arg.LastSeenAt, arg.ExpiresAt)
+	return err
 }
 
 const updateAccountStatus = `-- name: UpdateAccountStatus :one
