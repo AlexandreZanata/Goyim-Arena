@@ -38,6 +38,50 @@ func (q *Queries) CreateAttribution(ctx context.Context, arg CreateAttributionPa
 	return id, err
 }
 
+const getAttributionForModeration = `-- name: GetAttributionForModeration :one
+SELECT id, position_change_id, attributor_id, argument_id, status, created_at,
+       moderation_reason, moderated_by, moderated_at
+FROM app.persuasion_attributions
+WHERE id = $1::uuid
+FOR UPDATE
+`
+
+type GetAttributionForModerationRow struct {
+	ID               pgtype.UUID
+	PositionChangeID pgtype.UUID
+	AttributorID     pgtype.UUID
+	ArgumentID       pgtype.UUID
+	Status           string
+	CreatedAt        pgtype.Timestamptz
+	ModerationReason pgtype.Text
+	ModeratedBy      pgtype.UUID
+	ModeratedAt      pgtype.Timestamptz
+}
+
+// GetAttributionForModeration loads one attribution with its current
+// validity and its latest moderation decision and locks it FOR UPDATE, so
+// concurrent decisions on the same row serialize instead of overwriting
+// each other (P11-T04). It is the moderation read projection: a consumer
+// reads validity from the retained row that the schema keeps coherent with
+// the decision record, so no projection can observe an unrecorded
+// invalidation.
+func (q *Queries) GetAttributionForModeration(ctx context.Context, attributionID pgtype.UUID) (GetAttributionForModerationRow, error) {
+	row := q.db.QueryRow(ctx, getAttributionForModeration, attributionID)
+	var i GetAttributionForModerationRow
+	err := row.Scan(
+		&i.ID,
+		&i.PositionChangeID,
+		&i.AttributorID,
+		&i.ArgumentID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.ModerationReason,
+		&i.ModeratedBy,
+		&i.ModeratedAt,
+	)
+	return i, err
+}
+
 const getPositionChangeForAttributor = `-- name: GetPositionChangeForAttributor :one
 SELECT id, arena_id, account_id, changed_at
 FROM app.position_changes
@@ -71,6 +115,64 @@ func (q *Queries) GetPositionChangeForAttributor(ctx context.Context, arg GetPos
 		&i.ArenaID,
 		&i.AccountID,
 		&i.ChangedAt,
+	)
+	return i, err
+}
+
+const invalidateAttribution = `-- name: InvalidateAttribution :one
+UPDATE app.persuasion_attributions
+SET status = 'invalid',
+    invalidated_at = $1::timestamptz,
+    moderation_reason = $2::text,
+    moderated_by = $3::uuid,
+    moderated_at = $1::timestamptz
+WHERE id = $4::uuid
+  AND status = 'valid'
+RETURNING id, position_change_id, attributor_id, argument_id, status, created_at,
+          moderation_reason, moderated_by, moderated_at
+`
+
+type InvalidateAttributionParams struct {
+	DecidedAt     pgtype.Timestamptz
+	Reason        string
+	ModeratorID   pgtype.UUID
+	AttributionID pgtype.UUID
+}
+
+type InvalidateAttributionRow struct {
+	ID               pgtype.UUID
+	PositionChangeID pgtype.UUID
+	AttributorID     pgtype.UUID
+	ArgumentID       pgtype.UUID
+	Status           string
+	CreatedAt        pgtype.Timestamptz
+	ModerationReason pgtype.Text
+	ModeratedBy      pgtype.UUID
+	ModeratedAt      pgtype.Timestamptz
+}
+
+// InvalidateAttribution moves a valid attribution to invalid, recording the
+// actor, the mandatory reason and the instant on the retained row; nothing
+// is deleted. The status guard loses the race instead of overwriting a
+// concurrent decision.
+func (q *Queries) InvalidateAttribution(ctx context.Context, arg InvalidateAttributionParams) (InvalidateAttributionRow, error) {
+	row := q.db.QueryRow(ctx, invalidateAttribution,
+		arg.DecidedAt,
+		arg.Reason,
+		arg.ModeratorID,
+		arg.AttributionID,
+	)
+	var i InvalidateAttributionRow
+	err := row.Scan(
+		&i.ID,
+		&i.PositionChangeID,
+		&i.AttributorID,
+		&i.ArgumentID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.ModerationReason,
+		&i.ModeratedBy,
+		&i.ModeratedAt,
 	)
 	return i, err
 }
@@ -145,4 +247,61 @@ func (q *Queries) ListAttributionCandidates(ctx context.Context, argumentIds []p
 		return nil, err
 	}
 	return items, nil
+}
+
+const restoreAttribution = `-- name: RestoreAttribution :one
+UPDATE app.persuasion_attributions
+SET status = 'valid',
+    invalidated_at = NULL,
+    moderation_reason = $1::text,
+    moderated_by = $2::uuid,
+    moderated_at = $3::timestamptz
+WHERE id = $4::uuid
+  AND status = 'invalid'
+RETURNING id, position_change_id, attributor_id, argument_id, status, created_at,
+          moderation_reason, moderated_by, moderated_at
+`
+
+type RestoreAttributionParams struct {
+	Reason        string
+	ModeratorID   pgtype.UUID
+	DecidedAt     pgtype.Timestamptz
+	AttributionID pgtype.UUID
+}
+
+type RestoreAttributionRow struct {
+	ID               pgtype.UUID
+	PositionChangeID pgtype.UUID
+	AttributorID     pgtype.UUID
+	ArgumentID       pgtype.UUID
+	Status           string
+	CreatedAt        pgtype.Timestamptz
+	ModerationReason pgtype.Text
+	ModeratedBy      pgtype.UUID
+	ModeratedAt      pgtype.Timestamptz
+}
+
+// RestoreAttribution reverses one invalidation on the same retained row,
+// recording the restore decision: the row moves back to valid and the
+// decision record is replaced by the newest one, never erased.
+func (q *Queries) RestoreAttribution(ctx context.Context, arg RestoreAttributionParams) (RestoreAttributionRow, error) {
+	row := q.db.QueryRow(ctx, restoreAttribution,
+		arg.Reason,
+		arg.ModeratorID,
+		arg.DecidedAt,
+		arg.AttributionID,
+	)
+	var i RestoreAttributionRow
+	err := row.Scan(
+		&i.ID,
+		&i.PositionChangeID,
+		&i.AttributorID,
+		&i.ArgumentID,
+		&i.Status,
+		&i.CreatedAt,
+		&i.ModerationReason,
+		&i.ModeratedBy,
+		&i.ModeratedAt,
+	)
+	return i, err
 }

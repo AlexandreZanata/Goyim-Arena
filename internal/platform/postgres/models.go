@@ -182,6 +182,12 @@ type AppPersuasionAttribution struct {
 	Status        string
 	CreatedAt     pgtype.Timestamptz
 	InvalidatedAt pgtype.Timestamptz
+	// Mandatory justification of the latest moderation decision; never cleared, so the decision stays recorded without deleting the row
+	ModerationReason pgtype.Text
+	// Moderator account that took the latest decision (invalidate or restore)
+	ModeratedBy pgtype.UUID
+	// Instant of the latest moderation decision; coincides with invalidated_at while the attribution is invalid
+	ModeratedAt pgtype.Timestamptz
 }
 
 // Append-only chain of accepted position changes; from_position and to_position always differ

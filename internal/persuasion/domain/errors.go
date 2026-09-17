@@ -22,6 +22,15 @@ const (
 	CodeSelfAttribution         ErrorCode = "PERSUASION_SELF_ATTRIBUTION"
 	CodeArgumentNotBeforeChange ErrorCode = "PERSUASION_ARGUMENT_NOT_BEFORE_CHANGE"
 	CodeArgumentNotEligible     ErrorCode = "PERSUASION_ARGUMENT_NOT_ELIGIBLE"
+
+	CodeEmptyAttributionID        ErrorCode = "PERSUASION_EMPTY_ATTRIBUTION_ID"
+	CodeEmptyModeratorID          ErrorCode = "PERSUASION_EMPTY_MODERATOR_ID"
+	CodeInvalidAttributionStatus  ErrorCode = "PERSUASION_INVALID_ATTRIBUTION_STATUS"
+	CodeInvalidModerationAction   ErrorCode = "PERSUASION_INVALID_MODERATION_ACTION"
+	CodeEmptyReason               ErrorCode = "PERSUASION_EMPTY_REASON"
+	CodeInvalidReason             ErrorCode = "PERSUASION_INVALID_REASON"
+	CodeReasonTooLong             ErrorCode = "PERSUASION_REASON_TOO_LONG"
+	CodeAttributionNotModeratable ErrorCode = "PERSUASION_ATTRIBUTION_NOT_MODERATABLE"
 )
 
 // DomainError represents an invariant or rule failure in the persuasion
@@ -93,4 +102,33 @@ var (
 	// ErrArgumentNotEligible indicates an argument unavailable to the
 	// public (withdrawn or removed) at selection time.
 	ErrArgumentNotEligible = DomainError{Code: CodeArgumentNotEligible, Message: "the argument is not eligible for attribution"}
+
+	// ErrEmptyAttributionID indicates a missing attribution identifier.
+	ErrEmptyAttributionID = DomainError{Code: CodeEmptyAttributionID, Message: "attribution identifier cannot be empty"}
+
+	// ErrEmptyModeratorID indicates a moderation decision without an acting
+	// moderator.
+	ErrEmptyModeratorID = DomainError{Code: CodeEmptyModeratorID, Message: "moderation decisions require an acting moderator"}
+
+	// ErrInvalidAttributionStatus indicates a validity outside the closed
+	// vocabulary valid|invalid.
+	ErrInvalidAttributionStatus = DomainError{Code: CodeInvalidAttributionStatus, Message: "attribution status must be valid or invalid"}
+
+	// ErrInvalidModerationAction indicates an action outside the closed
+	// vocabulary or one that does not match the requested transition.
+	ErrInvalidModerationAction = DomainError{Code: CodeInvalidModerationAction, Message: "moderation action must be invalidate or restore"}
+
+	// ErrEmptyReason indicates a moderation decision without a reason.
+	ErrEmptyReason = DomainError{Code: CodeEmptyReason, Message: "moderation decisions require a reason"}
+
+	// ErrInvalidReason indicates a reason with unsupported characters.
+	ErrInvalidReason = DomainError{Code: CodeInvalidReason, Message: "reason contains unsupported characters"}
+
+	// ErrReasonTooLong indicates a reason above the configured maximum.
+	ErrReasonTooLong = DomainError{Code: CodeReasonTooLong, Message: "reason exceeds the maximum allowed length"}
+
+	// ErrAttributionNotModeratable indicates a transition that the current
+	// validity already satisfies (invalidating an invalid attribution or
+	// restoring a valid one).
+	ErrAttributionNotModeratable = DomainError{Code: CodeAttributionNotModeratable, Message: "the attribution is already in the requested validity state"}
 )

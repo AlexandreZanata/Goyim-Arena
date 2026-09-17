@@ -2,9 +2,16 @@ package application
 
 import (
 	"context"
+	"time"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/persuasion/domain"
 )
+
+// Clock exposes wall-clock time to persuasion use cases, keeping them
+// deterministic under test (ADR-012).
+type Clock interface {
+	Now() time.Time
+}
 
 // UnitOfWork runs a function inside one database transaction. Recording
 // attributions uses it so the set-level checks and the inserts commit or

@@ -24,7 +24,10 @@ type Repository struct {
 	queries *platformpg.Queries
 }
 
-var _ application.AttributionRepository = (*Repository)(nil)
+var (
+	_ application.AttributionRepository           = (*Repository)(nil)
+	_ application.AttributionModerationRepository = (*Repository)(nil)
+)
 
 // NewRepository creates a PostgreSQL repository adapter for persuasion.
 func NewRepository(pool *pgxpool.Pool) *Repository {
@@ -190,6 +193,141 @@ func (r *Repository) CreateAttributions(ctx context.Context, changeID domain.Cha
 		}
 	}
 	return nil
+}
+
+// LockAttributionForModeration loads the attribution with its current
+// validity and latest decision and locks it FOR UPDATE, so concurrent
+// decisions on the same row serialize.
+func (r *Repository) LockAttributionForModeration(ctx context.Context, attributionID domain.AttributionID) (*domain.Attribution, error) {
+	param, ok := uuidParam(attributionID.String())
+	if !ok {
+		return nil, application.ErrAttributionNotFound
+	}
+
+	row, err := r.queriesFor(ctx).GetAttributionForModeration(ctx, param)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrAttributionNotFound
+		}
+		return nil, fmt.Errorf("lock attribution: %w", err)
+	}
+	return moderationAttribution(row.ID, row.PositionChangeID, row.AttributorID, row.ArgumentID, row.Status, row.CreatedAt, row.ModerationReason, row.ModeratedBy, row.ModeratedAt)
+}
+
+// ApplyModerationDecision writes the decision and moves the validity to the
+// action target under the guard of the validity that action requires.
+func (r *Repository) ApplyModerationDecision(ctx context.Context, attributionID domain.AttributionID, decision domain.ModerationDecision) (*domain.Attribution, error) {
+	attributionParam, ok := uuidParam(attributionID.String())
+	if !ok {
+		return nil, application.ErrAttributionNotFound
+	}
+	moderatorParam, ok := uuidParam(decision.Actor.String())
+	if !ok {
+		return nil, fmt.Errorf("moderator id is not a database identifier")
+	}
+	decidedAt := pgtype.Timestamptz{Time: decision.DecidedAt, Valid: true}
+
+	switch decision.Action {
+	case domain.ModerationActionInvalidate:
+		row, err := r.queriesFor(ctx).InvalidateAttribution(ctx, platformpg.InvalidateAttributionParams{
+			DecidedAt:     decidedAt,
+			Reason:        decision.Reason.String(),
+			ModeratorID:   moderatorParam,
+			AttributionID: attributionParam,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, application.ErrModerationConflict
+			}
+			return nil, fmt.Errorf("invalidate attribution: %w", err)
+		}
+		return moderationAttribution(row.ID, row.PositionChangeID, row.AttributorID, row.ArgumentID, row.Status, row.CreatedAt, row.ModerationReason, row.ModeratedBy, row.ModeratedAt)
+	case domain.ModerationActionRestore:
+		row, err := r.queriesFor(ctx).RestoreAttribution(ctx, platformpg.RestoreAttributionParams{
+			Reason:        decision.Reason.String(),
+			ModeratorID:   moderatorParam,
+			DecidedAt:     decidedAt,
+			AttributionID: attributionParam,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, application.ErrModerationConflict
+			}
+			return nil, fmt.Errorf("restore attribution: %w", err)
+		}
+		return moderationAttribution(row.ID, row.PositionChangeID, row.AttributorID, row.ArgumentID, row.Status, row.CreatedAt, row.ModerationReason, row.ModeratedBy, row.ModeratedAt)
+	default:
+		return nil, domain.ErrInvalidModerationAction
+	}
+}
+
+// moderationAttribution maps one moderation row into the domain entity. The
+// three moderation queries project the same columns, so a single mapping
+// keeps validity reading identical everywhere.
+func moderationAttribution(
+	id, positionChangeID, attributorID, argumentID pgtype.UUID,
+	status string,
+	createdAt pgtype.Timestamptz,
+	reason pgtype.Text,
+	moderatedBy pgtype.UUID,
+	moderatedAt pgtype.Timestamptz,
+) (*domain.Attribution, error) {
+	attributionID, err := domain.ParseAttributionID(uuidToString(id))
+	if err != nil {
+		return nil, fmt.Errorf("stored attribution id is invalid: %w", err)
+	}
+	changeID, err := domain.ParseChangeID(uuidToString(positionChangeID))
+	if err != nil {
+		return nil, fmt.Errorf("stored change id is invalid: %w", err)
+	}
+	attributor, err := domain.ParseAttributorID(uuidToString(attributorID))
+	if err != nil {
+		return nil, fmt.Errorf("stored attributor id is invalid: %w", err)
+	}
+	argument, err := domain.ParseArgumentID(uuidToString(argumentID))
+	if err != nil {
+		return nil, fmt.Errorf("stored argument id is invalid: %w", err)
+	}
+	validity, err := domain.ParseAttributionStatus(status)
+	if err != nil {
+		return nil, fmt.Errorf("stored attribution status is invalid: %w", err)
+	}
+	if reason.Valid != moderatedBy.Valid {
+		return nil, fmt.Errorf("stored moderation decision is incoherent")
+	}
+
+	attribution := &domain.Attribution{
+		ID:           attributionID,
+		ChangeID:     changeID,
+		ArgumentID:   argument,
+		AttributorID: attributor,
+		Status:       validity,
+		CreatedAt:    createdAt.Time,
+	}
+	if reason.Valid {
+		decisionReason, err := domain.ParseReason(reason.String)
+		if err != nil {
+			return nil, fmt.Errorf("stored moderation reason is invalid: %w", err)
+		}
+		actor, err := domain.ParseModeratorID(uuidToString(moderatedBy))
+		if err != nil {
+			return nil, fmt.Errorf("stored moderator id is invalid: %w", err)
+		}
+		// The recorded action is the one that produced the current validity:
+		// an invalid attribution was invalidated, a valid one with a decision
+		// was restored.
+		action := domain.ModerationActionInvalidate
+		if validity == domain.AttributionStatusValid {
+			action = domain.ModerationActionRestore
+		}
+		attribution.Decision = domain.ModerationDecision{
+			Action:    action,
+			Actor:     actor,
+			Reason:    decisionReason,
+			DecidedAt: moderatedAt.Time,
+		}
+	}
+	return attribution, nil
 }
 
 // uuidParam parses a canonical UUID string into its database parameter.

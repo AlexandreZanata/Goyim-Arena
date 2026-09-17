@@ -13,6 +13,14 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/postgres"
 )
 
+// uuidOrNil renders an optional identifier as its database parameter.
+func uuidOrNil(value *pgtype.UUID) pgtype.UUID {
+	if value == nil {
+		return pgtype.UUID{}
+	}
+	return *value
+}
+
 // mustAttributionContext seeds one author with a position change and one
 // argument authored by another account, returning the identifiers the
 // schema tests link together.
@@ -53,6 +61,7 @@ func TestPersuasionAttributionSchemaConstraints(t *testing.T) {
 	pool := db.Pool.Pool()
 	q := postgres.New(db.Pool)
 	author, other, _, argumentID, changeID := mustAttributionContext(t, ctx, pool, q, "attribution-schema@arena.example.com")
+	moderator := mustCreateAccount(t, ctx, q, "attribution-moderator@arena.example.com").ID
 
 	// A valid attribution.
 	if _, err := pool.Exec(ctx, `
@@ -80,6 +89,13 @@ func TestPersuasionAttributionSchemaConstraints(t *testing.T) {
 		t.Fatalf("insert second argument: %v", err)
 	}
 
+	now := time.Now().UTC()
+	reason := "atribuição fraudulenta confirmada"
+	blankReason := "   "
+	longReason := strings.Repeat("a", 501)
+
+	// The decision record is all-or-nothing: validity only moves through a
+	// complete decision, so no projection can observe an unrecorded change.
 	probes := []struct {
 		name        string
 		changeID    pgtype.UUID
@@ -87,21 +103,29 @@ func TestPersuasionAttributionSchemaConstraints(t *testing.T) {
 		argumentID  pgtype.UUID
 		status      string
 		invalidated *time.Time
+		reason      *string
+		moderator   *pgtype.UUID
 		want        string
 	}{
 		{name: "unknown change", changeID: orphan, attributor: author, argumentID: secondArgument, status: "valid", want: "23503"},
 		{name: "unknown argument", changeID: changeID, attributor: author, argumentID: orphan, status: "valid", want: "23503"},
 		{name: "mismatched attributor", changeID: changeID, attributor: other, argumentID: secondArgument, status: "valid", want: "23503"},
 		{name: "unknown status", changeID: changeID, attributor: author, argumentID: secondArgument, status: "maybe", want: "23514"},
-		{name: "invalid without instant", changeID: changeID, attributor: author, argumentID: secondArgument, status: "invalid", want: "23514"},
+		{name: "invalid without instant", changeID: changeID, attributor: author, argumentID: secondArgument, status: "invalid", reason: &reason, moderator: &moderator, want: "23514"},
+		{name: "invalid without decision", changeID: changeID, attributor: author, argumentID: secondArgument, status: "invalid", invalidated: &now, want: "23514"},
+		{name: "decision without reason", changeID: changeID, attributor: author, argumentID: secondArgument, status: "invalid", invalidated: &now, moderator: &moderator, want: "23514"},
+		{name: "decision without moderator", changeID: changeID, attributor: author, argumentID: secondArgument, status: "invalid", invalidated: &now, reason: &reason, want: "23514"},
+		{name: "decision without instant", changeID: changeID, attributor: author, argumentID: secondArgument, status: "invalid", reason: &reason, moderator: &moderator, want: "23514"},
+		{name: "blank reason", changeID: changeID, attributor: author, argumentID: secondArgument, status: "invalid", invalidated: &now, reason: &blankReason, moderator: &moderator, want: "23514"},
+		{name: "reason above the bound", changeID: changeID, attributor: author, argumentID: secondArgument, status: "invalid", invalidated: &now, reason: &longReason, moderator: &moderator, want: "23514"},
 	}
-	now := time.Now().UTC()
 	for _, probe := range probes {
 		t.Run(probe.name, func(t *testing.T) {
 			_, err := pool.Exec(ctx, `
-				INSERT INTO app.persuasion_attributions (position_change_id, attributor_id, argument_id, status, invalidated_at)
-				VALUES ($1, $2, $3, $4, $5)`,
-				probe.changeID, probe.attributor, probe.argumentID, probe.status, timeOrNil(probe.invalidated))
+				INSERT INTO app.persuasion_attributions (position_change_id, attributor_id, argument_id, status, invalidated_at, moderation_reason, moderated_by, moderated_at)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $5)`,
+				probe.changeID, probe.attributor, probe.argumentID, probe.status, timeOrNil(probe.invalidated),
+				textOrNil(probe.reason), uuidOrNil(probe.moderator))
 			assertPgCode(t, err, probe.want)
 		})
 	}
@@ -113,11 +137,26 @@ func TestPersuasionAttributionSchemaConstraints(t *testing.T) {
 		VALUES ($1, $2, $3, 'valid', $4)`, changeID, author, secondArgument, now)
 	assertPgCode(t, err, "23514")
 
-	// An invalid attribution with its instant is accepted.
+	// An invalid attribution carrying its complete decision is accepted.
 	if _, err := pool.Exec(ctx, `
-		INSERT INTO app.persuasion_attributions (position_change_id, attributor_id, argument_id, status, invalidated_at)
-		VALUES ($1, $2, $3, 'invalid', $4)`, changeID, author, secondArgument, now); err != nil {
+		INSERT INTO app.persuasion_attributions (position_change_id, attributor_id, argument_id, status, invalidated_at, moderation_reason, moderated_by, moderated_at)
+		VALUES ($1, $2, $3, 'invalid', $4, $5, $6, $4)`, changeID, author, secondArgument, now, reason, moderator); err != nil {
 		t.Fatalf("invalid attribution rejected: %v", err)
+	}
+
+	// A restored attribution is valid and keeps its decision record.
+	var thirdArgument pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO app.arguments (arena_id, author_id, relation, content, content_hash, grapheme_cost)
+		SELECT arena_id, author_id, 'oppose', 'Terceiro argumento para atribuição', $2, 41
+		FROM app.arguments WHERE id = $1
+		RETURNING id`, argumentID, validArgumentHash).Scan(&thirdArgument); err != nil {
+		t.Fatalf("insert third argument: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO app.persuasion_attributions (position_change_id, attributor_id, argument_id, status, moderation_reason, moderated_by, moderated_at)
+		VALUES ($1, $2, $3, 'valid', $4, $5, $6)`, changeID, author, thirdArgument, reason, moderator, now); err != nil {
+		t.Fatalf("restored attribution rejected: %v", err)
 	}
 }
 
@@ -129,6 +168,7 @@ func TestPersuasionAttributionImmutabilityAndRetention(t *testing.T) {
 	pool := db.Pool.Pool()
 	q := postgres.New(db.Pool)
 	author, _, _, argumentID, changeID := mustAttributionContext(t, ctx, pool, q, "attribution-immutable@arena.example.com")
+	moderator := mustCreateAccount(t, ctx, q, "attribution-immutable-moderator@arena.example.com").ID
 
 	var attributionID pgtype.UUID
 	if err := pool.QueryRow(ctx, `
@@ -154,20 +194,42 @@ func TestPersuasionAttributionImmutabilityAndRetention(t *testing.T) {
 		})
 	}
 
-	// Invalidation and restoration move only the status and its instant.
+	// Invalidation and restoration move the validity and the decision record
+	// on the retained row.
 	if _, err := pool.Exec(ctx, `
-		UPDATE app.persuasion_attributions SET status = 'invalid', invalidated_at = now()
-		WHERE id = $1`, attributionID); err != nil {
+		UPDATE app.persuasion_attributions
+		SET status = 'invalid', invalidated_at = now(),
+		    moderation_reason = 'atribuição fraudulenta confirmada',
+		    moderated_by = $2, moderated_at = now()
+		WHERE id = $1`, attributionID, moderator); err != nil {
 		t.Fatalf("invalidation rejected: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
-		UPDATE app.persuasion_attributions SET status = 'valid', invalidated_at = NULL
-		WHERE id = $1`, attributionID); err != nil {
+		UPDATE app.persuasion_attributions
+		SET status = 'valid', invalidated_at = NULL,
+		    moderation_reason = 'recurso aceito',
+		    moderated_by = $2, moderated_at = now()
+		WHERE id = $1`, attributionID, moderator); err != nil {
 		t.Fatalf("restoration rejected: %v", err)
 	}
 
+	// The decision record is preserved: a restored attribution may not drop
+	// its moderation history (only the trigger can reject this, since a valid
+	// attribution without a decision is otherwise coherent).
+	_, err := pool.Exec(ctx, `
+		UPDATE app.persuasion_attributions
+		SET moderation_reason = NULL, moderated_by = NULL, moderated_at = NULL
+		WHERE id = $1`, attributionID)
+	assertPgCode(t, err, "23514")
+
+	// An unrecorded invalidation is refused even for the owner.
+	_, err = pool.Exec(ctx, `
+		UPDATE app.persuasion_attributions SET status = 'invalid', invalidated_at = now()
+		WHERE id = $1`, attributionID)
+	assertPgCode(t, err, "23514")
+
 	// Attributions are retained for every role.
-	_, err := pool.Exec(ctx, "DELETE FROM app.persuasion_attributions WHERE id = $1", attributionID)
+	_, err = pool.Exec(ctx, "DELETE FROM app.persuasion_attributions WHERE id = $1", attributionID)
 	assertPgCode(t, err, "23514")
 	withAppRole(t, pool, func(ctx context.Context, tx pgx.Tx) {
 		_, err := tx.Exec(ctx, "DELETE FROM app.persuasion_attributions WHERE id = $1", attributionID)
@@ -179,10 +241,20 @@ func TestPersuasionAttributionImmutabilityAndRetention(t *testing.T) {
 	})
 	withAppRole(t, pool, func(ctx context.Context, tx pgx.Tx) {
 		if _, err := tx.Exec(ctx, `
-			UPDATE app.persuasion_attributions SET status = 'invalid', invalidated_at = now()
-			WHERE id = $1`, attributionID); err != nil {
+			UPDATE app.persuasion_attributions
+			SET status = 'invalid', invalidated_at = now(),
+			    moderation_reason = 'invalidação pelo runtime',
+			    moderated_by = $2, moderated_at = now()
+			WHERE id = $1`, attributionID, moderator); err != nil {
 			t.Fatalf("runtime invalidation rejected: %v", err)
 		}
+	})
+	// The runtime cannot invalidate without recording the decision either.
+	withAppRole(t, pool, func(ctx context.Context, tx pgx.Tx) {
+		_, err := tx.Exec(ctx, `
+			UPDATE app.persuasion_attributions SET status = 'invalid', invalidated_at = now()
+			WHERE id = $1`, attributionID)
+		assertPgCode(t, err, "23514")
 	})
 }
 

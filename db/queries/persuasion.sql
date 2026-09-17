@@ -38,3 +38,48 @@ VALUES (
 )
 ON CONFLICT (position_change_id, argument_id) DO NOTHING
 RETURNING id;
+
+-- GetAttributionForModeration loads one attribution with its current
+-- validity and its latest moderation decision and locks it FOR UPDATE, so
+-- concurrent decisions on the same row serialize instead of overwriting
+-- each other (P11-T04). It is the moderation read projection: a consumer
+-- reads validity from the retained row that the schema keeps coherent with
+-- the decision record, so no projection can observe an unrecorded
+-- invalidation.
+-- name: GetAttributionForModeration :one
+SELECT id, position_change_id, attributor_id, argument_id, status, created_at,
+       moderation_reason, moderated_by, moderated_at
+FROM app.persuasion_attributions
+WHERE id = sqlc.arg(attribution_id)::uuid
+FOR UPDATE;
+
+-- InvalidateAttribution moves a valid attribution to invalid, recording the
+-- actor, the mandatory reason and the instant on the retained row; nothing
+-- is deleted. The status guard loses the race instead of overwriting a
+-- concurrent decision.
+-- name: InvalidateAttribution :one
+UPDATE app.persuasion_attributions
+SET status = 'invalid',
+    invalidated_at = sqlc.arg(decided_at)::timestamptz,
+    moderation_reason = sqlc.arg(reason)::text,
+    moderated_by = sqlc.arg(moderator_id)::uuid,
+    moderated_at = sqlc.arg(decided_at)::timestamptz
+WHERE id = sqlc.arg(attribution_id)::uuid
+  AND status = 'valid'
+RETURNING id, position_change_id, attributor_id, argument_id, status, created_at,
+          moderation_reason, moderated_by, moderated_at;
+
+-- RestoreAttribution reverses one invalidation on the same retained row,
+-- recording the restore decision: the row moves back to valid and the
+-- decision record is replaced by the newest one, never erased.
+-- name: RestoreAttribution :one
+UPDATE app.persuasion_attributions
+SET status = 'valid',
+    invalidated_at = NULL,
+    moderation_reason = sqlc.arg(reason)::text,
+    moderated_by = sqlc.arg(moderator_id)::uuid,
+    moderated_at = sqlc.arg(decided_at)::timestamptz
+WHERE id = sqlc.arg(attribution_id)::uuid
+  AND status = 'invalid'
+RETURNING id, position_change_id, attributor_id, argument_id, status, created_at,
+          moderation_reason, moderated_by, moderated_at;

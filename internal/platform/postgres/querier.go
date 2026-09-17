@@ -135,6 +135,14 @@ type Querier interface {
 	// GetArgumentForAuthor returns one argument scoped to its author. A foreign
 	// argument is deliberately indistinguishable from a missing one (P10-T06).
 	GetArgumentForAuthor(ctx context.Context, arg GetArgumentForAuthorParams) (GetArgumentForAuthorRow, error)
+	// GetAttributionForModeration loads one attribution with its current
+	// validity and its latest moderation decision and locks it FOR UPDATE, so
+	// concurrent decisions on the same row serialize instead of overwriting
+	// each other (P11-T04). It is the moderation read projection: a consumer
+	// reads validity from the retained row that the schema keeps coherent with
+	// the decision record, so no projection can observe an unrecorded
+	// invalidation.
+	GetAttributionForModeration(ctx context.Context, attributionID pgtype.UUID) (GetAttributionForModerationRow, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
 	// app.profiles with the explicit opt-ins. A missing preferences row resolves
 	// to the conservative default (marketing opt-in false), never to an implicit
@@ -189,6 +197,11 @@ type Querier interface {
 	GetWalletOperationByIdempotencyKey(ctx context.Context, idempotencyKey string) (AppWalletOperation, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
 	InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error
+	// InvalidateAttribution moves a valid attribution to invalid, recording the
+	// actor, the mandatory reason and the instant on the retained row; nothing
+	// is deleted. The status guard loses the race instead of overwriting a
+	// concurrent decision.
+	InvalidateAttribution(ctx context.Context, arg InvalidateAttributionParams) (InvalidateAttributionRow, error)
 	// IsAccountEligibleForProfile projects the single bit the profiles module
 	// needs for negative authorization: the account exists, is active and has a
 	// verified email. It never reads email, credentials or payment identifiers.
@@ -254,6 +267,10 @@ type Querier interface {
 	// RemoveArena applies the moderation removal to a published, closed or
 	// restricted Arena under the optimistic version check; removed is terminal.
 	RemoveArena(ctx context.Context, arg RemoveArenaParams) (AppArena, error)
+	// RestoreAttribution reverses one invalidation on the same retained row,
+	// recording the restore decision: the row moves back to valid and the
+	// decision record is replaced by the newest one, never erased.
+	RestoreAttribution(ctx context.Context, arg RestoreAttributionParams) (RestoreAttributionRow, error)
 	// RestrictArena applies the moderation restriction to a published or closed
 	// Arena under the optimistic version check (P08-T05).
 	RestrictArena(ctx context.Context, arg RestrictArenaParams) (AppArena, error)
