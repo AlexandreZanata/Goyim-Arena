@@ -8,10 +8,64 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// User account records and account status lifecycle
+type AppAccount struct {
+	ID pgtype.UUID
+	// User email address; uniqueness enforced case-insensitively via lower(email)
+	Email           string
+	Status          string
+	EmailVerifiedAt pgtype.Timestamptz
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
+// Single-use cryptographic token hashes for email verification
+type AppEmailVerificationToken struct {
+	ID        pgtype.UUID
+	AccountID pgtype.UUID
+	TokenHash []byte
+	ExpiresAt pgtype.Timestamptz
+	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
+// Hashed password credentials isolated from public account and profile data
+type AppPasswordCredential struct {
+	AccountID    pgtype.UUID
+	PasswordHash string
+	Algorithm    string
+	Version      int32
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+// Single-use cryptographic token hashes for password recovery
+type AppPasswordResetToken struct {
+	ID        pgtype.UUID
+	AccountID pgtype.UUID
+	TokenHash []byte
+	ExpiresAt pgtype.Timestamptz
+	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
 // goose forward-only migration history for the app schema (schema_metadata version table required by the master plan)
 type AppSchemaMetadatum struct {
 	ID        int32
 	VersionID int64
 	IsApplied bool
 	Tstamp    pgtype.Timestamp
+}
+
+// Opaque server-side session store with revocation and inactivity tracking
+type AppSession struct {
+	ID         pgtype.UUID
+	AccountID  pgtype.UUID
+	TokenHash  []byte
+	CreatedAt  pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+	LastSeenAt pgtype.Timestamptz
+	RevokedAt  pgtype.Timestamptz
+	IpAddress  pgtype.Text
+	UserAgent  pgtype.Text
 }

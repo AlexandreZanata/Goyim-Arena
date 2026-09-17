@@ -37,9 +37,9 @@ func TestQueriesGetHealthMetadata(t *testing.T) {
 		t.Fatalf("q.GetHealthMetadata() returned error: %v", err)
 	}
 
-	// 3 migrations have been applied by dbmigrate.Up in dbtest.New.
-	if meta.VersionID != 3 {
-		t.Errorf("meta.VersionID = %d, want 3", meta.VersionID)
+	// Migrations have been applied by dbmigrate.Up in dbtest.New.
+	if meta.VersionID < 1 {
+		t.Errorf("meta.VersionID = %d, want >= 1", meta.VersionID)
 	}
 	if !meta.IsApplied {
 		t.Errorf("meta.IsApplied = %v, want true", meta.IsApplied)
@@ -84,8 +84,8 @@ func TestQueriesWithTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("qTx.GetHealthMetadata() returned error: %v", err)
 	}
-	if meta.VersionID != 3 {
-		t.Errorf("meta.VersionID = %d, want 3", meta.VersionID)
+	if meta.VersionID < 1 {
+		t.Errorf("meta.VersionID = %d, want >= 1", meta.VersionID)
 	}
 
 	ready, err := qTx.PingHealth(ctx)

@@ -6,14 +6,39 @@ package postgres
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type Querier interface {
+	// Identity and authentication queries for the PostgreSQL platform adapter.
+	CreateAccount(ctx context.Context, arg CreateAccountParams) (AppAccount, error)
+	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
+	CreatePasswordCredential(ctx context.Context, arg CreatePasswordCredentialParams) error
+	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (AppPasswordResetToken, error)
+	CreateSession(ctx context.Context, arg CreateSessionParams) (AppSession, error)
+	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	GetAccountByEmail(ctx context.Context, lower string) (AppAccount, error)
+	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
+	// GetAccountProfile retrieves account profile data without ever reading or exposing password credentials.
+	GetAccountProfile(ctx context.Context, id pgtype.UUID) (AppAccount, error)
+	GetActiveEmailVerificationToken(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
+	GetActivePasswordResetToken(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
+	GetActiveSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	// Health metadata and connectivity queries for the PostgreSQL platform adapter.
 	// GetHealthMetadata retrieves the latest applied migration metadata from app.schema_metadata.
 	GetHealthMetadata(ctx context.Context) (GetHealthMetadataRow, error)
+	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
+	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) error
+	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) error
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.
 	PingHealth(ctx context.Context) (int32, error)
+	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
+	RevokeSession(ctx context.Context, tokenHash []byte) error
+	SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAccount, error)
+	UpdateAccountStatus(ctx context.Context, arg UpdateAccountStatusParams) (AppAccount, error)
+	UpdatePasswordCredential(ctx context.Context, arg UpdatePasswordCredentialParams) error
+	UpdateSessionLastSeen(ctx context.Context, id pgtype.UUID) error
 }
 
 var _ Querier = (*Queries)(nil)
