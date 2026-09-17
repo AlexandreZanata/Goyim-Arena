@@ -14,11 +14,18 @@ type SentVerificationEmail struct {
 	Token string
 }
 
+// SentResetEmail records a password recovery email message sent to a user.
+type SentResetEmail struct {
+	Email domain.Email
+	Token string
+}
+
 // Sender implements application.EmailSender in-memory for testing and non-production environments.
 type Sender struct {
-	mu     sync.Mutex
-	emails []SentVerificationEmail
-	failOn error
+	mu          sync.Mutex
+	emails      []SentVerificationEmail
+	resetEmails []SentResetEmail
+	failOn      error
 }
 
 var _ application.EmailSender = (*Sender)(nil)
@@ -44,13 +51,39 @@ func (s *Sender) SendVerificationEmail(ctx context.Context, email domain.Email, 
 	return nil
 }
 
-// SentEmails returns a copy of all recorded emails.
+// SendPasswordResetEmail records the sent password reset email.
+func (s *Sender) SendPasswordResetEmail(ctx context.Context, email domain.Email, token string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.failOn != nil {
+		return s.failOn
+	}
+
+	s.resetEmails = append(s.resetEmails, SentResetEmail{
+		Email: email,
+		Token: token,
+	})
+	return nil
+}
+
+// SentEmails returns a copy of all recorded verification emails.
 func (s *Sender) SentEmails() []SentVerificationEmail {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	out := make([]SentVerificationEmail, len(s.emails))
 	copy(out, s.emails)
+	return out
+}
+
+// SentResetEmails returns a copy of all recorded password reset emails.
+func (s *Sender) SentResetEmails() []SentResetEmail {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]SentResetEmail, len(s.resetEmails))
+	copy(out, s.resetEmails)
 	return out
 }
 
@@ -62,6 +95,19 @@ func (s *Sender) LastTokenForEmail(email domain.Email) (string, bool) {
 	for i := len(s.emails) - 1; i >= 0; i-- {
 		if s.emails[i].Email.Equals(email) {
 			return s.emails[i].Token, true
+		}
+	}
+	return "", false
+}
+
+// LastResetTokenForEmail finds the most recent password reset token sent to the given email address.
+func (s *Sender) LastResetTokenForEmail(email domain.Email) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i := len(s.resetEmails) - 1; i >= 0; i-- {
+		if s.resetEmails[i].Email.Equals(email) {
+			return s.resetEmails[i].Token, true
 		}
 	}
 	return "", false
@@ -79,5 +125,6 @@ func (s *Sender) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.emails = nil
+	s.resetEmails = nil
 	s.failOn = nil
 }

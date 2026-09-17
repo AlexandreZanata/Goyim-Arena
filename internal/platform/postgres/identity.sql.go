@@ -326,6 +326,26 @@ func (q *Queries) GetPasswordCredentialByAccountID(ctx context.Context, accountI
 	return i, err
 }
 
+const getPasswordResetTokenByHash = `-- name: GetPasswordResetTokenByHash :one
+SELECT id, account_id, token_hash, expires_at, used_at, created_at
+FROM app.password_reset_tokens
+WHERE token_hash = $1
+`
+
+func (q *Queries) GetPasswordResetTokenByHash(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error) {
+	row := q.db.QueryRow(ctx, getPasswordResetTokenByHash, tokenHash)
+	var i AppPasswordResetToken
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
 SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
 FROM app.sessions
@@ -360,26 +380,43 @@ func (q *Queries) InvalidateActiveEmailVerificationTokens(ctx context.Context, a
 	return err
 }
 
-const markEmailVerificationTokenUsed = `-- name: MarkEmailVerificationTokenUsed :exec
-UPDATE app.email_verification_tokens
+const invalidateActivePasswordResetTokens = `-- name: InvalidateActivePasswordResetTokens :exec
+UPDATE app.password_reset_tokens
 SET used_at = now()
-WHERE id = $1
+WHERE account_id = $1 AND used_at IS NULL
 `
 
-func (q *Queries) MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markEmailVerificationTokenUsed, id)
+func (q *Queries) InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, invalidateActivePasswordResetTokens, accountID)
 	return err
 }
 
-const markPasswordResetTokenUsed = `-- name: MarkPasswordResetTokenUsed :exec
-UPDATE app.password_reset_tokens
+const markEmailVerificationTokenUsed = `-- name: MarkEmailVerificationTokenUsed :execrows
+UPDATE app.email_verification_tokens
 SET used_at = now()
-WHERE id = $1
+WHERE id = $1 AND used_at IS NULL
 `
 
-func (q *Queries) MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markPasswordResetTokenUsed, id)
-	return err
+func (q *Queries) MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markEmailVerificationTokenUsed, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markPasswordResetTokenUsed = `-- name: MarkPasswordResetTokenUsed :execrows
+UPDATE app.password_reset_tokens
+SET used_at = now()
+WHERE id = $1 AND used_at IS NULL
+`
+
+func (q *Queries) MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, markPasswordResetTokenUsed, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const revokeAllAccountSessions = `-- name: RevokeAllAccountSessions :exec

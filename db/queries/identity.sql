@@ -67,10 +67,10 @@ UPDATE app.email_verification_tokens
 SET used_at = now()
 WHERE account_id = $1 AND used_at IS NULL;
 
--- name: MarkEmailVerificationTokenUsed :exec
+-- name: MarkEmailVerificationTokenUsed :execrows
 UPDATE app.email_verification_tokens
 SET used_at = now()
-WHERE id = $1;
+WHERE id = $1 AND used_at IS NULL;
 
 -- name: CreatePasswordResetToken :one
 INSERT INTO app.password_reset_tokens (account_id, token_hash, expires_at)
@@ -82,10 +82,20 @@ SELECT id, account_id, token_hash, expires_at, used_at, created_at
 FROM app.password_reset_tokens
 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now();
 
--- name: MarkPasswordResetTokenUsed :exec
+-- name: GetPasswordResetTokenByHash :one
+SELECT id, account_id, token_hash, expires_at, used_at, created_at
+FROM app.password_reset_tokens
+WHERE token_hash = $1;
+
+-- name: InvalidateActivePasswordResetTokens :exec
 UPDATE app.password_reset_tokens
 SET used_at = now()
-WHERE id = $1;
+WHERE account_id = $1 AND used_at IS NULL;
+
+-- name: MarkPasswordResetTokenUsed :execrows
+UPDATE app.password_reset_tokens
+SET used_at = now()
+WHERE id = $1 AND used_at IS NULL;
 
 -- name: CreateSession :one
 INSERT INTO app.sessions (account_id, token_hash, expires_at, ip_address, user_agent)

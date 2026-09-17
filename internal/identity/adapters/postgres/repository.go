@@ -27,6 +27,7 @@ var (
 	_ application.AccountRepository            = (*Repository)(nil)
 	_ application.PasswordCredentialRepository = (*Repository)(nil)
 	_ application.VerificationTokenRepository  = (*Repository)(nil)
+	_ application.PasswordResetTokenRepository = (*Repository)(nil)
 	_ application.SessionRepository            = (*Repository)(nil)
 )
 
@@ -173,8 +174,12 @@ func (r *Repository) MarkTokenUsed(ctx context.Context, tokenID string, usedAt t
 	if err := pgUUID.Scan(tokenID); err != nil {
 		return fmt.Errorf("invalid token id format: %w", err)
 	}
-	if err := r.queries.MarkEmailVerificationTokenUsed(ctx, pgUUID); err != nil {
+	rows, err := r.queries.MarkEmailVerificationTokenUsed(ctx, pgUUID)
+	if err != nil {
 		return fmt.Errorf("mark token used: %w", err)
+	}
+	if rows == 0 {
+		return application.ErrTokenAlreadyUsed
 	}
 	return nil
 }
@@ -187,6 +192,78 @@ func (r *Repository) InvalidateActiveTokens(ctx context.Context, accountID domai
 	}
 	if err := r.queries.InvalidateActiveEmailVerificationTokens(ctx, pgUUID); err != nil {
 		return fmt.Errorf("invalidate active tokens: %w", err)
+	}
+	return nil
+}
+
+// CreatePasswordResetToken stores a new cryptographic reset token hash for an account.
+func (r *Repository) CreatePasswordResetToken(ctx context.Context, accountID domain.AccountID, tokenHash []byte, expiresAt time.Time) error {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(accountID.String()); err != nil {
+		return fmt.Errorf("invalid account id format: %w", err)
+	}
+
+	_, err := r.queries.CreatePasswordResetToken(ctx, platformpg.CreatePasswordResetTokenParams{
+		AccountID: pgUUID,
+		TokenHash: tokenHash,
+		ExpiresAt: pgtype.Timestamptz{Time: expiresAt, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("create password reset token: %w", err)
+	}
+	return nil
+}
+
+// GetPasswordResetToken retrieves a password reset token record by its binary hash.
+func (r *Repository) GetPasswordResetToken(ctx context.Context, tokenHash []byte) (*application.PasswordResetTokenRecord, error) {
+	row, err := r.queries.GetPasswordResetTokenByHash(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrInvalidToken
+		}
+		return nil, fmt.Errorf("get password reset token: %w", err)
+	}
+
+	var usedAt *time.Time
+	if row.UsedAt.Valid {
+		t := row.UsedAt.Time
+		usedAt = &t
+	}
+
+	return &application.PasswordResetTokenRecord{
+		ID:        uuidToString(row.ID),
+		AccountID: domain.AccountID(uuidToString(row.AccountID)),
+		TokenHash: row.TokenHash,
+		ExpiresAt: row.ExpiresAt.Time,
+		UsedAt:    usedAt,
+		CreatedAt: row.CreatedAt.Time,
+	}, nil
+}
+
+// MarkPasswordResetTokenUsed records that the token has been consumed, preventing replay.
+func (r *Repository) MarkPasswordResetTokenUsed(ctx context.Context, tokenID string, usedAt time.Time) error {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(tokenID); err != nil {
+		return fmt.Errorf("invalid token id format: %w", err)
+	}
+	rows, err := r.queries.MarkPasswordResetTokenUsed(ctx, pgUUID)
+	if err != nil {
+		return fmt.Errorf("mark password reset token used: %w", err)
+	}
+	if rows == 0 {
+		return application.ErrTokenAlreadyUsed
+	}
+	return nil
+}
+
+// InvalidateActivePasswordResetTokens marks all existing unconsumed reset tokens for the account as used.
+func (r *Repository) InvalidateActivePasswordResetTokens(ctx context.Context, accountID domain.AccountID) error {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(accountID.String()); err != nil {
+		return fmt.Errorf("invalid account id format: %w", err)
+	}
+	if err := r.queries.InvalidateActivePasswordResetTokens(ctx, pgUUID); err != nil {
+		return fmt.Errorf("invalidate active password reset tokens: %w", err)
 	}
 	return nil
 }

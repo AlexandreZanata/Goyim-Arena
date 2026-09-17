@@ -30,10 +30,12 @@ type Querier interface {
 	// GetHealthMetadata retrieves the latest applied migration metadata from app.schema_metadata.
 	GetHealthMetadata(ctx context.Context) (GetHealthMetadataRow, error)
 	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
+	GetPasswordResetTokenByHash(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
-	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) error
-	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) error
+	InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error
+	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
+	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.
 	PingHealth(ctx context.Context) (int32, error)
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error

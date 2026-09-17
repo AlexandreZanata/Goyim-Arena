@@ -82,10 +82,38 @@ type VerificationTokenRepository interface {
 	InvalidateActiveTokens(ctx context.Context, accountID domain.AccountID) error
 }
 
-// EmailSender delivers or enqueues transactional verification emails.
+// EmailSender delivers or enqueues transactional verification and password recovery emails.
 type EmailSender interface {
 	// SendVerificationEmail delivers or enqueues an email containing the unhashed verification token.
 	SendVerificationEmail(ctx context.Context, email domain.Email, token string) error
+
+	// SendPasswordResetEmail delivers or enqueues an email containing the unhashed password reset token.
+	SendPasswordResetEmail(ctx context.Context, email domain.Email, token string) error
+}
+
+// PasswordResetTokenRecord represents a stored single-use password recovery token.
+type PasswordResetTokenRecord struct {
+	ID        string
+	AccountID domain.AccountID
+	TokenHash []byte
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	CreatedAt time.Time
+}
+
+// PasswordResetTokenRepository manages single-use password recovery tokens.
+type PasswordResetTokenRepository interface {
+	// CreatePasswordResetToken stores a new cryptographic reset token hash for an account.
+	CreatePasswordResetToken(ctx context.Context, accountID domain.AccountID, tokenHash []byte, expiresAt time.Time) error
+
+	// GetPasswordResetToken retrieves a password reset token record by its binary hash.
+	GetPasswordResetToken(ctx context.Context, tokenHash []byte) (*PasswordResetTokenRecord, error)
+
+	// MarkPasswordResetTokenUsed records that the token has been consumed, preventing replay.
+	MarkPasswordResetTokenUsed(ctx context.Context, tokenID string, usedAt time.Time) error
+
+	// InvalidateActivePasswordResetTokens marks all existing unconsumed reset tokens for the account as used.
+	InvalidateActivePasswordResetTokens(ctx context.Context, accountID domain.AccountID) error
 }
 
 // PasswordCredentialRecord represents a stored password credential.

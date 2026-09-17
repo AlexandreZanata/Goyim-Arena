@@ -200,6 +200,16 @@ func (m *memoryEmailSender) SendVerificationEmail(ctx context.Context, email dom
 	return nil
 }
 
+func (m *memoryEmailSender) SendPasswordResetEmail(ctx context.Context, email domain.Email, token string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.emails = append(m.emails, struct {
+		Email domain.Email
+		Token string
+	}{Email: email, Token: token})
+	return nil
+}
+
 func (m *memoryEmailSender) LastToken() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -324,8 +324,12 @@ func TestExpiryAndUsageFiltering(t *testing.T) {
 	}
 
 	// 3. Mark active token used
-	if err := q.MarkEmailVerificationTokenUsed(ctx, activeTok.ID); err != nil {
+	rows, err := q.MarkEmailVerificationTokenUsed(ctx, activeTok.ID)
+	if err != nil {
 		t.Fatalf("mark token used: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("expected 1 row affected, got %d", rows)
 	}
 
 	// Subsequent lookup must return ErrNoRows because used_at IS NOT NULL
