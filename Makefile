@@ -7,6 +7,7 @@
 GO ?= go
 GOFMT ?= gofmt
 NPM ?= npm
+SQLC ?= $(shell which sqlc 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/sqlc")
 
 .PHONY: fmt fmt-check test-unit test-integration typecheck build-web test-contract generate generate-check verify
 
@@ -34,9 +35,9 @@ test-unit:
 	$(GO) test ./...
 	@echo "test-unit: ok"
 
-# test-integration executa os testes de integração contra PostgreSQL real descartável (P03-T05).
+# test-integration executa os testes de integração contra PostgreSQL real descartável (P03-T05, P03-T06).
 test-integration:
-	$(GO) test -v -race ./internal/platform/dbpool/... ./internal/platform/dbtest/...
+	$(GO) test -v -race ./internal/platform/dbpool/... ./internal/platform/dbtest/... ./internal/platform/postgres/...
 	@echo "test-integration: ok"
 
 # typecheck roda a checagem estrita de tipos do frontend (tsc --noEmit).
@@ -60,22 +61,24 @@ test-contract:
 	$(GO) test ./internal/contract/...
 	@echo "test-contract: ok"
 
-# generate valida os catálogos i18n e reescreve os artefatos gerados
-# (paridade de chaves/placeholders, JSON válido, locales conhecidos).
+# generate valida os catálogos i18n, reescreve os artefatos gerados
+# e executa a geração de código SQL tipado com sqlc para o adapter PostgreSQL.
 generate:
 	$(I18NGEN)
+	$(SQLC) generate
 	@echo "generate: ok"
 
-# generate-check valida os catálogos e falha quando os artefatos gerados
-# estão desatualizados em relação a locales/ (drift = falha, nunca sucesso falso).
+# generate-check valida os catálogos i18n e a ausência de drift no código SQL
+# gerado pelo sqlc, falhando caso os artefatos gerados estejam desatualizados.
 generate-check:
 	$(I18NGEN) -check
+	$(SQLC) diff
 	@echo "generate-check: ok"
 
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-contract typecheck build-web
+verify: fmt-check generate-check test-unit test-integration test-contract typecheck build-web
 	@echo "verify: gates presentes, porém não implementados (falham explicitamente ao serem invocados):"
 	@echo "verify: gates ainda não criados:"
 	@for gate in lint test-security test-e2e test-race test-load-smoke vuln; do \
