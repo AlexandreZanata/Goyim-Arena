@@ -161,6 +161,10 @@ type Querier interface {
 	// GetPublicArenaBySlug resolves a public Arena address. Drafts are never
 	// addressable and removed Arenas are not found for the public (P08-T07).
 	GetPublicArenaBySlug(ctx context.Context, slug pgtype.Text) (AppArena, error)
+	// GetPublicArgument resolves one argument for the public surface: published
+	// and withdrawn (retracted) arguments resolve; moderation-removed arguments
+	// are not found (P10-T07).
+	GetPublicArgument(ctx context.Context, argumentID pgtype.UUID) (GetPublicArgumentRow, error)
 	// GetPublicProfileByUsername returns only the publicly allowed profile fields.
 	// It never selects email, credentials, internal financial identifiers or
 	// administrative flags, and deliberately omits account_id.
@@ -179,6 +183,11 @@ type Querier interface {
 	// needs for negative authorization: the account exists, is active and has a
 	// verified email. It never reads email, credentials or payment identifiers.
 	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
+	// ListArenaArgumentsPage returns one keyset page of published top-level
+	// arguments of one relation in one Arena, newest first, with the derived
+	// published-reply count computed in the same statement (no N+1). Withdrawn
+	// and removed arguments never appear in public lists (P10-T07).
+	ListArenaArgumentsPage(ctx context.Context, arg ListArenaArgumentsPageParams) ([]ListArenaArgumentsPageRow, error)
 	ListArenaDraftsForCreator(ctx context.Context, creatorID pgtype.UUID) ([]AppArena, error)
 	ListArenaPassConsumptionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListArenaPassConsumptionsByAccountRow, error)
 	// ListArenaPassConsumptionsPage returns one keyset-paginated page of the
@@ -205,6 +214,11 @@ type Querier interface {
 	// appear, and the (published_at, id) tuple comparison never duplicates or
 	// skips rows (P08-T06).
 	ListPublicArenasPage(ctx context.Context, arg ListPublicArenasPageParams) ([]AppArena, error)
+	// ListRepliesPage returns one keyset page of published replies of one
+	// parent, newest first. Replies carry no derived reply count: the depth
+	// policy forbids grandchildren (P10-T05), so the count is always zero and
+	// the statement stays cheaper.
+	ListRepliesPage(ctx context.Context, arg ListRepliesPageParams) ([]ListRepliesPageRow, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	// ListWalletStatementPage returns one keyset-paginated page of the account
 	// statement, newest first. NULL after_* parameters select the first page;

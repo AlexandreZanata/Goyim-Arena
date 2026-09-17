@@ -281,6 +281,221 @@ func (q *Queries) GetParentArgument(ctx context.Context, argumentID pgtype.UUID)
 	return i, err
 }
 
+const getPublicArgument = `-- name: GetPublicArgument :one
+SELECT
+    a.id, a.arena_id, a.author_id, a.parent_id, a.relation, a.content,
+    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at, a.withdrawn_at,
+    (SELECT count(*) FROM app.arguments reply WHERE reply.parent_id = a.id AND reply.status = 'published')::bigint AS reply_count
+FROM app.arguments a
+WHERE a.id = $1::uuid
+  AND a.status IN ('published', 'withdrawn')
+`
+
+type GetPublicArgumentRow struct {
+	ID           pgtype.UUID
+	ArenaID      pgtype.UUID
+	AuthorID     pgtype.UUID
+	ParentID     pgtype.UUID
+	Relation     string
+	Content      string
+	ContentHash  string
+	GraphemeCost int32
+	Status       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	WithdrawnAt  pgtype.Timestamptz
+	ReplyCount   int64
+}
+
+// GetPublicArgument resolves one argument for the public surface: published
+// and withdrawn (retracted) arguments resolve; moderation-removed arguments
+// are not found (P10-T07).
+func (q *Queries) GetPublicArgument(ctx context.Context, argumentID pgtype.UUID) (GetPublicArgumentRow, error) {
+	row := q.db.QueryRow(ctx, getPublicArgument, argumentID)
+	var i GetPublicArgumentRow
+	err := row.Scan(
+		&i.ID,
+		&i.ArenaID,
+		&i.AuthorID,
+		&i.ParentID,
+		&i.Relation,
+		&i.Content,
+		&i.ContentHash,
+		&i.GraphemeCost,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WithdrawnAt,
+		&i.ReplyCount,
+	)
+	return i, err
+}
+
+const listArenaArgumentsPage = `-- name: ListArenaArgumentsPage :many
+SELECT
+    a.id, a.arena_id, a.author_id, a.parent_id, a.relation, a.content,
+    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at, a.withdrawn_at,
+    (SELECT count(*) FROM app.arguments reply WHERE reply.parent_id = a.id AND reply.status = 'published')::bigint AS reply_count
+FROM app.arguments a
+WHERE a.arena_id = $1::uuid
+  AND a.relation = $2::text
+  AND a.parent_id IS NULL
+  AND a.status = 'published'
+  AND (
+      $3::timestamptz IS NULL
+      OR (a.created_at, a.id) < ($3::timestamptz, $4::uuid)
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $5
+`
+
+type ListArenaArgumentsPageParams struct {
+	ArenaID        pgtype.UUID
+	Relation       string
+	AfterCreatedAt pgtype.Timestamptz
+	AfterID        pgtype.UUID
+	PageLimit      int32
+}
+
+type ListArenaArgumentsPageRow struct {
+	ID           pgtype.UUID
+	ArenaID      pgtype.UUID
+	AuthorID     pgtype.UUID
+	ParentID     pgtype.UUID
+	Relation     string
+	Content      string
+	ContentHash  string
+	GraphemeCost int32
+	Status       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	WithdrawnAt  pgtype.Timestamptz
+	ReplyCount   int64
+}
+
+// ListArenaArgumentsPage returns one keyset page of published top-level
+// arguments of one relation in one Arena, newest first, with the derived
+// published-reply count computed in the same statement (no N+1). Withdrawn
+// and removed arguments never appear in public lists (P10-T07).
+func (q *Queries) ListArenaArgumentsPage(ctx context.Context, arg ListArenaArgumentsPageParams) ([]ListArenaArgumentsPageRow, error) {
+	rows, err := q.db.Query(ctx, listArenaArgumentsPage,
+		arg.ArenaID,
+		arg.Relation,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArenaArgumentsPageRow{}
+	for rows.Next() {
+		var i ListArenaArgumentsPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ArenaID,
+			&i.AuthorID,
+			&i.ParentID,
+			&i.Relation,
+			&i.Content,
+			&i.ContentHash,
+			&i.GraphemeCost,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.WithdrawnAt,
+			&i.ReplyCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRepliesPage = `-- name: ListRepliesPage :many
+SELECT
+    a.id, a.arena_id, a.author_id, a.parent_id, a.relation, a.content,
+    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at, a.withdrawn_at
+FROM app.arguments a
+WHERE a.parent_id = $1::uuid
+  AND a.status = 'published'
+  AND (
+      $2::timestamptz IS NULL
+      OR (a.created_at, a.id) < ($2::timestamptz, $3::uuid)
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $4
+`
+
+type ListRepliesPageParams struct {
+	ParentID       pgtype.UUID
+	AfterCreatedAt pgtype.Timestamptz
+	AfterID        pgtype.UUID
+	PageLimit      int32
+}
+
+type ListRepliesPageRow struct {
+	ID           pgtype.UUID
+	ArenaID      pgtype.UUID
+	AuthorID     pgtype.UUID
+	ParentID     pgtype.UUID
+	Relation     string
+	Content      string
+	ContentHash  string
+	GraphemeCost int32
+	Status       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	WithdrawnAt  pgtype.Timestamptz
+}
+
+// ListRepliesPage returns one keyset page of published replies of one
+// parent, newest first. Replies carry no derived reply count: the depth
+// policy forbids grandchildren (P10-T05), so the count is always zero and
+// the statement stays cheaper.
+func (q *Queries) ListRepliesPage(ctx context.Context, arg ListRepliesPageParams) ([]ListRepliesPageRow, error) {
+	rows, err := q.db.Query(ctx, listRepliesPage,
+		arg.ParentID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRepliesPageRow{}
+	for rows.Next() {
+		var i ListRepliesPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ArenaID,
+			&i.AuthorID,
+			&i.ParentID,
+			&i.Relation,
+			&i.Content,
+			&i.ContentHash,
+			&i.GraphemeCost,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.WithdrawnAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const withdrawArgument = `-- name: WithdrawArgument :one
 UPDATE app.arguments
 SET status = 'withdrawn',

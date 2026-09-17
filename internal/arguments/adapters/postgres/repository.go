@@ -291,3 +291,161 @@ func uuidToString(u pgtype.UUID) string {
 		b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
 		b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15])
 }
+
+// ListArenaArguments returns published top-level arguments of one relation
+// in one Arena, newest first, strictly older than the position.
+func (r *Repository) ListArenaArguments(ctx context.Context, arenaID domain.ArenaID, relation domain.Relation, after *application.ArgumentPosition, limit int) ([]application.PublicArgument, error) {
+	arenaParam, ok := uuidParam(arenaID.String())
+	if !ok {
+		return nil, application.ErrArgumentNotFound
+	}
+	afterCreatedAt, afterID, err := argumentCursorParams(after)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := r.queriesFor(ctx).ListArenaArgumentsPage(ctx, platformpg.ListArenaArgumentsPageParams{
+		ArenaID:        arenaParam,
+		Relation:       relation.String(),
+		AfterCreatedAt: afterCreatedAt,
+		AfterID:        afterID,
+		PageLimit:      int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list arena arguments: %w", err)
+	}
+
+	arguments := make([]application.PublicArgument, 0, len(rows))
+	for _, row := range rows {
+		argument, err := mapPublicArgument(row.ID, row.ArenaID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time, row.ReplyCount)
+		if err != nil {
+			return nil, err
+		}
+		arguments = append(arguments, *argument)
+	}
+	return arguments, nil
+}
+
+// ListReplies returns published replies of one parent, newest first,
+// strictly older than the position.
+func (r *Repository) ListReplies(ctx context.Context, parentID domain.ArgumentID, after *application.ArgumentPosition, limit int) ([]application.PublicArgument, error) {
+	parentParam, ok := uuidParam(parentID.String())
+	if !ok {
+		return nil, application.ErrArgumentNotFound
+	}
+	afterCreatedAt, afterID, err := argumentCursorParams(after)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := r.queriesFor(ctx).ListRepliesPage(ctx, platformpg.ListRepliesPageParams{
+		ParentID:       parentParam,
+		AfterCreatedAt: afterCreatedAt,
+		AfterID:        afterID,
+		PageLimit:      int32(limit),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list replies: %w", err)
+	}
+
+	arguments := make([]application.PublicArgument, 0, len(rows))
+	for _, row := range rows {
+		// Replies carry no derived count: the depth policy forbids
+		// grandchildren, so the reply count is structurally zero.
+		argument, err := mapPublicArgument(row.ID, row.ArenaID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time, 0)
+		if err != nil {
+			return nil, err
+		}
+		arguments = append(arguments, *argument)
+	}
+	return arguments, nil
+}
+
+// GetPublicArgument resolves one argument for the public surface.
+func (r *Repository) GetPublicArgument(ctx context.Context, argumentID domain.ArgumentID) (*application.PublicArgument, error) {
+	argumentParam, ok := uuidParam(argumentID.String())
+	if !ok {
+		return nil, application.ErrArgumentNotFound
+	}
+
+	row, err := r.queriesFor(ctx).GetPublicArgument(ctx, argumentParam)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrArgumentNotFound
+		}
+		return nil, fmt.Errorf("get public argument: %w", err)
+	}
+	return mapPublicArgument(row.ID, row.ArenaID, row.ParentID, row.Relation, row.Content, row.ContentHash, row.GraphemeCost, row.Status, row.CreatedAt.Time, row.ReplyCount)
+}
+
+// argumentCursorParams renders the optional keyset position.
+func argumentCursorParams(after *application.ArgumentPosition) (pgtype.Timestamptz, pgtype.UUID, error) {
+	if after == nil {
+		return pgtype.Timestamptz{}, pgtype.UUID{}, nil
+	}
+	afterID, ok := uuidParam(after.ArgumentID)
+	if !ok {
+		return pgtype.Timestamptz{}, pgtype.UUID{}, application.ErrInvalidCursor
+	}
+	return pgtype.Timestamptz{Time: after.CreatedAt.UTC(), Valid: true}, afterID, nil
+}
+
+// mapPublicArgument rebuilds the cache-safe public projection, applying the
+// visibility policy: a withdrawn argument resolves as a retracted
+// placeholder (no content), while published content is revalidated against
+// its canonical hash.
+func mapPublicArgument(
+	id, arenaID, parentID pgtype.UUID,
+	relation, content, contentHash string,
+	graphemeCost int32,
+	status string,
+	createdAt time.Time,
+	replyCount int64,
+) (*application.PublicArgument, error) {
+	argumentID, err := domain.ParseArgumentID(uuidToString(id))
+	if err != nil {
+		return nil, fmt.Errorf("stored argument id is invalid: %w", err)
+	}
+	arena, err := domain.ParseArenaID(uuidToString(arenaID))
+	if err != nil {
+		return nil, fmt.Errorf("stored arena id is invalid: %w", err)
+	}
+	parent := domain.ArgumentID{}
+	if parentID.Valid {
+		parent, err = domain.ParseArgumentID(uuidToString(parentID))
+		if err != nil {
+			return nil, fmt.Errorf("stored parent id is invalid: %w", err)
+		}
+	}
+	storedRelation, err := domain.ParseRelation(relation)
+	if err != nil {
+		return nil, fmt.Errorf("stored relation is invalid: %w", err)
+	}
+
+	projection := &application.PublicArgument{
+		ID:         argumentID,
+		ArenaID:    arena,
+		ParentID:   parent,
+		Relation:   storedRelation,
+		Status:     status,
+		CreatedAt:  createdAt,
+		ReplyCount: replyCount,
+	}
+
+	// Retraction policy: only published content is projected; a withdrawn
+	// argument keeps its identity and status so the UI can render the
+	// placeholder coherently.
+	if status == "published" {
+		hash, err := domain.ParseContentHash(contentHash)
+		if err != nil {
+			return nil, fmt.Errorf("stored content hash is invalid: %w", err)
+		}
+		storedContent, err := domain.ReconstituteContent(content, int(graphemeCost), hash)
+		if err != nil {
+			return nil, fmt.Errorf("stored content is invalid: %w", err)
+		}
+		projection.Content = &storedContent
+	}
+
+	return projection, nil
+}

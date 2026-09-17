@@ -82,3 +82,54 @@ WHERE id = sqlc.arg(argument_id)::uuid
   AND author_id = sqlc.arg(author_id)::uuid
   AND status = 'published'
 RETURNING id, arena_id, author_id, parent_id, relation, content, content_hash, grapheme_cost, status, created_at, updated_at, withdrawn_at;
+
+-- ListArenaArgumentsPage returns one keyset page of published top-level
+-- arguments of one relation in one Arena, newest first, with the derived
+-- published-reply count computed in the same statement (no N+1). Withdrawn
+-- and removed arguments never appear in public lists (P10-T07).
+-- name: ListArenaArgumentsPage :many
+SELECT
+    a.id, a.arena_id, a.author_id, a.parent_id, a.relation, a.content,
+    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at, a.withdrawn_at,
+    (SELECT count(*) FROM app.arguments reply WHERE reply.parent_id = a.id AND reply.status = 'published')::bigint AS reply_count
+FROM app.arguments a
+WHERE a.arena_id = sqlc.arg(arena_id)::uuid
+  AND a.relation = sqlc.arg(relation)::text
+  AND a.parent_id IS NULL
+  AND a.status = 'published'
+  AND (
+      sqlc.arg(after_created_at)::timestamptz IS NULL
+      OR (a.created_at, a.id) < (sqlc.arg(after_created_at)::timestamptz, sqlc.arg(after_id)::uuid)
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- ListRepliesPage returns one keyset page of published replies of one
+-- parent, newest first. Replies carry no derived reply count: the depth
+-- policy forbids grandchildren (P10-T05), so the count is always zero and
+-- the statement stays cheaper.
+-- name: ListRepliesPage :many
+SELECT
+    a.id, a.arena_id, a.author_id, a.parent_id, a.relation, a.content,
+    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at, a.withdrawn_at
+FROM app.arguments a
+WHERE a.parent_id = sqlc.arg(parent_id)::uuid
+  AND a.status = 'published'
+  AND (
+      sqlc.arg(after_created_at)::timestamptz IS NULL
+      OR (a.created_at, a.id) < (sqlc.arg(after_created_at)::timestamptz, sqlc.arg(after_id)::uuid)
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- GetPublicArgument resolves one argument for the public surface: published
+-- and withdrawn (retracted) arguments resolve; moderation-removed arguments
+-- are not found (P10-T07).
+-- name: GetPublicArgument :one
+SELECT
+    a.id, a.arena_id, a.author_id, a.parent_id, a.relation, a.content,
+    a.content_hash, a.grapheme_cost, a.status, a.created_at, a.updated_at, a.withdrawn_at,
+    (SELECT count(*) FROM app.arguments reply WHERE reply.parent_id = a.id AND reply.status = 'published')::bigint AS reply_count
+FROM app.arguments a
+WHERE a.id = sqlc.arg(argument_id)::uuid
+  AND a.status IN ('published', 'withdrawn');

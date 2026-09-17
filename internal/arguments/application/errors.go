@@ -48,4 +48,12 @@ var (
 	// ErrArenaNotOpen indicates the Arena accepts no new arguments: only a
 	// published Arena is open.
 	ErrArenaNotOpen = errors.New("arguments: arena is not open to new arguments")
+
+	// ErrInvalidCursor indicates a malformed, forged or version-mismatched
+	// keyset cursor. Unknown values are never reflected back to callers.
+	ErrInvalidCursor = errors.New("arguments: argument list cursor is invalid")
+
+	// ErrWeakCursorSecret indicates the configured cursor signing secret is
+	// shorter than the 256-bit minimum.
+	ErrWeakCursorSecret = errors.New("arguments: argument cursor secret must be at least 32 bytes")
 )
