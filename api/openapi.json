@@ -872,6 +872,321 @@
         }
       }
     },
+    "/api/v1/me/arenas/{id}/arguments": {
+      "post": {
+        "operationId": "publishArgument",
+        "summary": "Publish an argument",
+        "description": "Publishes one argument in a published, open Arena: the content is measured in grapheme clusters (1 INK per cluster), the INK cost is debited and the argument plus its sources are inserted in the same transaction. The Idempotency-Key header is mandatory; a retry resolves the recorded argument (200 plus Idempotency-Replayed: true) instead of charging again. Private responses always carry Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["arguments"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Client attempt key, unique per author and endpoint; a retry resolves the recorded argument without charging INK again.",
+            "schema": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ArgumentPublishRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Argument published.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArgumentMutationResult" }
+              }
+            }
+          },
+          "200": {
+            "description": "Retry resolved the recorded argument (replayed).",
+            "headers": {
+              "Idempotency-Replayed": { "description": "true on replays.", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArgumentMutationResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/me/arenas/{id}/arguments/{argumentID}/replies": {
+      "post": {
+        "operationId": "replyToArgument",
+        "summary": "Reply to an argument",
+        "description": "Publishes a reply through the same publication use case: the parent must belong to the same Arena and be published, and the reply depth policy accepts one recursion level (a reply to a reply answers reply_depth_exceeded). The Arena travels in the path so cross-Arena replies stay refused. The Idempotency-Key header is mandatory.",
+        "tags": ["arguments"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "argumentID",
+            "in": "path",
+            "required": true,
+            "description": "Opaque parent argument identifier.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "description": "Client attempt key, unique per author and endpoint; a retry resolves the recorded argument without charging INK again.",
+            "schema": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ArgumentPublishRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Reply published.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArgumentMutationResult" }
+              }
+            }
+          },
+          "200": {
+            "description": "Retry resolved the recorded reply (replayed).",
+            "headers": {
+              "Idempotency-Replayed": { "description": "true on replays.", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArgumentMutationResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/me/arguments/{id}/withdraw": {
+      "post": {
+        "operationId": "withdrawArgument",
+        "summary": "Withdraw my argument",
+        "description": "Retracts the author's argument from the public display without erasing the historical content and without any automatic refund. The action is owner-scoped and idempotent: repeats resolve the recorded withdrawal (replayed). A moderation removal is never overridden by the author.",
+        "tags": ["arguments"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque argument identifier.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Withdrawal recorded or replayed.",
+            "headers": {
+              "Idempotency-Replayed": { "description": "true on replays.", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArgumentMutationResult" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/arenas/{id}/arguments": {
+      "get": {
+        "operationId": "listArenaArguments",
+        "summary": "Public per-relation argument list",
+        "description": "Returns one keyset page of published top-level arguments of one relation in one Arena, newest first, with the derived published-reply count computed in the same statement. Withdrawn and removed arguments never appear. The response carries an ETag and short public cache headers and may be revalidated with If-None-Match.",
+        "tags": ["arguments"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "relation",
+            "in": "query",
+            "required": true,
+            "description": "Relation filter of the list.",
+            "schema": { "type": "string", "enum": ["support", "oppose", "context"] }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque server-signed cursor returned as next_cursor by the previous page.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1..100); defaults to 20.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One argument page.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Short public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArgumentPage" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "400": { "$ref": "#/components/responses/Validation" }
+        }
+      }
+    },
+    "/api/v1/arguments/{id}/replies": {
+      "get": {
+        "operationId": "listArgumentReplies",
+        "summary": "Public replies list",
+        "description": "Returns one keyset page of published replies of one argument, newest first. The depth policy forbids grandchildren, so replies carry no derived reply count. The response carries an ETag and short public cache headers.",
+        "tags": ["arguments"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque parent argument identifier.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque server-signed cursor returned as next_cursor by the previous page.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1..100); defaults to 20.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One replies page.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Short public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArgumentPage" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "400": { "$ref": "#/components/responses/Validation" }
+        }
+      }
+    },
+    "/api/v1/arguments/{id}": {
+      "get": {
+        "operationId": "getPublicArgument",
+        "summary": "Public argument",
+        "description": "Returns one argument for the public surface. A withdrawn argument resolves as a retracted placeholder: its identity and status stay visible while the content is withheld. A moderation-removed argument is not found. The response carries an ETag and short public cache headers.",
+        "tags": ["arguments"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque argument identifier.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public argument or retracted placeholder.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Short public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Argument" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
     "/d/{slug}": {
       "get": {
         "operationId": "getArenaDocument",
@@ -1290,6 +1605,75 @@
           "checked_at": { "type": "string", "format": "date-time" }
         }
       },
+      "ArgumentPublishRequest": {
+        "type": "object",
+        "description": "Publication body: the declared relation, the plaintext content (at most 3.000 grapheme clusters) and optional structured sources.",
+        "required": ["relation", "content"],
+        "properties": {
+          "relation": { "type": "string", "enum": ["support", "oppose", "context"] },
+          "content": { "type": "string", "minLength": 1, "maxLength": 12000 },
+          "sources": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ArgumentSource" }
+          }
+        }
+      },
+      "ArgumentSource": {
+        "type": "object",
+        "description": "Structured source supporting an argument: an absolute http(s) URL plus an optional short description.",
+        "required": ["url"],
+        "properties": {
+          "url": { "type": "string", "minLength": 8, "maxLength": 2048 },
+          "description": { "type": "string", "maxLength": 500 }
+        }
+      },
+      "Argument": {
+        "type": "object",
+        "description": "Cache-safe public projection of one argument: no account identifier is ever part of it. Content is null when the author retracted the argument.",
+        "required": ["id", "arena_id", "parent_id", "relation", "content", "status", "created_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "arena_id": { "type": "string" },
+          "parent_id": { "type": ["string", "null"], "description": "Null for top-level arguments." },
+          "relation": { "type": "string", "enum": ["support", "oppose", "context"] },
+          "content": { "type": ["string", "null"], "description": "Null when retracted by the author." },
+          "status": { "type": "string", "enum": ["published", "withdrawn"] },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ArgumentListItem": {
+        "type": "object",
+        "description": "One list entry: the public argument plus the derived published-reply count computed in the same statement.",
+        "required": ["id", "arena_id", "parent_id", "relation", "content", "status", "created_at", "reply_count"],
+        "properties": {
+          "id": { "type": "string" },
+          "arena_id": { "type": "string" },
+          "parent_id": { "type": ["string", "null"] },
+          "relation": { "type": "string", "enum": ["support", "oppose", "context"] },
+          "content": { "type": ["string", "null"] },
+          "status": { "type": "string", "enum": ["published", "withdrawn"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "reply_count": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ArgumentPage": {
+        "type": "object",
+        "description": "Cursor page of public arguments, newest first.",
+        "required": ["items", "next_cursor"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/ArgumentListItem" } },
+          "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
+        }
+      },
+      "ArgumentMutationResult": {
+        "type": "object",
+        "description": "Outcome of a publication, reply or withdrawal: the stored projection and whether the call resolved an earlier attempt.",
+        "required": ["argument", "replayed"],
+        "properties": {
+          "argument": { "$ref": "#/components/schemas/Argument" },
+          "replayed": { "type": "boolean" }
+        }
+      },
       "HealthStatus": {
         "type": "object",
         "required": ["status"],
@@ -1453,6 +1837,7 @@
     { "name": "profiles", "description": "Public and private profile projections." },
     { "name": "wallet", "description": "Authenticated INK balance and statement reads." },
     { "name": "passes", "description": "Authenticated Arena Pass summary and consumption history." },
-    { "name": "arenas", "description": "Arena drafts, publication, closing and the public feed." }
+    { "name": "arenas", "description": "Arena drafts, publication, closing and the public feed." },
+    { "name": "arguments", "description": "Argument publication, replies, withdrawal and the public reads." }
   ]
 }

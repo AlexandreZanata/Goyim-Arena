@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/adapters/html"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/adapters/http"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/arguments/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
@@ -98,6 +99,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 			continue
 		}
 		if route.Path == "/d/{slug}" {
+			continue
+		}
+		if strings.HasPrefix(route.Path, "/api/v1/me/arguments") || strings.HasPrefix(route.Path, "/api/v1/arguments") {
 			continue
 		}
 		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
@@ -518,6 +522,114 @@ func TestContractPositionSchemasExposeOnlyAllowedFields(t *testing.T) {
 	for _, marker := range []string{"ETag", "public, max-age=60", `"304"`, "If-None-Match", "suppressed"} {
 		if !strings.Contains(aggregateOperation, marker) {
 			t.Errorf("aggregate operation must document %q", marker)
+		}
+	}
+}
+
+// TestContractArgumentSchemasExposeOnlyAllowedFields is the contract-level
+// proof of P10-T08: the argument documents declare exactly the allowed
+// properties, no schema declares forbidden markers (account identifiers,
+// credentials, payment data or moderation notes), the private routes
+// require the session cookie and the idempotency header, and the public
+// reads stay cacheable with ETag revalidation.
+func TestContractArgumentSchemasExposeOnlyAllowedFields(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"ArgumentPublishRequest": {"relation", "content", "sources"},
+		"ArgumentSource":         {"url", "description"},
+		"Argument":               {"id", "arena_id", "parent_id", "relation", "content", "status", "created_at"},
+		"ArgumentListItem":       {"id", "arena_id", "parent_id", "relation", "content", "status", "created_at", "reply_count"},
+		"ArgumentPage":           {"items", "next_cursor"},
+		"ArgumentMutationResult": {"argument", "replayed"},
+	}
+	forbiddenMarkers := []string{
+		"account", "author", "creator", "email", "user", "password", "credential",
+		"stripe", "billing", "payment", "fraud", "admin", "reason", "actor",
+		"notes", "ip", "user_agent",
+	}
+
+	for name, expectedProperties := range expected {
+		raw, ok := document.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", name)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if len(schema.Properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(schema.Properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := schema.Properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range schema.Properties {
+			// Snake-case tokens compare exactly: "reply_count" must not
+			// match a short marker by substring.
+			for _, token := range strings.Split(strings.ToLower(property), "_") {
+				for _, marker := range forbiddenMarkers {
+					if token == marker {
+						t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+					}
+				}
+			}
+		}
+	}
+
+	// The relation vocabulary is closed in every schema that carries it.
+	for _, name := range []string{"ArgumentPublishRequest", "Argument", "ArgumentListItem"} {
+		raw := string(document.Components.Schemas[name])
+		if !strings.Contains(raw, `"support"`) || !strings.Contains(raw, `"oppose"`) || !strings.Contains(raw, `"context"`) {
+			t.Errorf("%s must declare the closed relation vocabulary", name)
+		}
+	}
+
+	// Private routes require the session cookie; the two INK-spending posts
+	// also require the idempotency header (withdrawal is idempotent by
+	// state and needs no attempt key).
+	privatePaths := map[string]bool{
+		"/api/v1/me/arenas/{id}/arguments":                      true,
+		"/api/v1/me/arenas/{id}/arguments/{argumentID}/replies": true,
+		"/api/v1/me/arguments/{id}/withdraw":                    false,
+	}
+	for path, needsIdempotencyKey := range privatePaths {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		operation := string(operations["post"])
+		if !strings.Contains(operation, `"SessionCookie"`) {
+			t.Errorf("POST %s must require the SessionCookie scheme", path)
+		}
+		if needsIdempotencyKey != strings.Contains(operation, `"Idempotency-Key"`) {
+			t.Errorf("POST %s idempotency documentation = %v, want %v", path, !needsIdempotencyKey, needsIdempotencyKey)
+		}
+	}
+
+	for _, path := range []string{
+		"/api/v1/arenas/{id}/arguments",
+		"/api/v1/arguments/{id}/replies",
+		"/api/v1/arguments/{id}",
+	} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		operation := string(operations["get"])
+		if strings.Contains(operation, `"SessionCookie"`) {
+			t.Errorf("%s must stay public", path)
+		}
+		for _, marker := range []string{"ETag", "public, max-age=60", `"304"`, "If-None-Match"} {
+			if !strings.Contains(operation, marker) {
+				t.Errorf("%s operation must document %q", path, marker)
+			}
 		}
 	}
 }
