@@ -8,10 +8,10 @@
 -- name: CreateWalletAccount :one
 INSERT INTO app.wallet_accounts (account_id)
 VALUES ($1)
-RETURNING account_id, balance_free, balance_purchased, created_at, updated_at;
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at;
 
 -- name: GetWalletAccount :one
-SELECT account_id, balance_free, balance_purchased, created_at, updated_at
+SELECT account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at
 FROM app.wallet_accounts
 WHERE account_id = $1;
 
@@ -38,20 +38,20 @@ UPDATE app.wallet_accounts
 SET balance_free = balance_free + $2,
     updated_at = now()
 WHERE account_id = $1
-RETURNING account_id, balance_free, balance_purchased, created_at, updated_at;
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at;
 
 -- name: CreditPurchasedBalance :one
 UPDATE app.wallet_accounts
 SET balance_purchased = balance_purchased + $2,
     updated_at = now()
 WHERE account_id = $1
-RETURNING account_id, balance_free, balance_purchased, created_at, updated_at;
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at;
 
 -- GetWalletAccountForUpdate locks the balance projection row of an account
 -- for the duration of the transaction, serializing concurrent debits so no
 -- double spend can pass the balance check (THR-WAL-01).
 -- name: GetWalletAccountForUpdate :one
-SELECT account_id, balance_free, balance_purchased, created_at, updated_at
+SELECT account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at
 FROM app.wallet_accounts
 WHERE account_id = $1
 FOR UPDATE;
@@ -65,13 +65,29 @@ SET balance_free = balance_free - $2,
     balance_purchased = balance_purchased - $3,
     updated_at = now()
 WHERE account_id = $1
-RETURNING account_id, balance_free, balance_purchased, created_at, updated_at;
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at;
 
 -- name: ListWalletTransactionsByOperationID :many
 SELECT id, operation_id, bucket, amount, created_at
 FROM app.wallet_transactions
 WHERE operation_id = $1
 ORDER BY bucket;
+
+-- name: GetWalletFreeCycleAnchor :one
+SELECT free_cycle_anchor_at
+FROM app.wallet_accounts
+WHERE account_id = $1;
+
+-- ApplyFreeBalanceDelta applies a signed net delta to the FREE_INK balance:
+-- the monthly renewal expires the remaining franchise and grants the next
+-- one in a single statement. The CHECK (balance_free >= 0) still guards the
+-- invariant.
+-- name: ApplyFreeBalanceDelta :one
+UPDATE app.wallet_accounts
+SET balance_free = balance_free + $2,
+    updated_at = now()
+WHERE account_id = $1
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at;
 
 -- GetDerivedWalletBalance recomputes both bucket balances exclusively from
 -- the append-only ledger: the source of truth for the cached projection

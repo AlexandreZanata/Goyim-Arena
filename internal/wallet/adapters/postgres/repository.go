@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -30,6 +31,7 @@ var (
 	_ application.CreditRepository      = (*Repository)(nil)
 	_ application.DebitRepository       = (*Repository)(nil)
 	_ application.WalletQueryRepository = (*Repository)(nil)
+	_ application.FreeCycleRepository   = (*Repository)(nil)
 )
 
 // NewRepository creates a PostgreSQL repository adapter for the wallet.
@@ -373,6 +375,131 @@ func (r *Repository) ListStatementPage(ctx context.Context, accountID domain.Acc
 		})
 	}
 	return entries, nil
+}
+
+// FreeCycleAnchor returns the persisted activation anchor of the free
+// cycle.
+func (r *Repository) FreeCycleAnchor(ctx context.Context, accountID domain.AccountID) (time.Time, error) {
+	pgUUID, err := pgUUIDFromAccountID(accountID)
+	if err != nil {
+		return time.Time{}, application.ErrWalletNotFound
+	}
+
+	anchor, err := r.queries.GetWalletFreeCycleAnchor(ctx, pgUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, application.ErrWalletNotFound
+		}
+		return time.Time{}, fmt.Errorf("get free cycle anchor: %w", err)
+	}
+	return anchor.Time.UTC(), nil
+}
+
+// RenewFreePeriod atomically expires the remaining FREE_INK balance and
+// grants the period franchise under the wallet lock. The period grant key is
+// the idempotency marker: a retry returns Replayed without writing anything.
+func (r *Repository) RenewFreePeriod(ctx context.Context, request application.FreeCycleRenewalRequest) (*application.PeriodRenewal, error) {
+	pgUUID, err := pgUUIDFromAccountID(request.AccountID)
+	if err != nil {
+		return nil, application.ErrWalletNotFound
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := r.queries.WithTx(tx)
+
+	accountRow, err := qtx.GetWalletAccountForUpdate(ctx, pgUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrWalletNotFound
+		}
+		return nil, fmt.Errorf("lock wallet account: %w", err)
+	}
+
+	// The grant operation is the period marker: its key is written exactly
+	// once, together with the expiry, inside this transaction.
+	grantOperation, err := qtx.GetWalletOperationByIdempotencyKey(ctx, request.GrantKey.String())
+	switch {
+	case err == nil:
+		if uuidToString(grantOperation.AccountID) != request.AccountID.String() {
+			return nil, application.ErrIdempotencyMismatch
+		}
+		return &application.PeriodRenewal{PeriodStart: request.PeriodStart, Replayed: true}, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, fmt.Errorf("load period grant operation: %w", err)
+	}
+
+	expired, err := domain.NewInk(accountRow.BalanceFree)
+	if err != nil {
+		return nil, fmt.Errorf("stored free balance is invalid: %w", err)
+	}
+
+	renewal := &application.PeriodRenewal{PeriodStart: request.PeriodStart, Granted: request.Franchise}
+	if !expired.IsZero() {
+		expireOperation, err := qtx.CreateWalletOperationIfAbsent(ctx, platformpg.CreateWalletOperationIfAbsentParams{
+			AccountID:      pgUUID,
+			OperationType:  domain.OperationExpireFree.String(),
+			IdempotencyKey: request.ExpireKey.String(),
+			Reference:      request.Reference.String(),
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("free cycle expire key conflict without an operation")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("create free cycle expire operation: %w", err)
+		}
+
+		delta, err := domain.DirectionDebit.Apply(expired)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := qtx.CreateWalletTransaction(ctx, platformpg.CreateWalletTransactionParams{
+			OperationID: expireOperation.ID,
+			Bucket:      domain.BucketFree.String(),
+			Amount:      delta,
+		}); err != nil {
+			return nil, fmt.Errorf("create free cycle expire transaction: %w", err)
+		}
+		renewal.Expired = expired
+	}
+
+	grantOperation, err = qtx.CreateWalletOperationIfAbsent(ctx, platformpg.CreateWalletOperationIfAbsentParams{
+		AccountID:      pgUUID,
+		OperationType:  domain.OperationCreditFree.String(),
+		IdempotencyKey: request.GrantKey.String(),
+		Reference:      request.Reference.String(),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, errors.New("free cycle grant key conflict without an operation")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create free cycle grant operation: %w", err)
+	}
+	if _, err := qtx.CreateWalletTransaction(ctx, platformpg.CreateWalletTransactionParams{
+		OperationID: grantOperation.ID,
+		Bucket:      domain.BucketFree.String(),
+		Amount:      request.Franchise.Int64(),
+	}); err != nil {
+		return nil, fmt.Errorf("create free cycle grant transaction: %w", err)
+	}
+
+	netDelta := request.Franchise.Int64() - expired.Int64()
+	if _, err := qtx.ApplyFreeBalanceDelta(ctx, platformpg.ApplyFreeBalanceDeltaParams{
+		AccountID:   pgUUID,
+		BalanceFree: netDelta,
+	}); err != nil {
+		return nil, fmt.Errorf("apply free balance delta: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return renewal, nil
 }
 
 // creditBalance adds the signed delta to the balance projection of the

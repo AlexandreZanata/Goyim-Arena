@@ -1038,3 +1038,373 @@ func firstCursor(t *testing.T, useCase *application.GetWalletStatementUseCase, c
 	}
 	return statement.NextCursor
 }
+
+type testClock struct {
+	now time.Time
+}
+
+func (c testClock) Now() time.Time { return c.now }
+
+func setFreeCycleAnchor(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accountID pgtype.UUID, anchor time.Time) {
+	t.Helper()
+	if _, err := pool.Exec(ctx,
+		"UPDATE app.wallet_accounts SET free_cycle_anchor_at = $2 WHERE account_id = $1", accountID, anchor.UTC(),
+	); err != nil {
+		t.Fatalf("set free cycle anchor: %v", err)
+	}
+}
+
+func countOperationType(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accountID pgtype.UUID, operationType string) int {
+	t.Helper()
+	return countRows(t, ctx, pool,
+		"SELECT count(*) FROM app.wallet_operations WHERE account_id = $1 AND operation_type = $2",
+		accountID, operationType)
+}
+
+func TestRepository_RenewFreeCycleNormalTurn(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustWalletAccount(t, ctx, q, "free-cycle-normal@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:activation", "free-cycle:activation",
+	)); err != nil {
+		t.Fatalf("activation credit error = %v", err)
+	}
+	setFreeCycleAnchor(t, ctx, pool, acc.ID, now.Add(-35*24*time.Hour))
+
+	useCase := application.NewRenewFreeCycleUseCase(repo, domain.DefaultFreeCyclePolicy(), testClock{now: now})
+	result, err := useCase.Execute(ctx, application.RenewFreeCycleCommand{AccountID: accountID.String()})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(result.Renewals) != 1 {
+		t.Fatalf("renewals = %+v, want exactly 1", result.Renewals)
+	}
+	renewal := result.Renewals[0]
+	if renewal.Replayed {
+		t.Error("the first renewal of a period must not be a replay")
+	}
+	if renewal.Expired.Int64() != 5000 || renewal.Granted.Int64() != 5000 {
+		t.Fatalf("renewal = expired %d / granted %d, want 5000/5000", renewal.Expired.Int64(), renewal.Granted.Int64())
+	}
+	if renewal.PeriodStart.Location() != time.UTC {
+		t.Errorf("PeriodStart location = %v, want UTC", renewal.PeriodStart.Location())
+	}
+
+	balance, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, accountID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if balance.Free.Int64() != 5000 || balance.Purchased.Int64() != 0 {
+		t.Fatalf("balance = %d/%d, want 5000/0 (franchise renewed, not accumulated)", balance.Free.Int64(), balance.Purchased.Int64())
+	}
+	if got := countOperationType(t, ctx, pool, acc.ID, "expire_free"); got != 1 {
+		t.Fatalf("expire_free operations = %d, want 1", got)
+	}
+	if got := countOperationType(t, ctx, pool, acc.ID, "credit_free"); got != 2 {
+		t.Fatalf("credit_free operations = %d, want 2 (activation + renewal)", got)
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_transactions"); got != 3 {
+		t.Fatalf("transactions = %d, want 3", got)
+	}
+}
+
+func TestRepository_RenewFreeCycleDelayWithSpending(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustWalletAccount(t, ctx, q, "free-cycle-delay@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:activation", "free-cycle:delay:activation",
+	)); err != nil {
+		t.Fatalf("activation credit error = %v", err)
+	}
+	if _, err := repo.ApplyDebit(ctx, mustDebitRequest(
+		t, accountID, domain.OperationDebitArgument, 2000, "argument:delay", "free-cycle:delay:spend",
+	)); err != nil {
+		t.Fatalf("spending debit error = %v", err)
+	}
+	setFreeCycleAnchor(t, ctx, pool, acc.ID, now.Add(-45*24*time.Hour))
+
+	useCase := application.NewRenewFreeCycleUseCase(repo, domain.DefaultFreeCyclePolicy(), testClock{now: now})
+	result, err := useCase.Execute(ctx, application.RenewFreeCycleCommand{AccountID: accountID.String()})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(result.Renewals) != 1 || result.Renewals[0].Expired.Int64() != 3000 {
+		t.Fatalf("renewals = %+v, want one renewal expiring the 3000 left", result.Renewals)
+	}
+
+	balance, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, accountID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if balance.Free.Int64() != 5000 {
+		t.Fatalf("balance_free = %d, want 5000 after the delayed renewal", balance.Free.Int64())
+	}
+}
+
+func TestRepository_RenewFreeCycleIsIdempotentOnRetry(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustWalletAccount(t, ctx, q, "free-cycle-retry@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:activation", "free-cycle:retry:activation",
+	)); err != nil {
+		t.Fatalf("activation credit error = %v", err)
+	}
+	setFreeCycleAnchor(t, ctx, pool, acc.ID, now.Add(-35*24*time.Hour))
+
+	useCase := application.NewRenewFreeCycleUseCase(repo, domain.DefaultFreeCyclePolicy(), testClock{now: now})
+	if _, err := useCase.Execute(ctx, application.RenewFreeCycleCommand{AccountID: accountID.String()}); err != nil {
+		t.Fatalf("first Execute() error = %v", err)
+	}
+
+	retry, err := useCase.Execute(ctx, application.RenewFreeCycleCommand{AccountID: accountID.String()})
+	if err != nil {
+		t.Fatalf("retry Execute() error = %v", err)
+	}
+	if len(retry.Renewals) != 1 || !retry.Renewals[0].Replayed {
+		t.Fatalf("retry renewals = %+v, want one replayed period", retry.Renewals)
+	}
+	if got := countOperationType(t, ctx, pool, acc.ID, "expire_free"); got != 1 {
+		t.Fatalf("expire_free operations after retry = %d, want 1", got)
+	}
+	if got := countOperationType(t, ctx, pool, acc.ID, "credit_free"); got != 2 {
+		t.Fatalf("credit_free operations after retry = %d, want 2", got)
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_transactions"); got != 3 {
+		t.Fatalf("transactions after retry = %d, want 3", got)
+	}
+	balance, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, accountID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if balance.Free.Int64() != 5000 {
+		t.Fatalf("balance_free after retry = %d, want 5000", balance.Free.Int64())
+	}
+}
+
+func TestRepository_RenewFreeCycleMultiplePeriods(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustWalletAccount(t, ctx, q, "free-cycle-multi@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:activation", "free-cycle:multi:activation",
+	)); err != nil {
+		t.Fatalf("activation credit error = %v", err)
+	}
+	setFreeCycleAnchor(t, ctx, pool, acc.ID, now.Add(-100*24*time.Hour))
+
+	useCase := application.NewRenewFreeCycleUseCase(repo, domain.DefaultFreeCyclePolicy(), testClock{now: now})
+	result, err := useCase.Execute(ctx, application.RenewFreeCycleCommand{AccountID: accountID.String()})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if len(result.Renewals) != 3 {
+		t.Fatalf("renewals = %d, want 3 elapsed periods", len(result.Renewals))
+	}
+	var expiredTotal, grantedTotal int64
+	for i, renewal := range result.Renewals {
+		if renewal.Replayed {
+			t.Errorf("renewal %d must be fresh", i)
+		}
+		expiredTotal += renewal.Expired.Int64()
+		grantedTotal += renewal.Granted.Int64()
+	}
+	if expiredTotal != 15000 || grantedTotal != 15000 {
+		t.Fatalf("totals = expired %d / granted %d, want 15000/15000", expiredTotal, grantedTotal)
+	}
+
+	balance, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, accountID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if balance.Free.Int64() != 5000 {
+		t.Fatalf("balance_free = %d, want exactly one franchise after catch-up", balance.Free.Int64())
+	}
+	if got := countOperationType(t, ctx, pool, acc.ID, "expire_free"); got != 3 {
+		t.Fatalf("expire_free operations = %d, want 3", got)
+	}
+	if got := countOperationType(t, ctx, pool, acc.ID, "credit_free"); got != 4 {
+		t.Fatalf("credit_free operations = %d, want 4 (activation + 3 renewals)", got)
+	}
+}
+
+func TestRepository_RenewFreeCycleTimeZoneIrrelevant(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	anchor := now.Add(-35 * 24 * time.Hour)
+	brazil := time.FixedZone("BRT", -3*3600)
+
+	accounts := []struct {
+		email string
+		clock application.Clock
+	}{
+		{email: "free-cycle-tz-utc@arena.example.com", clock: testClock{now: now}},
+		{email: "free-cycle-tz-brt@arena.example.com", clock: testClock{now: now.In(brazil)}},
+	}
+
+	results := make([]*application.RenewFreeCycleResult, 0, len(accounts))
+	for _, account := range accounts {
+		acc := mustWalletAccount(t, ctx, q, account.email)
+		accountID := domain.AccountID(uuidString(acc.ID))
+		if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+			t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:activation", "free-cycle:tz:"+account.email,
+		)); err != nil {
+			t.Fatalf("activation credit error = %v", err)
+		}
+		setFreeCycleAnchor(t, ctx, pool, acc.ID, anchor)
+
+		useCase := application.NewRenewFreeCycleUseCase(repo, domain.DefaultFreeCyclePolicy(), account.clock)
+		result, err := useCase.Execute(ctx, application.RenewFreeCycleCommand{AccountID: accountID.String()})
+		if err != nil {
+			t.Fatalf("Execute() error = %v", err)
+		}
+		results = append(results, result)
+	}
+
+	first, second := results[0], results[1]
+	if !first.CurrentPeriodStart.Equal(second.CurrentPeriodStart) {
+		t.Fatalf("period starts diverged by clock zone: %v vs %v", first.CurrentPeriodStart, second.CurrentPeriodStart)
+	}
+	if first.CurrentPeriodStart.Location() != time.UTC {
+		t.Errorf("CurrentPeriodStart location = %v, want UTC", first.CurrentPeriodStart.Location())
+	}
+	if len(first.Renewals) != 1 || len(second.Renewals) != 1 {
+		t.Fatalf("renewals diverged by clock zone: %d vs %d", len(first.Renewals), len(second.Renewals))
+	}
+	if first.Renewals[0].Expired.Int64() != second.Renewals[0].Expired.Int64() ||
+		first.Renewals[0].Granted.Int64() != second.Renewals[0].Granted.Int64() {
+		t.Fatalf("renewal outcomes diverged by clock zone: %+v vs %+v", first.Renewals[0], second.Renewals[0])
+	}
+}
+
+// TestRepository_RenewFreeCycleConcurrentWorkers runs ten workers through
+// the same renewal: the wallet lock and the period keys allow exactly one
+// fresh renewal, and every other worker replays it.
+func TestRepository_RenewFreeCycleConcurrentWorkers(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t, dbtest.WithPoolLimits(10, 1))
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustWalletAccount(t, ctx, q, "free-cycle-race@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:activation", "free-cycle:race:activation",
+	)); err != nil {
+		t.Fatalf("activation credit error = %v", err)
+	}
+	setFreeCycleAnchor(t, ctx, pool, acc.ID, now.Add(-40*24*time.Hour))
+
+	useCase := application.NewRenewFreeCycleUseCase(repo, domain.DefaultFreeCyclePolicy(), testClock{now: now})
+
+	const workers = 10
+	var wg sync.WaitGroup
+	results := make([]*application.RenewFreeCycleResult, workers)
+	errs := make([]error, workers)
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			result, err := useCase.Execute(ctx, application.RenewFreeCycleCommand{AccountID: accountID.String()})
+			if err != nil {
+				errs[index] = err
+				return
+			}
+			results[index] = result
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("worker %d error = %v", i, err)
+		}
+	}
+
+	fresh, replayed := 0, 0
+	for _, result := range results {
+		if result == nil || len(result.Renewals) != 1 {
+			t.Fatalf("worker result = %+v, want one renewal", result)
+		}
+		if result.Renewals[0].Replayed {
+			replayed++
+		} else {
+			fresh++
+		}
+	}
+	if fresh != 1 || replayed != workers-1 {
+		t.Fatalf("fresh=%d replayed=%d, want 1/%d", fresh, replayed, workers-1)
+	}
+
+	if got := countOperationType(t, ctx, pool, acc.ID, "expire_free"); got != 1 {
+		t.Fatalf("expire_free operations = %d, want 1", got)
+	}
+	if got := countOperationType(t, ctx, pool, acc.ID, "credit_free"); got != 2 {
+		t.Fatalf("credit_free operations = %d, want 2", got)
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_transactions"); got != 3 {
+		t.Fatalf("transactions = %d, want 3", got)
+	}
+	balance, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, accountID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if balance.Free.Int64() != 5000 {
+		t.Fatalf("balance_free = %d, want 5000", balance.Free.Int64())
+	}
+}
+
+func TestRepository_RenewFreeCycleMissingWallet(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "free-cycle-missing@arena.example.com")
+	useCase := application.NewRenewFreeCycleUseCase(repo, domain.DefaultFreeCyclePolicy(), testClock{now: time.Now().UTC()})
+
+	_, err := useCase.Execute(ctx, application.RenewFreeCycleCommand{AccountID: uuidString(acc.ID)})
+	if !errors.Is(err, application.ErrWalletNotFound) {
+		t.Fatalf("missing wallet error = %v, want ErrWalletNotFound", err)
+	}
+}

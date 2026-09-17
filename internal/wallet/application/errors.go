@@ -13,4 +13,8 @@ var (
 	// ErrInvalidCursor indicates a malformed, foreign or version-mismatched
 	// statement cursor. Unknown values are never reflected back to callers.
 	ErrInvalidCursor = errors.New("application: statement cursor is invalid")
+
+	// ErrWalletNotFound indicates the account has no wallet yet, so no free
+	// cycle has ever started for it.
+	ErrWalletNotFound = errors.New("application: wallet not found")
 )

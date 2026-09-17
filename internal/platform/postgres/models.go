@@ -118,6 +118,8 @@ type AppWalletAccount struct {
 	BalancePurchased int64
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
+	// Monthly FREE_INK cycle anchor (activation instant); immutable and evaluated in UTC
+	FreeCycleAnchorAt pgtype.Timestamptz
 }
 
 // Append-only idempotency registry of logical INK operations (credit, debit, expiry)

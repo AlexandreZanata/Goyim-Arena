@@ -11,13 +11,44 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyFreeBalanceDelta = `-- name: ApplyFreeBalanceDelta :one
+UPDATE app.wallet_accounts
+SET balance_free = balance_free + $2,
+    updated_at = now()
+WHERE account_id = $1
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at
+`
+
+type ApplyFreeBalanceDeltaParams struct {
+	AccountID   pgtype.UUID
+	BalanceFree int64
+}
+
+// ApplyFreeBalanceDelta applies a signed net delta to the FREE_INK balance:
+// the monthly renewal expires the remaining franchise and grants the next
+// one in a single statement. The CHECK (balance_free >= 0) still guards the
+// invariant.
+func (q *Queries) ApplyFreeBalanceDelta(ctx context.Context, arg ApplyFreeBalanceDeltaParams) (AppWalletAccount, error) {
+	row := q.db.QueryRow(ctx, applyFreeBalanceDelta, arg.AccountID, arg.BalanceFree)
+	var i AppWalletAccount
+	err := row.Scan(
+		&i.AccountID,
+		&i.BalanceFree,
+		&i.BalancePurchased,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.FreeCycleAnchorAt,
+	)
+	return i, err
+}
+
 const applyWalletDebit = `-- name: ApplyWalletDebit :one
 UPDATE app.wallet_accounts
 SET balance_free = balance_free - $2,
     balance_purchased = balance_purchased - $3,
     updated_at = now()
 WHERE account_id = $1
-RETURNING account_id, balance_free, balance_purchased, created_at, updated_at
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at
 `
 
 type ApplyWalletDebitParams struct {
@@ -38,6 +69,7 @@ func (q *Queries) ApplyWalletDebit(ctx context.Context, arg ApplyWalletDebitPara
 		&i.BalancePurchased,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FreeCycleAnchorAt,
 	)
 	return i, err
 }
@@ -46,7 +78,7 @@ const createWalletAccount = `-- name: CreateWalletAccount :one
 
 INSERT INTO app.wallet_accounts (account_id)
 VALUES ($1)
-RETURNING account_id, balance_free, balance_purchased, created_at, updated_at
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at
 `
 
 // Wallet ledger queries for the PostgreSQL platform adapter.
@@ -64,6 +96,7 @@ func (q *Queries) CreateWalletAccount(ctx context.Context, accountID pgtype.UUID
 		&i.BalancePurchased,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FreeCycleAnchorAt,
 	)
 	return i, err
 }
@@ -166,7 +199,7 @@ UPDATE app.wallet_accounts
 SET balance_free = balance_free + $2,
     updated_at = now()
 WHERE account_id = $1
-RETURNING account_id, balance_free, balance_purchased, created_at, updated_at
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at
 `
 
 type CreditFreeBalanceParams struct {
@@ -185,6 +218,7 @@ func (q *Queries) CreditFreeBalance(ctx context.Context, arg CreditFreeBalancePa
 		&i.BalancePurchased,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FreeCycleAnchorAt,
 	)
 	return i, err
 }
@@ -194,7 +228,7 @@ UPDATE app.wallet_accounts
 SET balance_purchased = balance_purchased + $2,
     updated_at = now()
 WHERE account_id = $1
-RETURNING account_id, balance_free, balance_purchased, created_at, updated_at
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at
 `
 
 type CreditPurchasedBalanceParams struct {
@@ -211,6 +245,7 @@ func (q *Queries) CreditPurchasedBalance(ctx context.Context, arg CreditPurchase
 		&i.BalancePurchased,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FreeCycleAnchorAt,
 	)
 	return i, err
 }
@@ -253,7 +288,7 @@ func (q *Queries) GetDerivedWalletBalance(ctx context.Context, accountID pgtype.
 }
 
 const getWalletAccount = `-- name: GetWalletAccount :one
-SELECT account_id, balance_free, balance_purchased, created_at, updated_at
+SELECT account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at
 FROM app.wallet_accounts
 WHERE account_id = $1
 `
@@ -267,12 +302,13 @@ func (q *Queries) GetWalletAccount(ctx context.Context, accountID pgtype.UUID) (
 		&i.BalancePurchased,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FreeCycleAnchorAt,
 	)
 	return i, err
 }
 
 const getWalletAccountForUpdate = `-- name: GetWalletAccountForUpdate :one
-SELECT account_id, balance_free, balance_purchased, created_at, updated_at
+SELECT account_id, balance_free, balance_purchased, created_at, updated_at, free_cycle_anchor_at
 FROM app.wallet_accounts
 WHERE account_id = $1
 FOR UPDATE
@@ -290,8 +326,22 @@ func (q *Queries) GetWalletAccountForUpdate(ctx context.Context, accountID pgtyp
 		&i.BalancePurchased,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.FreeCycleAnchorAt,
 	)
 	return i, err
+}
+
+const getWalletFreeCycleAnchor = `-- name: GetWalletFreeCycleAnchor :one
+SELECT free_cycle_anchor_at
+FROM app.wallet_accounts
+WHERE account_id = $1
+`
+
+func (q *Queries) GetWalletFreeCycleAnchor(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getWalletFreeCycleAnchor, accountID)
+	var free_cycle_anchor_at pgtype.Timestamptz
+	err := row.Scan(&free_cycle_anchor_at)
+	return free_cycle_anchor_at, err
 }
 
 const getWalletOperationByIdempotencyKey = `-- name: GetWalletOperationByIdempotencyKey :one

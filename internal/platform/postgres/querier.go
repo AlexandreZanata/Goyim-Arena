@@ -11,6 +11,11 @@ import (
 )
 
 type Querier interface {
+	// ApplyFreeBalanceDelta applies a signed net delta to the FREE_INK balance:
+	// the monthly renewal expires the remaining franchise and grants the next
+	// one in a single statement. The CHECK (balance_free >= 0) still guards the
+	// invariant.
+	ApplyFreeBalanceDelta(ctx context.Context, arg ApplyFreeBalanceDeltaParams) (AppWalletAccount, error)
 	// ApplyWalletDebit subtracts the planned bucket consumptions in a single
 	// statement; the CHECK (balance >= 0) guards the invariant even if a caller
 	// gets the plan wrong.
@@ -88,6 +93,7 @@ type Querier interface {
 	// for the duration of the transaction, serializing concurrent debits so no
 	// double spend can pass the balance check (THR-WAL-01).
 	GetWalletAccountForUpdate(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
+	GetWalletFreeCycleAnchor(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error)
 	GetWalletOperationByIdempotencyKey(ctx context.Context, idempotencyKey string) (AppWalletOperation, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
 	InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error
