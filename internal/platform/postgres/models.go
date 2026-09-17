@@ -171,6 +171,19 @@ type AppPasswordResetToken struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// Private influence attributions: one position change credits one argument; the attributor identity is never part of a public projection
+type AppPersuasionAttribution struct {
+	ID               pgtype.UUID
+	PositionChangeID pgtype.UUID
+	// Account that made the position change; coherent with the change through the composite foreign key and private by default
+	AttributorID pgtype.UUID
+	ArgumentID   pgtype.UUID
+	// valid or invalid (moderation/fraud); invalidation never deletes the historical row
+	Status        string
+	CreatedAt     pgtype.Timestamptz
+	InvalidatedAt pgtype.Timestamptz
+}
+
 // Append-only chain of accepted position changes; from_position and to_position always differ
 type AppPositionChange struct {
 	ID           pgtype.UUID
