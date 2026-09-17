@@ -130,11 +130,12 @@ func replayCredit(ctx context.Context, qtx *platformpg.Queries, request applicat
 // stores the operation under its idempotency key, records one line per
 // consumed bucket and updates the balances atomically. Insufficient balance
 // leaves no partial state, and concurrent debits cannot double spend
-// (THR-WAL-01).
+// (THR-WAL-01). When the context carries a shared transaction (P07-T05) the
+// debit joins it so the caller commits or rolls back the whole operation;
+// otherwise the adapter owns one transaction.
 func (r *Repository) ApplyDebit(ctx context.Context, request application.DebitRequest) (*application.DebitResult, error) {
-	pgUUID, err := pgUUIDFromAccountID(request.AccountID)
-	if err != nil {
-		return nil, fmt.Errorf("apply debit: %w", err)
+	if tx, ok := platformpg.TxFromContext(ctx); ok {
+		return r.applyDebit(ctx, r.queries.WithTx(tx), request)
 	}
 
 	tx, err := r.pool.Begin(ctx)
@@ -143,7 +144,23 @@ func (r *Repository) ApplyDebit(ctx context.Context, request application.DebitRe
 	}
 	defer tx.Rollback(ctx)
 
-	qtx := r.queries.WithTx(tx)
+	result, err := r.applyDebit(ctx, r.queries.WithTx(tx), request)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+	return result, nil
+}
+
+// applyDebit runs the debit against the given queries, which may be bound
+// to an owned or to a shared transaction.
+func (r *Repository) applyDebit(ctx context.Context, qtx *platformpg.Queries, request application.DebitRequest) (*application.DebitResult, error) {
+	pgUUID, err := pgUUIDFromAccountID(request.AccountID)
+	if err != nil {
+		return nil, fmt.Errorf("apply debit: %w", err)
+	}
 
 	// Fast path: an already processed key replays without locking the wallet.
 	if result, found, err := replayDebit(ctx, qtx, request); err != nil {
@@ -224,10 +241,6 @@ func (r *Repository) ApplyDebit(ctx context.Context, request application.DebitRe
 		BalancePurchased: allocation.FromPurchased().Int64(),
 	}); err != nil {
 		return nil, fmt.Errorf("apply wallet debit: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
 	operation, err := mapOperationRow(operationRow)

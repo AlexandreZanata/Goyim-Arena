@@ -87,6 +87,8 @@ type AppArgument struct {
 	Status    string
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+	// Client attempt key, unique per author: a retry resolves the recorded argument instead of debiting INK again
+	IdempotencyKey pgtype.Text
 }
 
 // Structured sources supporting an argument: URL plus optional short description; a source never certifies truth

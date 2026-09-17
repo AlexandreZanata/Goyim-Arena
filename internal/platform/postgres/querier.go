@@ -59,6 +59,12 @@ type Querier interface {
 	// (account, origin, reference). On a conflict it returns no row, which tells
 	// the adapter to resolve the original lot (P07-T02).
 	CreateArenaPassLotIfAbsent(ctx context.Context, arg CreateArenaPassLotIfAbsentParams) (AppArenaPassLot, error)
+	// CreateArgument inserts one argument under the author idempotency key. The
+	// partial unique index resolves concurrent attempts with the same key: the
+	// loser gets no row back and resolves the replay (P10-T04).
+	CreateArgument(ctx context.Context, arg CreateArgumentParams) (CreateArgumentRow, error)
+	// CreateArgumentSource attaches one structured source to an argument.
+	CreateArgumentSource(ctx context.Context, arg CreateArgumentSourceParams) (pgtype.UUID, error)
 	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
 	CreatePasswordCredential(ctx context.Context, arg CreatePasswordCredentialParams) error
@@ -119,6 +125,12 @@ type Querier interface {
 	// slug, including removed, so the SEO document endpoint can answer 410 for
 	// removed Arenas instead of 404 (P08-T08). Drafts never hold a slug.
 	GetArenaStatusBySlug(ctx context.Context, slug pgtype.Text) (string, error)
+	// GetArgumentByAuthorAndKey resolves the argument recorded under one
+	// attempt key (P10-T04).
+	GetArgumentByAuthorAndKey(ctx context.Context, arg GetArgumentByAuthorAndKeyParams) (GetArgumentByAuthorAndKeyRow, error)
+	// GetArgumentByID returns one argument; replies resolve their parent
+	// through it (P10-T04).
+	GetArgumentByID(ctx context.Context, argumentID pgtype.UUID) (GetArgumentByIDRow, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
 	// app.profiles with the explicit opt-ins. A missing preferences row resolves
 	// to the conservative default (marketing opt-in false), never to an implicit

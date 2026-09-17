@@ -18,6 +18,15 @@ const (
 	CodeEmptySourceURL           ErrorCode = "ARGUMENT_EMPTY_SOURCE_URL"
 	CodeInvalidSourceURL         ErrorCode = "ARGUMENT_INVALID_SOURCE_URL"
 	CodeSourceDescriptionTooLong ErrorCode = "ARGUMENT_SOURCE_DESCRIPTION_TOO_LONG"
+	CodeEmptyIdempotencyKey      ErrorCode = "ARGUMENT_EMPTY_IDEMPOTENCY_KEY"
+	CodeInvalidIdempotencyKey    ErrorCode = "ARGUMENT_INVALID_IDEMPOTENCY_KEY"
+	CodeIdempotencyKeyTooLong    ErrorCode = "ARGUMENT_IDEMPOTENCY_KEY_TOO_LONG"
+	CodeEmptyArgumentID          ErrorCode = "ARGUMENT_EMPTY_ID"
+	CodeInvalidArgumentID        ErrorCode = "ARGUMENT_INVALID_ID"
+	CodeEmptyArenaID             ErrorCode = "ARGUMENT_EMPTY_ARENA_ID"
+	CodeInvalidArenaID           ErrorCode = "ARGUMENT_INVALID_ARENA_ID"
+	CodeEmptyAccountID           ErrorCode = "ARGUMENT_EMPTY_ACCOUNT_ID"
+	CodeInvalidAccountID         ErrorCode = "ARGUMENT_INVALID_ACCOUNT_ID"
 )
 
 // DomainError represents an invariant or rule failure in the arguments
@@ -81,4 +90,31 @@ var (
 
 	// ErrSourceDescriptionTooLong indicates a description above the limit.
 	ErrSourceDescriptionTooLong = DomainError{Code: CodeSourceDescriptionTooLong, Message: "source description exceeds 500 characters"}
+
+	// ErrEmptyIdempotencyKey indicates a missing attempt key.
+	ErrEmptyIdempotencyKey = DomainError{Code: CodeEmptyIdempotencyKey, Message: "idempotency key cannot be empty"}
+
+	// ErrInvalidIdempotencyKey indicates a key with unsupported characters.
+	ErrInvalidIdempotencyKey = DomainError{Code: CodeInvalidIdempotencyKey, Message: "idempotency key contains unsupported characters"}
+
+	// ErrIdempotencyKeyTooLong indicates a key above the maximum length.
+	ErrIdempotencyKeyTooLong = DomainError{Code: CodeIdempotencyKeyTooLong, Message: "idempotency key exceeds the maximum allowed length"}
+
+	// ErrEmptyArgumentID indicates a missing argument identifier.
+	ErrEmptyArgumentID = DomainError{Code: CodeEmptyArgumentID, Message: "argument identifier cannot be empty"}
+
+	// ErrInvalidArgumentID indicates a malformed argument identifier.
+	ErrInvalidArgumentID = DomainError{Code: CodeInvalidArgumentID, Message: "argument identifier format is invalid"}
+
+	// ErrEmptyArenaID indicates a missing Arena identifier.
+	ErrEmptyArenaID = DomainError{Code: CodeEmptyArenaID, Message: "arena identifier cannot be empty"}
+
+	// ErrInvalidArenaID indicates a malformed Arena identifier.
+	ErrInvalidArenaID = DomainError{Code: CodeInvalidArenaID, Message: "arena identifier format is invalid"}
+
+	// ErrEmptyAccountID indicates a missing account identifier.
+	ErrEmptyAccountID = DomainError{Code: CodeEmptyAccountID, Message: "account identifier cannot be empty"}
+
+	// ErrInvalidAccountID indicates a malformed account identifier.
+	ErrInvalidAccountID = DomainError{Code: CodeInvalidAccountID, Message: "account identifier format is invalid"}
 )
