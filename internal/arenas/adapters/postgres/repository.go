@@ -302,6 +302,45 @@ func (r *Repository) RemoveArena(ctx context.Context, arenaID domain.ArenaID, ex
 	return mapArenaRow(row)
 }
 
+// ListPublicArenas returns one keyset page of the public feed, newest
+// first. The query itself limits candidates to publicly visible statuses:
+// drafts and removed Arenas can never appear, whatever the filters.
+func (r *Repository) ListPublicArenas(ctx context.Context, filter application.ArenaFeedFilter, after *application.FeedPosition, limit int) ([]domain.Arena, error) {
+	params := platformpg.ListPublicArenasPageParams{PageLimit: int32(limit)}
+	if filter.Language != nil {
+		params.LanguageFilter = pgtype.Text{String: filter.Language.String(), Valid: true}
+	}
+	if filter.Category != nil {
+		params.CategoryFilter = pgtype.Text{String: filter.Category.String(), Valid: true}
+	}
+	if filter.Status != nil {
+		params.StatusFilter = pgtype.Text{String: filter.Status.String(), Valid: true}
+	}
+	if after != nil {
+		var afterID pgtype.UUID
+		if err := afterID.Scan(after.ArenaID); err != nil {
+			return nil, application.ErrInvalidCursor
+		}
+		params.AfterPublishedAt = pgtype.Timestamptz{Time: after.PublishedAt.UTC(), Valid: true}
+		params.AfterID = afterID
+	}
+
+	rows, err := r.queriesFor(ctx).ListPublicArenasPage(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("list public arenas: %w", err)
+	}
+
+	arenas := make([]domain.Arena, 0, len(rows))
+	for _, row := range rows {
+		arena, err := mapArenaRow(row)
+		if err != nil {
+			return nil, err
+		}
+		arenas = append(arenas, *arena)
+	}
+	return arenas, nil
+}
+
 // diagnoseCloseMiss explains why the closing affected no row.
 func (r *Repository) diagnoseCloseMiss(ctx context.Context, arenaUUID, creatorUUID pgtype.UUID, expectedVersion int32) error {
 	state, err := r.queriesFor(ctx).GetArenaStateForCreator(ctx, platformpg.GetArenaStateForCreatorParams{

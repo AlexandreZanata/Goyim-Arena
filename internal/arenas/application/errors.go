@@ -28,4 +28,16 @@ var (
 	// ErrNotAuthorized indicates the acting account is not allowed to perform
 	// moderation actions on Arenas.
 	ErrNotAuthorized = errors.New("application: actor is not authorized for arena moderation")
+
+	// ErrInvalidCursor indicates a malformed, forged or version-mismatched
+	// feed cursor. Unknown values are never reflected back to callers.
+	ErrInvalidCursor = errors.New("application: arena feed cursor is invalid")
+
+	// ErrWeakFeedCursorSecret indicates the configured feed cursor signing
+	// secret is shorter than the 256-bit minimum.
+	ErrWeakFeedCursorSecret = errors.New("application: arena feed cursor secret must be at least 32 bytes")
+
+	// ErrInvalidFeedFilter indicates a feed filter that can never describe a
+	// public Arena (unknown status, draft or removed).
+	ErrInvalidFeedFilter = errors.New("application: arena feed filter is invalid")
 )

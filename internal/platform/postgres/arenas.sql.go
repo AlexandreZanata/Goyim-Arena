@@ -252,6 +252,75 @@ func (q *Queries) ListArenaDraftsForCreator(ctx context.Context, creatorID pgtyp
 	return items, nil
 }
 
+const listPublicArenasPage = `-- name: ListPublicArenasPage :many
+SELECT id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
+FROM app.arenas
+WHERE status IN ('published', 'closed', 'restricted')
+  AND ($1::text IS NULL OR language = $1::text)
+  AND ($2::text IS NULL OR category = $2::text)
+  AND ($3::text IS NULL OR status = $3::text)
+  AND (
+      $4::timestamptz IS NULL
+      OR (published_at, id) < ($4::timestamptz, $5::uuid)
+  )
+ORDER BY published_at DESC, id DESC
+LIMIT $6
+`
+
+type ListPublicArenasPageParams struct {
+	LanguageFilter   pgtype.Text
+	CategoryFilter   pgtype.Text
+	StatusFilter     pgtype.Text
+	AfterPublishedAt pgtype.Timestamptz
+	AfterID          pgtype.UUID
+	PageLimit        int32
+}
+
+// ListPublicArenasPage returns one keyset page of the public feed, newest
+// first, with optional language, category and status filters. Only publicly
+// visible statuses are ever candidates: drafts and removed Arenas can never
+// appear, and the (published_at, id) tuple comparison never duplicates or
+// skips rows (P08-T06).
+func (q *Queries) ListPublicArenasPage(ctx context.Context, arg ListPublicArenasPageParams) ([]AppArena, error) {
+	rows, err := q.db.Query(ctx, listPublicArenasPage,
+		arg.LanguageFilter,
+		arg.CategoryFilter,
+		arg.StatusFilter,
+		arg.AfterPublishedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppArena{}
+	for rows.Next() {
+		var i AppArena
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatorID,
+			&i.Slug,
+			&i.Statement,
+			&i.Context,
+			&i.Category,
+			&i.Language,
+			&i.Status,
+			&i.Version,
+			&i.CreatedAt,
+			&i.PublishedAt,
+			&i.ClosesAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const publishArenaDraft = `-- name: PublishArenaDraft :one
 UPDATE app.arenas
 SET status = 'published',

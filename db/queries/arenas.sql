@@ -92,3 +92,22 @@ RETURNING id, creator_id, slug, statement, context, category, language, status, 
 SELECT status, version
 FROM app.arenas
 WHERE id = $1;
+
+-- ListPublicArenasPage returns one keyset page of the public feed, newest
+-- first, with optional language, category and status filters. Only publicly
+-- visible statuses are ever candidates: drafts and removed Arenas can never
+-- appear, and the (published_at, id) tuple comparison never duplicates or
+-- skips rows (P08-T06).
+-- name: ListPublicArenasPage :many
+SELECT id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
+FROM app.arenas
+WHERE status IN ('published', 'closed', 'restricted')
+  AND (sqlc.narg(language_filter)::text IS NULL OR language = sqlc.narg(language_filter)::text)
+  AND (sqlc.narg(category_filter)::text IS NULL OR category = sqlc.narg(category_filter)::text)
+  AND (sqlc.narg(status_filter)::text IS NULL OR status = sqlc.narg(status_filter)::text)
+  AND (
+      sqlc.arg(after_published_at)::timestamptz IS NULL
+      OR (published_at, id) < (sqlc.arg(after_published_at)::timestamptz, sqlc.arg(after_id)::uuid)
+  )
+ORDER BY published_at DESC, id DESC
+LIMIT sqlc.arg(page_limit);

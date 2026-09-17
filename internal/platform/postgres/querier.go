@@ -153,6 +153,12 @@ type Querier interface {
 	// Expiration is never written back: the predicate is evaluated at read time,
 	// so the sweep is a pure derivation and repeated runs are identical (P07-T04).
 	ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredArenaPassLotsParams) ([]AppArenaPassLot, error)
+	// ListPublicArenasPage returns one keyset page of the public feed, newest
+	// first, with optional language, category and status filters. Only publicly
+	// visible statuses are ever candidates: drafts and removed Arenas can never
+	// appear, and the (published_at, id) tuple comparison never duplicates or
+	// skips rows (P08-T06).
+	ListPublicArenasPage(ctx context.Context, arg ListPublicArenasPageParams) ([]AppArena, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	// ListWalletStatementPage returns one keyset-paginated page of the account
 	// statement, newest first. NULL after_* parameters select the first page;
