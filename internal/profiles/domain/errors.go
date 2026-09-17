@@ -1,0 +1,56 @@
+package domain
+
+import "fmt"
+
+// ErrorCode is a stable machine-readable identifier for domain rule violations.
+type ErrorCode string
+
+const (
+	CodeEmptyUsername           ErrorCode = "PROFILE_EMPTY_USERNAME"
+	CodeUsernameTooShort        ErrorCode = "PROFILE_USERNAME_TOO_SHORT"
+	CodeUsernameTooLong         ErrorCode = "PROFILE_USERNAME_TOO_LONG"
+	CodeUsernameNonASCII        ErrorCode = "PROFILE_USERNAME_NON_ASCII"
+	CodeInvalidUsernameFormat   ErrorCode = "PROFILE_USERNAME_INVALID_FORMAT"
+	CodeUsernameReserved        ErrorCode = "PROFILE_USERNAME_RESERVED"
+	CodeUsernameUnchanged       ErrorCode = "PROFILE_USERNAME_UNCHANGED"
+	CodeUsernameCooldown        ErrorCode = "PROFILE_USERNAME_COOLDOWN"
+	CodeInvalidCooldown         ErrorCode = "PROFILE_INVALID_COOLDOWN"
+	CodeInvalidReservedUsername ErrorCode = "PROFILE_INVALID_RESERVED_USERNAME"
+	CodeEmptyLocale             ErrorCode = "PROFILE_EMPTY_LOCALE"
+	CodeInvalidLocale           ErrorCode = "PROFILE_INVALID_LOCALE"
+	CodeUnsupportedLocale       ErrorCode = "PROFILE_UNSUPPORTED_LOCALE"
+)
+
+// DomainError represents an invariant or rule failure in the profiles domain.
+type DomainError struct {
+	Code    ErrorCode
+	Message string
+}
+
+func (e DomainError) Error() string {
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+func (e DomainError) Is(target error) bool {
+	t, ok := target.(DomainError)
+	if !ok {
+		return false
+	}
+	return e.Code == t.Code
+}
+
+var (
+	ErrEmptyUsername           = DomainError{Code: CodeEmptyUsername, Message: "username cannot be empty"}
+	ErrUsernameTooShort        = DomainError{Code: CodeUsernameTooShort, Message: "username is shorter than the minimum allowed length"}
+	ErrUsernameTooLong         = DomainError{Code: CodeUsernameTooLong, Message: "username is longer than the maximum allowed length"}
+	ErrUsernameNonASCII        = DomainError{Code: CodeUsernameNonASCII, Message: "username contains non-ASCII characters"}
+	ErrInvalidUsernameFormat   = DomainError{Code: CodeInvalidUsernameFormat, Message: "username format is invalid"}
+	ErrUsernameReserved        = DomainError{Code: CodeUsernameReserved, Message: "username is reserved"}
+	ErrUsernameUnchanged       = DomainError{Code: CodeUsernameUnchanged, Message: "username is unchanged"}
+	ErrUsernameCooldown        = DomainError{Code: CodeUsernameCooldown, Message: "username cannot be changed before the cooldown elapses"}
+	ErrInvalidCooldown         = DomainError{Code: CodeInvalidCooldown, Message: "username change cooldown cannot be negative"}
+	ErrInvalidReservedUsername = DomainError{Code: CodeInvalidReservedUsername, Message: "reserved username list contains an invalid username"}
+	ErrEmptyLocale             = DomainError{Code: CodeEmptyLocale, Message: "interface locale cannot be empty"}
+	ErrInvalidLocale           = DomainError{Code: CodeInvalidLocale, Message: "interface locale is not a well-formed BCP 47 tag"}
+	ErrUnsupportedLocale       = DomainError{Code: CodeUnsupportedLocale, Message: "interface locale is not supported by the product"}
+)
