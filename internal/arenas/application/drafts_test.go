@@ -29,6 +29,9 @@ type fakeArenaRepo struct {
 	publishRequests []publishCall
 	publishErr      error
 
+	transitions   []transitionCall
+	transitionErr error
+
 	deleteCalls []domain.ArenaID
 	deleteErr   error
 }
@@ -130,6 +133,67 @@ type publishCall struct {
 	slug            domain.Slug
 	publishedAt     time.Time
 	expectedVersion int32
+}
+
+type transitionCall struct {
+	status          domain.ArenaStatus
+	expectedVersion int32
+}
+
+func (r *fakeArenaRepo) transition(arenaID domain.ArenaID, status domain.ArenaStatus, expectedVersion int32) (*domain.Arena, error) {
+	arena, ok := r.arenas[arenaID]
+	if !ok {
+		return nil, application.ErrArenaNotFound
+	}
+	if arena.Version() != expectedVersion {
+		return nil, application.ErrVersionConflict
+	}
+	publishedAt := arena.PublishedAt()
+	updated, err := domain.ReconstituteArena(
+		arena.ID(), arena.CreatorID(), arena.Statement(), arena.Context(), arena.Category(), arena.Language(),
+		status, arena.Slug(), arena.Version()+1, arena.CreatedAt(), publishedAt, arena.ClosesAt(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	r.arenas[arenaID] = updated
+	return updated, nil
+}
+
+func (r *fakeArenaRepo) GetArenaByID(_ context.Context, arenaID domain.ArenaID) (*domain.Arena, error) {
+	if r.getErr != nil {
+		return nil, r.getErr
+	}
+	arena, ok := r.arenas[arenaID]
+	if !ok {
+		return nil, application.ErrArenaNotFound
+	}
+	copied := *arena
+	return &copied, nil
+}
+
+func (r *fakeArenaRepo) CloseArena(_ context.Context, arenaID domain.ArenaID, _ domain.CreatorID, expectedVersion int32) (*domain.Arena, error) {
+	r.transitions = append(r.transitions, transitionCall{status: domain.ArenaStatusClosed, expectedVersion: expectedVersion})
+	if r.transitionErr != nil {
+		return nil, r.transitionErr
+	}
+	return r.transition(arenaID, domain.ArenaStatusClosed, expectedVersion)
+}
+
+func (r *fakeArenaRepo) RestrictArena(_ context.Context, arenaID domain.ArenaID, expectedVersion int32) (*domain.Arena, error) {
+	r.transitions = append(r.transitions, transitionCall{status: domain.ArenaStatusRestricted, expectedVersion: expectedVersion})
+	if r.transitionErr != nil {
+		return nil, r.transitionErr
+	}
+	return r.transition(arenaID, domain.ArenaStatusRestricted, expectedVersion)
+}
+
+func (r *fakeArenaRepo) RemoveArena(_ context.Context, arenaID domain.ArenaID, expectedVersion int32) (*domain.Arena, error) {
+	r.transitions = append(r.transitions, transitionCall{status: domain.ArenaStatusRemoved, expectedVersion: expectedVersion})
+	if r.transitionErr != nil {
+		return nil, r.transitionErr
+	}
+	return r.transition(arenaID, domain.ArenaStatusRemoved, expectedVersion)
 }
 
 func (r *fakeArenaRepo) DeleteArenaDraft(_ context.Context, arenaID domain.ArenaID, _ domain.CreatorID) error {

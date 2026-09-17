@@ -28,6 +28,11 @@ const (
 	CodeArenaNotDraft       ErrorCode = "ARENA_NOT_DRAFT"
 	CodeMissingSlug         ErrorCode = "ARENA_MISSING_SLUG"
 	CodeInvalidCloseDate    ErrorCode = "ARENA_INVALID_CLOSE_DATE"
+	CodeArenaNotOpen        ErrorCode = "ARENA_NOT_OPEN"
+	CodeActorRequired       ErrorCode = "ARENA_ACTOR_REQUIRED"
+	CodeEmptyReason         ErrorCode = "ARENA_EMPTY_REASON"
+	CodeInvalidReason       ErrorCode = "ARENA_INVALID_REASON"
+	CodeReasonTooLong       ErrorCode = "ARENA_REASON_TOO_LONG"
 )
 
 // DomainError represents an invariant or rule failure in the arenas domain.
@@ -71,4 +76,9 @@ var (
 	ErrArenaNotDraft       = DomainError{Code: CodeArenaNotDraft, Message: "arena is not a draft"}
 	ErrMissingSlug         = DomainError{Code: CodeMissingSlug, Message: "publishing an arena requires a slug"}
 	ErrInvalidCloseDate    = DomainError{Code: CodeInvalidCloseDate, Message: "arena close date must be after its publication"}
+	ErrArenaNotOpen        = DomainError{Code: CodeArenaNotOpen, Message: "arena is not open to participation"}
+	ErrActorRequired       = DomainError{Code: CodeActorRequired, Message: "moderation actions require an acting moderator"}
+	ErrEmptyReason         = DomainError{Code: CodeEmptyReason, Message: "moderation actions require a reason"}
+	ErrInvalidReason       = DomainError{Code: CodeInvalidReason, Message: "reason contains unsupported characters"}
+	ErrReasonTooLong       = DomainError{Code: CodeReasonTooLong, Message: "reason exceeds the maximum allowed length"}
 )

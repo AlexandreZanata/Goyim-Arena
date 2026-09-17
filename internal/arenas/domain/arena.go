@@ -30,6 +30,21 @@ func (id CreatorID) IsZero() bool {
 	return id == ""
 }
 
+// ModeratorID identifies the acting moderator of a moderation decision. It
+// is a distinct type so a creator id can never be passed as an actor by
+// accident.
+type ModeratorID string
+
+// String returns the string representation of the moderator identifier.
+func (id ModeratorID) String() string {
+	return string(id)
+}
+
+// IsZero reports whether the ModeratorID is uninitialized.
+func (id ModeratorID) IsZero() bool {
+	return id == ""
+}
+
 // ArenaStatus represents the discrete lifecycle states of an Arena.
 type ArenaStatus string
 
@@ -219,9 +234,19 @@ func (a *Arena) IsDraft() bool {
 }
 
 // AcceptsParticipation reports whether new participation is allowed: only
-// published Arenas accept positions, arguments and changes.
+// published Arenas accept positions, arguments and changes. Closed,
+// restricted, removed and draft Arenas reject every participation mutation.
 func (a *Arena) AcceptsParticipation() bool {
 	return a.status == ArenaStatusPublished
+}
+
+// EnsureAcceptsParticipation returns ErrArenaNotOpen when the Arena does not
+// accept new participation.
+func (a *Arena) EnsureAcceptsParticipation() error {
+	if !a.AcceptsParticipation() {
+		return ErrArenaNotOpen
+	}
+	return nil
 }
 
 // UpdateDraft applies the provided changes to a draft. Each value object is

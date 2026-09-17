@@ -24,4 +24,8 @@ var (
 	// ErrSlugConflict indicates the derived public slug is already taken by
 	// another Arena.
 	ErrSlugConflict = errors.New("application: arena slug is already taken")
+
+	// ErrNotAuthorized indicates the acting account is not allowed to perform
+	// moderation actions on Arenas.
+	ErrNotAuthorized = errors.New("application: actor is not authorized for arena moderation")
 )

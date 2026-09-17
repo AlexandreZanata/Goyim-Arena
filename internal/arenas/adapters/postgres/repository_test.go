@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -14,6 +15,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/adapters/postgres"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbtest"
 	platformpg "github.com/AlexandreZanata/Goyim-Arena/internal/platform/postgres"
 )
@@ -384,5 +386,208 @@ func TestRepository_DraftsArePrivateAndConsumeNoPasses(t *testing.T) {
 	}
 	if got := countArenaRows(t, ctx, pool, "SELECT count(*) FROM app.arenas"); got != 0 {
 		t.Fatalf("arenas after delete = %d, want 0", got)
+	}
+}
+
+func mustPublishSeed(t *testing.T, ctx context.Context, repo *postgres.Repository, creator domain.CreatorID, statement, slug string) *domain.Arena {
+	t.Helper()
+	draft, err := repo.CreateArena(ctx, mustCreateRequest(t, creator, statement, "", "technology", "pt-BR"))
+	if err != nil {
+		t.Fatalf("seed draft: %v", err)
+	}
+	parsedSlug, err := domain.ParseSlug(slug)
+	if err != nil {
+		t.Fatalf("ParseSlug(%q): %v", slug, err)
+	}
+	published, err := repo.PublishArenaDraft(ctx, draft.ID(), creator, parsedSlug, time.Now().UTC(), draft.Version())
+	if err != nil {
+		t.Fatalf("seed publication: %v", err)
+	}
+	return published
+}
+
+func TestRepository_CloseRestrictRemoveTransitions(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	creator := mustArenaCreator(t, ctx, q, "arena-transitions@arena.example.com")
+	intruder := mustArenaCreator(t, ctx, q, "arena-transitions-intruder@arena.example.com")
+
+	arena := mustPublishSeed(t, ctx, repo, creator, "Arena publicada para fechamento", "close-transition-arena")
+
+	closed, err := repo.CloseArena(ctx, arena.ID(), creator, arena.Version())
+	if err != nil {
+		t.Fatalf("CloseArena() error = %v", err)
+	}
+	if closed.Status() != domain.ArenaStatusClosed || closed.Version() != arena.Version()+1 {
+		t.Fatalf("closed = status %s version %d", closed.Status(), closed.Version())
+	}
+	if closed.EnsureAcceptsParticipation(); !errors.Is(closed.EnsureAcceptsParticipation(), domain.ErrArenaNotOpen) {
+		t.Fatal("a closed Arena must reject participation")
+	}
+
+	// Closing a closed Arena is not a transition.
+	if _, err := repo.CloseArena(ctx, arena.ID(), creator, closed.Version()); !errors.Is(err, domain.ErrInvalidStatusChange) {
+		t.Fatalf("second close error = %v, want ErrInvalidStatusChange", err)
+	}
+
+	// Stale version.
+	stale := mustPublishSeed(t, ctx, repo, creator, "Arena para conflito de versão", "stale-version-arena")
+	if _, err := repo.CloseArena(ctx, stale.ID(), creator, stale.Version()+1); !errors.Is(err, application.ErrVersionConflict) {
+		t.Fatalf("stale close error = %v, want ErrVersionConflict", err)
+	}
+
+	// Foreign Arena is not found.
+	if _, err := repo.CloseArena(ctx, stale.ID(), intruder, stale.Version()); !errors.Is(err, application.ErrArenaNotFound) {
+		t.Fatalf("foreign close error = %v, want ErrArenaNotFound", err)
+	}
+
+	// Restrict a closed Arena; retry on the restricted state is a conflict
+	// at the repository level (the use case resolves it as a replay).
+	restricted, err := repo.RestrictArena(ctx, arena.ID(), closed.Version())
+	if err != nil {
+		t.Fatalf("RestrictArena() error = %v", err)
+	}
+	if restricted.Status() != domain.ArenaStatusRestricted {
+		t.Fatalf("status = %s, want restricted", restricted.Status())
+	}
+	if _, err := repo.RestrictArena(ctx, arena.ID(), restricted.Version()); !errors.Is(err, application.ErrVersionConflict) {
+		t.Fatalf("second restrict error = %v, want ErrVersionConflict", err)
+	}
+
+	// Remove the restricted Arena; removed is terminal at the repository.
+	removed, err := repo.RemoveArena(ctx, arena.ID(), restricted.Version())
+	if err != nil {
+		t.Fatalf("RemoveArena() error = %v", err)
+	}
+	if removed.Status() != domain.ArenaStatusRemoved {
+		t.Fatalf("status = %s, want removed", removed.Status())
+	}
+	if _, err := repo.RemoveArena(ctx, arena.ID(), removed.Version()); !errors.Is(err, application.ErrVersionConflict) {
+		t.Fatalf("second remove error = %v, want ErrVersionConflict", err)
+	}
+
+	// Drafts cannot be moderated or closed.
+	draft, err := repo.CreateArena(ctx, mustCreateRequest(t, creator, "Rascunho fora da moderação", "", "culture", "pt-BR"))
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+	if _, err := repo.RestrictArena(ctx, draft.ID(), draft.Version()); !errors.Is(err, domain.ErrInvalidStatusChange) {
+		t.Fatalf("draft restrict error = %v, want ErrInvalidStatusChange", err)
+	}
+	if _, err := repo.RemoveArena(ctx, draft.ID(), draft.Version()); !errors.Is(err, domain.ErrInvalidStatusChange) {
+		t.Fatalf("draft remove error = %v, want ErrInvalidStatusChange", err)
+	}
+	if _, err := repo.CloseArena(ctx, draft.ID(), creator, draft.Version()); !errors.Is(err, domain.ErrInvalidStatusChange) {
+		t.Fatalf("draft close error = %v, want ErrInvalidStatusChange", err)
+	}
+
+	// Unscoped lookup serves moderation; unknown ids are not found.
+	if _, err := repo.GetArenaByID(ctx, arena.ID()); err != nil {
+		t.Fatalf("GetArenaByID() error = %v", err)
+	}
+	if _, err := repo.GetArenaByID(ctx, "018f6b2a-0000-7000-8000-0000000000ff"); !errors.Is(err, application.ErrArenaNotFound) {
+		t.Fatalf("unknown GetArenaByID error = %v, want ErrArenaNotFound", err)
+	}
+}
+
+type allowModerationAuthorizer struct {
+	calls int
+}
+
+func (a *allowModerationAuthorizer) EnsureModerator(_ context.Context, _ domain.ModeratorID) error {
+	a.calls++
+	return nil
+}
+
+type denyModerationAuthorizer struct{}
+
+func (denyModerationAuthorizer) EnsureModerator(_ context.Context, _ domain.ModeratorID) error {
+	return application.ErrNotAuthorized
+}
+
+type captureModerationAudit struct {
+	events []application.ModerationEvent
+}
+
+func (a *captureModerationAudit) RecordArenaModeration(_ context.Context, event application.ModerationEvent) error {
+	a.events = append(a.events, event)
+	return nil
+}
+
+func TestRepository_ModerationUseCasesEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	creator := mustArenaCreator(t, ctx, q, "arena-moderation@arena.example.com")
+	arena := mustPublishSeed(t, ctx, repo, creator, "Arena sob decisão de moderação", "moderation-arena")
+
+	authorizer := &allowModerationAuthorizer{}
+	audit := &captureModerationAudit{}
+	clock := clockseed.NewClock()
+
+	restrict := application.NewRestrictArenaUseCase(repo, authorizer, audit, clock)
+	remove := application.NewRemoveArenaUseCase(repo, authorizer, audit, clock)
+
+	command := application.ModerateArenaCommand{
+		ActorAccountID: "018f6b2a-0000-7000-8000-000000000099",
+		ArenaID:        arena.ID().String(),
+		Reason:         "decisão registrada no caso 42",
+	}
+
+	restricted, err := restrict.Execute(ctx, command)
+	if err != nil {
+		t.Fatalf("restrict Execute() error = %v", err)
+	}
+	if restricted.Arena.Status() != domain.ArenaStatusRestricted {
+		t.Fatalf("status = %s, want restricted", restricted.Arena.Status())
+	}
+	stored, err := repo.GetArenaByID(ctx, arena.ID())
+	if err != nil {
+		t.Fatalf("reload moderated arena: %v", err)
+	}
+	if stored.Status() != domain.ArenaStatusRestricted {
+		t.Fatalf("stored status = %s, want restricted", stored.Status())
+	}
+	if len(audit.events) != 1 || audit.events[0].Action != application.ModerationRestrict {
+		t.Fatalf("audit events = %+v", audit.events)
+	}
+
+	removed, err := remove.Execute(ctx, command)
+	if err != nil {
+		t.Fatalf("remove Execute() error = %v", err)
+	}
+	if removed.Arena.Status() != domain.ArenaStatusRemoved {
+		t.Fatalf("status = %s, want removed", removed.Arena.Status())
+	}
+	if len(audit.events) != 2 || audit.events[1].Action != application.ModerationRemove {
+		t.Fatalf("audit events = %+v", audit.events)
+	}
+
+	// Negative authorization: nothing changes and nothing is audited.
+	other := mustPublishSeed(t, ctx, repo, creator, "Arena protegida da moderação", "protected-moderation-arena")
+	denied := application.NewRestrictArenaUseCase(repo, denyModerationAuthorizer{}, audit, clock)
+	if _, err := denied.Execute(ctx, application.ModerateArenaCommand{
+		ActorAccountID: "018f6b2a-0000-7000-8000-000000000098",
+		ArenaID:        other.ID().String(),
+		Reason:         "tentativa sem autorização",
+	}); !errors.Is(err, application.ErrNotAuthorized) {
+		t.Fatalf("denied execute error = %v, want ErrNotAuthorized", err)
+	}
+	unchanged, err := repo.GetArenaByID(ctx, other.ID())
+	if err != nil {
+		t.Fatalf("reload protected arena: %v", err)
+	}
+	if unchanged.Status() != domain.ArenaStatusPublished {
+		t.Fatalf("status after denial = %s, want published", unchanged.Status())
+	}
+	if len(audit.events) != 2 {
+		t.Fatalf("audit events after denial = %d, want 2", len(audit.events))
 	}
 }

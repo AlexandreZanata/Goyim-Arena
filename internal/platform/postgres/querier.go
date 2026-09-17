@@ -20,6 +20,10 @@ type Querier interface {
 	// statement; the CHECK (balance >= 0) guards the invariant even if a caller
 	// gets the plan wrong.
 	ApplyWalletDebit(ctx context.Context, arg ApplyWalletDebitParams) (AppWalletAccount, error)
+	// CloseArena performs the published→closed transition requested by the
+	// creator under the optimistic version check. Reopening does not exist in
+	// the MVP (P08-T05).
+	CloseArena(ctx context.Context, arg CloseArenaParams) (AppArena, error)
 	// ConsumeArenaPassLot atomically decrements a lot that still has passes. The
 	// conditional predicate and the remaining_quantity CHECK together make
 	// over-consumption impossible, even under concurrent consumers (P07-T03).
@@ -86,10 +90,12 @@ type Querier interface {
 	GetActiveEmailVerificationToken(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
 	GetActivePasswordResetToken(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetActiveSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
+	GetArenaByID(ctx context.Context, id pgtype.UUID) (AppArena, error)
 	GetArenaForCreator(ctx context.Context, arg GetArenaForCreatorParams) (AppArena, error)
 	GetArenaPassConsumptionByArena(ctx context.Context, arenaID pgtype.UUID) (AppArenaPassConsumption, error)
 	GetArenaPassLot(ctx context.Context, id pgtype.UUID) (AppArenaPassLot, error)
 	GetArenaPassLotByGrant(ctx context.Context, arg GetArenaPassLotByGrantParams) (AppArenaPassLot, error)
+	GetArenaStateByID(ctx context.Context, id pgtype.UUID) (GetArenaStateByIDRow, error)
 	// GetArenaStateForCreator diagnoses why a scoped draft write affected no
 	// row: missing or foreign arena, non-draft status, or stale version.
 	GetArenaStateForCreator(ctx context.Context, arg GetArenaStateForCreatorParams) (GetArenaStateForCreatorRow, error)
@@ -162,6 +168,12 @@ type Querier interface {
 	// optimistic version check inside the publication transaction, so the Arena
 	// row and the consumed Arena Pass commit together (P08-T04).
 	PublishArenaDraft(ctx context.Context, arg PublishArenaDraftParams) (AppArena, error)
+	// RemoveArena applies the moderation removal to a published, closed or
+	// restricted Arena under the optimistic version check; removed is terminal.
+	RemoveArena(ctx context.Context, arg RemoveArenaParams) (AppArena, error)
+	// RestrictArena applies the moderation restriction to a published or closed
+	// Arena under the optimistic version check (P08-T05).
+	RestrictArena(ctx context.Context, arg RestrictArenaParams) (AppArena, error)
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
 	RevokeSession(ctx context.Context, tokenHash []byte) error
 	SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAccount, error)

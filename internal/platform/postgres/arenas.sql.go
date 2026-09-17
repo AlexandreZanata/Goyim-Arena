@@ -11,6 +11,43 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const closeArena = `-- name: CloseArena :one
+UPDATE app.arenas
+SET status = 'closed',
+    version = version + 1
+WHERE id = $1 AND creator_id = $2 AND status = 'published' AND version = $3
+RETURNING id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
+`
+
+type CloseArenaParams struct {
+	ID        pgtype.UUID
+	CreatorID pgtype.UUID
+	Version   int32
+}
+
+// CloseArena performs the published→closed transition requested by the
+// creator under the optimistic version check. Reopening does not exist in
+// the MVP (P08-T05).
+func (q *Queries) CloseArena(ctx context.Context, arg CloseArenaParams) (AppArena, error) {
+	row := q.db.QueryRow(ctx, closeArena, arg.ID, arg.CreatorID, arg.Version)
+	var i AppArena
+	err := row.Scan(
+		&i.ID,
+		&i.CreatorID,
+		&i.Slug,
+		&i.Statement,
+		&i.Context,
+		&i.Category,
+		&i.Language,
+		&i.Status,
+		&i.Version,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.ClosesAt,
+	)
+	return i, err
+}
+
 const createArena = `-- name: CreateArena :one
 
 INSERT INTO app.arenas (creator_id, statement, context, category, language)
@@ -75,6 +112,32 @@ func (q *Queries) DeleteArenaDraft(ctx context.Context, arg DeleteArenaDraftPara
 	return result.RowsAffected(), nil
 }
 
+const getArenaByID = `-- name: GetArenaByID :one
+SELECT id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
+FROM app.arenas
+WHERE id = $1
+`
+
+func (q *Queries) GetArenaByID(ctx context.Context, id pgtype.UUID) (AppArena, error) {
+	row := q.db.QueryRow(ctx, getArenaByID, id)
+	var i AppArena
+	err := row.Scan(
+		&i.ID,
+		&i.CreatorID,
+		&i.Slug,
+		&i.Statement,
+		&i.Context,
+		&i.Category,
+		&i.Language,
+		&i.Status,
+		&i.Version,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.ClosesAt,
+	)
+	return i, err
+}
+
 const getArenaForCreator = `-- name: GetArenaForCreator :one
 SELECT id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
 FROM app.arenas
@@ -103,6 +166,24 @@ func (q *Queries) GetArenaForCreator(ctx context.Context, arg GetArenaForCreator
 		&i.PublishedAt,
 		&i.ClosesAt,
 	)
+	return i, err
+}
+
+const getArenaStateByID = `-- name: GetArenaStateByID :one
+SELECT status, version
+FROM app.arenas
+WHERE id = $1
+`
+
+type GetArenaStateByIDRow struct {
+	Status  string
+	Version int32
+}
+
+func (q *Queries) GetArenaStateByID(ctx context.Context, id pgtype.UUID) (GetArenaStateByIDRow, error) {
+	row := q.db.QueryRow(ctx, getArenaStateByID, id)
+	var i GetArenaStateByIDRow
+	err := row.Scan(&i.Status, &i.Version)
 	return i, err
 }
 
@@ -200,6 +281,76 @@ func (q *Queries) PublishArenaDraft(ctx context.Context, arg PublishArenaDraftPa
 		arg.PublishedAt,
 		arg.Version,
 	)
+	var i AppArena
+	err := row.Scan(
+		&i.ID,
+		&i.CreatorID,
+		&i.Slug,
+		&i.Statement,
+		&i.Context,
+		&i.Category,
+		&i.Language,
+		&i.Status,
+		&i.Version,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.ClosesAt,
+	)
+	return i, err
+}
+
+const removeArena = `-- name: RemoveArena :one
+UPDATE app.arenas
+SET status = 'removed',
+    version = version + 1
+WHERE id = $1 AND status IN ('published', 'closed', 'restricted') AND version = $2
+RETURNING id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
+`
+
+type RemoveArenaParams struct {
+	ID      pgtype.UUID
+	Version int32
+}
+
+// RemoveArena applies the moderation removal to a published, closed or
+// restricted Arena under the optimistic version check; removed is terminal.
+func (q *Queries) RemoveArena(ctx context.Context, arg RemoveArenaParams) (AppArena, error) {
+	row := q.db.QueryRow(ctx, removeArena, arg.ID, arg.Version)
+	var i AppArena
+	err := row.Scan(
+		&i.ID,
+		&i.CreatorID,
+		&i.Slug,
+		&i.Statement,
+		&i.Context,
+		&i.Category,
+		&i.Language,
+		&i.Status,
+		&i.Version,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.ClosesAt,
+	)
+	return i, err
+}
+
+const restrictArena = `-- name: RestrictArena :one
+UPDATE app.arenas
+SET status = 'restricted',
+    version = version + 1
+WHERE id = $1 AND status IN ('published', 'closed') AND version = $2
+RETURNING id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
+`
+
+type RestrictArenaParams struct {
+	ID      pgtype.UUID
+	Version int32
+}
+
+// RestrictArena applies the moderation restriction to a published or closed
+// Arena under the optimistic version check (P08-T05).
+func (q *Queries) RestrictArena(ctx context.Context, arg RestrictArenaParams) (AppArena, error) {
+	row := q.db.QueryRow(ctx, restrictArena, arg.ID, arg.Version)
 	var i AppArena
 	err := row.Scan(
 		&i.ID,

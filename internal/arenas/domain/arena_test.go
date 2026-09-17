@@ -431,6 +431,32 @@ func TestArenaStatusPredicates(t *testing.T) {
 		t.Error("closed predicates are inconsistent")
 	}
 
+	restricted := mustPublishedArena(t)
+	if err := restricted.Restrict(); err != nil {
+		t.Fatalf("Restrict(): %v", err)
+	}
+	if err := restricted.EnsureAcceptsParticipation(); !errors.Is(err, domain.ErrArenaNotOpen) {
+		t.Fatalf("restricted participation error = %v, want ErrArenaNotOpen", err)
+	}
+
+	removed := mustPublishedArena(t)
+	if err := removed.Remove(); err != nil {
+		t.Fatalf("Remove(): %v", err)
+	}
+	if err := removed.EnsureAcceptsParticipation(); !errors.Is(err, domain.ErrArenaNotOpen) {
+		t.Fatalf("removed participation error = %v, want ErrArenaNotOpen", err)
+	}
+
+	if err := published.EnsureAcceptsParticipation(); err != nil {
+		t.Fatalf("published participation error = %v, want nil", err)
+	}
+	if err := closed.EnsureAcceptsParticipation(); !errors.Is(err, domain.ErrArenaNotOpen) {
+		t.Fatalf("closed participation error = %v, want ErrArenaNotOpen", err)
+	}
+	if err := draft.EnsureAcceptsParticipation(); !errors.Is(err, domain.ErrArenaNotOpen) {
+		t.Fatalf("draft participation error = %v, want ErrArenaNotOpen", err)
+	}
+
 	if domain.ArenaStatus("unknown").IsValid() {
 		t.Error("unknown status must be invalid")
 	}

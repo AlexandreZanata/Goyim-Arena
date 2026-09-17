@@ -220,6 +220,131 @@ func (r *Repository) diagnosePublishMiss(ctx context.Context, arenaUUID, creator
 	return application.ErrVersionConflict
 }
 
+// GetArenaByID returns any Arena by identifier; moderation is not scoped by
+// the creator.
+func (r *Repository) GetArenaByID(ctx context.Context, arenaID domain.ArenaID) (*domain.Arena, error) {
+	arenaUUID, err := pgUUIDFromArenaID(arenaID)
+	if err != nil {
+		return nil, application.ErrArenaNotFound
+	}
+
+	row, err := r.queriesFor(ctx).GetArenaByID(ctx, arenaUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrArenaNotFound
+		}
+		return nil, fmt.Errorf("get arena by id: %w", err)
+	}
+	return mapArenaRow(row)
+}
+
+// CloseArena performs the published→closed transition requested by the
+// creator under the optimistic version check.
+func (r *Repository) CloseArena(ctx context.Context, arenaID domain.ArenaID, creatorID domain.CreatorID, expectedVersion int32) (*domain.Arena, error) {
+	arenaUUID, creatorUUID, err := arenaScope(arenaID, creatorID)
+	if err != nil {
+		return nil, err
+	}
+
+	row, err := r.queriesFor(ctx).CloseArena(ctx, platformpg.CloseArenaParams{
+		ID:        arenaUUID,
+		CreatorID: creatorUUID,
+		Version:   expectedVersion,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, r.diagnoseCloseMiss(ctx, arenaUUID, creatorUUID, expectedVersion)
+		}
+		return nil, fmt.Errorf("close arena: %w", err)
+	}
+	return mapArenaRow(row)
+}
+
+// RestrictArena applies the moderation restriction to a published or closed
+// Arena under the optimistic version check.
+func (r *Repository) RestrictArena(ctx context.Context, arenaID domain.ArenaID, expectedVersion int32) (*domain.Arena, error) {
+	arenaUUID, err := pgUUIDFromArenaID(arenaID)
+	if err != nil {
+		return nil, application.ErrArenaNotFound
+	}
+
+	row, err := r.queriesFor(ctx).RestrictArena(ctx, platformpg.RestrictArenaParams{
+		ID:      arenaUUID,
+		Version: expectedVersion,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, r.diagnoseModerationMiss(ctx, arenaUUID, expectedVersion, domain.ArenaStatusRestricted, domain.ArenaStatusPublished, domain.ArenaStatusClosed)
+		}
+		return nil, fmt.Errorf("restrict arena: %w", err)
+	}
+	return mapArenaRow(row)
+}
+
+// RemoveArena applies the moderation removal to a published, closed or
+// restricted Arena under the optimistic version check.
+func (r *Repository) RemoveArena(ctx context.Context, arenaID domain.ArenaID, expectedVersion int32) (*domain.Arena, error) {
+	arenaUUID, err := pgUUIDFromArenaID(arenaID)
+	if err != nil {
+		return nil, application.ErrArenaNotFound
+	}
+
+	row, err := r.queriesFor(ctx).RemoveArena(ctx, platformpg.RemoveArenaParams{
+		ID:      arenaUUID,
+		Version: expectedVersion,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, r.diagnoseModerationMiss(ctx, arenaUUID, expectedVersion, domain.ArenaStatusRemoved, domain.ArenaStatusPublished, domain.ArenaStatusClosed, domain.ArenaStatusRestricted)
+		}
+		return nil, fmt.Errorf("remove arena: %w", err)
+	}
+	return mapArenaRow(row)
+}
+
+// diagnoseCloseMiss explains why the closing affected no row.
+func (r *Repository) diagnoseCloseMiss(ctx context.Context, arenaUUID, creatorUUID pgtype.UUID, expectedVersion int32) error {
+	state, err := r.queriesFor(ctx).GetArenaStateForCreator(ctx, platformpg.GetArenaStateForCreatorParams{
+		ID:        arenaUUID,
+		CreatorID: creatorUUID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ErrArenaNotFound
+		}
+		return fmt.Errorf("diagnose arena closing: %w", err)
+	}
+	if state.Status != string(domain.ArenaStatusPublished) {
+		return domain.ErrInvalidStatusChange
+	}
+	return application.ErrVersionConflict
+}
+
+// diagnoseModerationMiss explains why a moderation write affected no row:
+// the target state means a concurrent identical decision (resolved as a
+// replay by the retry), a non-moderable state is a transition violation and
+// anything else is a concurrent change.
+func (r *Repository) diagnoseModerationMiss(ctx context.Context, arenaUUID pgtype.UUID, expectedVersion int32, target domain.ArenaStatus, allowed ...domain.ArenaStatus) error {
+	state, err := r.queriesFor(ctx).GetArenaStateByID(ctx, arenaUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return application.ErrArenaNotFound
+		}
+		return fmt.Errorf("diagnose arena moderation: %w", err)
+	}
+
+	status := domain.ArenaStatus(state.Status)
+	if status == target {
+		return application.ErrVersionConflict
+	}
+	for _, candidate := range allowed {
+		if status == candidate {
+			return application.ErrVersionConflict
+		}
+	}
+	return domain.ErrInvalidStatusChange
+}
+
 // diagnoseDraftMiss explains why a scoped draft write affected no row:
 // missing or foreign Arena, a non-draft state or a concurrent change.
 func (r *Repository) diagnoseDraftMiss(ctx context.Context, arenaUUID, creatorUUID pgtype.UUID, expectedVersion int32) error {

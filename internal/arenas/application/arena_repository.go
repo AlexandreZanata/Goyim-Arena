@@ -56,4 +56,20 @@ type ArenaRepository interface {
 	// domain.ErrArenaNotDraft when the Arena left the draft state and
 	// ErrVersionConflict when the version moved.
 	PublishArenaDraft(ctx context.Context, arenaID domain.ArenaID, creatorID domain.CreatorID, slug domain.Slug, publishedAt time.Time, expectedVersion int32) (*domain.Arena, error)
+
+	// GetArenaByID returns any Arena by identifier; moderation is not scoped
+	// by the creator. It returns ErrArenaNotFound when the id is unknown.
+	GetArenaByID(ctx context.Context, arenaID domain.ArenaID) (*domain.Arena, error)
+
+	// CloseArena performs the published→closed transition requested by the
+	// creator under the optimistic version check.
+	CloseArena(ctx context.Context, arenaID domain.ArenaID, creatorID domain.CreatorID, expectedVersion int32) (*domain.Arena, error)
+
+	// RestrictArena applies the moderation restriction to a published or
+	// closed Arena under the optimistic version check.
+	RestrictArena(ctx context.Context, arenaID domain.ArenaID, expectedVersion int32) (*domain.Arena, error)
+
+	// RemoveArena applies the moderation removal to a published, closed or
+	// restricted Arena under the optimistic version check.
+	RemoveArena(ctx context.Context, arenaID domain.ArenaID, expectedVersion int32) (*domain.Arena, error)
 }
