@@ -69,6 +69,8 @@ func (r *Repository) ApplyCredit(ctx context.Context, request application.Credit
 		OperationType:  request.OperationType.String(),
 		IdempotencyKey: request.IdempotencyKey.String(),
 		Reference:      request.Reference.String(),
+		Reason:         operationReason(request.Reason),
+		ActorAccountID: operationActor(request.ActorAccountID),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return replayCredit(ctx, qtx, request)
@@ -186,6 +188,8 @@ func (r *Repository) ApplyDebit(ctx context.Context, request application.DebitRe
 		OperationType:  request.OperationType.String(),
 		IdempotencyKey: request.IdempotencyKey.String(),
 		Reference:      request.Reference.String(),
+		Reason:         operationReason(request.Reason),
+		ActorAccountID: operationActor(request.ActorAccountID),
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Cross-account key conflict: the wallet lock did not serialize it.
@@ -540,14 +544,47 @@ func mapOperationRow(row platformpg.AppWalletOperation) (*domain.Operation, erro
 		return nil, fmt.Errorf("stored reference is invalid: %w", err)
 	}
 
+	reason := domain.Reason{}
+	if row.Reason.Valid {
+		reason, err = domain.ParseReason(row.Reason.String)
+		if err != nil {
+			return nil, fmt.Errorf("stored reason is invalid: %w", err)
+		}
+	}
+
+	actor := domain.AccountID("")
+	if row.ActorAccountID.Valid {
+		actor = domain.AccountID(uuidToString(row.ActorAccountID))
+	}
+
 	return domain.ReconstituteOperation(
 		domain.OperationID(uuidToString(row.ID)),
 		domain.AccountID(uuidToString(row.AccountID)),
 		operationType,
 		idempotencyKey,
 		reference,
+		reason,
+		actor,
 		row.CreatedAt.Time,
 	)
+}
+
+func operationReason(reason domain.Reason) pgtype.Text {
+	if reason.IsZero() {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: reason.String(), Valid: true}
+}
+
+func operationActor(actor domain.AccountID) pgtype.UUID {
+	if actor.IsZero() {
+		return pgtype.UUID{}
+	}
+	pgUUID, err := pgUUIDFromAccountID(actor)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return pgUUID
 }
 
 func pgUUIDFromAccountID(id domain.AccountID) (pgtype.UUID, error) {

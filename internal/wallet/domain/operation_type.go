@@ -126,6 +126,13 @@ func (t OperationType) IsDebit() bool {
 	return ok && direction == DirectionDebit
 }
 
+// IsAdmin reports whether the operation type is an administrative
+// adjustment: those only enter the ledger through the restricted, audited
+// adjustment path (P06-T07).
+func (t OperationType) IsAdmin() bool {
+	return t == OperationCreditAdmin || t == OperationDebitAdmin
+}
+
 // String returns the stored operation type value.
 func (t OperationType) String() string {
 	return string(t)

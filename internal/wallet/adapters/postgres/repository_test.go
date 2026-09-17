@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -284,12 +285,19 @@ func TestRepository_ApplyCreditAccumulatesByBucket(t *testing.T) {
 	acc := mustWalletAccount(t, ctx, q, "credit-buckets@arena.example.com")
 	accountID := domain.AccountID(uuidString(acc.ID))
 
+	operator := mustWalletAccount(t, ctx, q, "credit-buckets-operator@arena.example.com")
+	adminReason, adminActor := mustAdminAudit(t, domain.AccountID(uuidString(operator.ID)), "manual grant approved in ticket 9")
+
+	adminCredit := mustCreditRequest(t, accountID, domain.BucketFree, domain.OperationCreditAdmin, 100, "admin:ticket-9", "bucket-admin")
+	adminCredit.Reason = adminReason
+	adminCredit.ActorAccountID = adminActor
+
 	credits := []application.CreditRequest{
 		mustCreditRequest(t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:2026-09", "bucket-free"),
 		mustCreditRequest(t, accountID, domain.BucketPurchased, domain.OperationCreditPurchase, 10000, "stripe:evt_purchase", "bucket-purchase"),
 		mustCreditRequest(t, accountID, domain.BucketFree, domain.OperationCreditMember, 30000, "member:2026-09", "bucket-member"),
 		mustCreditRequest(t, accountID, domain.BucketPurchased, domain.OperationCreditRefund, 2000, "moderation:case-7", "bucket-refund"),
-		mustCreditRequest(t, accountID, domain.BucketFree, domain.OperationCreditAdmin, 100, "admin:ticket-9", "bucket-admin"),
+		adminCredit,
 	}
 	for _, request := range credits {
 		if _, err := repo.ApplyCredit(ctx, request); err != nil {
@@ -399,6 +407,15 @@ func TestRepository_ApplyCreditRollsBackOnBalanceFailure(t *testing.T) {
 	if wallet.BalanceFree != 9223372036854775807 {
 		t.Fatalf("balance_free = %d, want the untouched ceiling", wallet.BalanceFree)
 	}
+}
+
+func mustAdminAudit(t *testing.T, actor domain.AccountID, rawReason string) (domain.Reason, domain.AccountID) {
+	t.Helper()
+	reason, err := domain.ParseReason(rawReason)
+	if err != nil {
+		t.Fatalf("ParseReason(%q): %v", rawReason, err)
+	}
+	return reason, actor
 }
 
 func mustDebitRequest(
@@ -566,9 +583,14 @@ func TestRepository_ApplyDebitPurchasedOnly(t *testing.T) {
 		t.Fatalf("credit error = %v", err)
 	}
 
-	result, err := repo.ApplyDebit(ctx, mustDebitRequest(
-		t, accountID, domain.OperationDebitAdmin, 1000, "admin:ticket-1", "debit-purchased:debit",
-	))
+	operator := mustWalletAccount(t, ctx, q, "debit-purchased-operator@arena.example.com")
+	adminReason, adminActor := mustAdminAudit(t, domain.AccountID(uuidString(operator.ID)), "manual adjustment of ticket 1")
+
+	adminDebit := mustDebitRequest(t, accountID, domain.OperationDebitAdmin, 1000, "admin:ticket-1", "debit-purchased:debit")
+	adminDebit.Reason = adminReason
+	adminDebit.ActorAccountID = adminActor
+
+	result, err := repo.ApplyDebit(ctx, adminDebit)
 	if err != nil {
 		t.Fatalf("ApplyDebit() error = %v", err)
 	}
@@ -1406,5 +1428,349 @@ func TestRepository_RenewFreeCycleMissingWallet(t *testing.T) {
 	_, err := useCase.Execute(ctx, application.RenewFreeCycleCommand{AccountID: uuidString(acc.ID)})
 	if !errors.Is(err, application.ErrWalletNotFound) {
 		t.Fatalf("missing wallet error = %v, want ErrWalletNotFound", err)
+	}
+}
+
+func TestRepository_AdminAdjustmentRowsCarryReasonAndActor(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	operator := mustWalletAccount(t, ctx, q, "admin-operator@arena.example.com")
+	target := mustWalletAccount(t, ctx, q, "admin-target@arena.example.com")
+	operatorID := domain.AccountID(uuidString(operator.ID))
+	targetID := domain.AccountID(uuidString(target.ID))
+
+	creditRequest := mustCreditRequest(t, targetID, domain.BucketFree, domain.OperationCreditAdmin, 1500, "admin:ticket-77", "admin-credit:77")
+	creditRequest.Reason, creditRequest.ActorAccountID = mustAdminAudit(t, operatorID, "concessão manual aprovada no ticket 77")
+	credit, err := repo.ApplyCredit(ctx, creditRequest)
+	if err != nil {
+		t.Fatalf("admin credit error = %v", err)
+	}
+
+	debitRequest := mustDebitRequest(t, targetID, domain.OperationDebitAdmin, 500, "admin:ticket-78", "admin-debit:78")
+	debitRequest.Reason, debitRequest.ActorAccountID = mustAdminAudit(t, operatorID, "reversão parcial aprovada no ticket 78")
+	debit, err := repo.ApplyDebit(ctx, debitRequest)
+	if err != nil {
+		t.Fatalf("admin debit error = %v", err)
+	}
+
+	rows := []struct {
+		operationID pgtype.UUID
+		operation   string
+		wantReason  string
+	}{
+		{operationID: mustUUID(t, credit.Operation.ID().String()), operation: "credit_admin", wantReason: "concessão manual aprovada no ticket 77"},
+		{operationID: mustUUID(t, debit.Operation.ID().String()), operation: "debit_admin", wantReason: "reversão parcial aprovada no ticket 78"},
+	}
+	for _, row := range rows {
+		var reason string
+		var actor pgtype.UUID
+		var operationType string
+		if err := pool.QueryRow(ctx,
+			"SELECT operation_type, reason, actor_account_id FROM app.wallet_operations WHERE id = $1", row.operationID,
+		).Scan(&operationType, &reason, &actor); err != nil {
+			t.Fatalf("load admin operation: %v", err)
+		}
+		if operationType != row.operation || reason != row.wantReason {
+			t.Errorf("row = %q/%q, want %q/%q", operationType, reason, row.operation, row.wantReason)
+		}
+		if !actor.Valid || uuidString(actor) != operatorID.String() {
+			t.Errorf("actor = %+v, want %q", actor, operatorID)
+		}
+	}
+
+	// The operation entity round-trips the audit fields as well.
+	if credit.Operation.Reason().String() != "concessão manual aprovada no ticket 77" {
+		t.Errorf("operation reason = %q", credit.Operation.Reason())
+	}
+	if credit.Operation.ActorAccountID() != operatorID {
+		t.Errorf("operation actor = %q, want %q", credit.Operation.ActorAccountID(), operatorID)
+	}
+	balance, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, targetID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if balance.Free.Int64() != 1000 {
+		t.Fatalf("balance_free = %d, want 1000", balance.Free.Int64())
+	}
+}
+
+// TestRepository_AdminAdjustmentSchemaRequiresReasonAndActor proves the
+// database refuses administrative operations without justification and
+// actor, even if an application path is bypassed (THR-ADM-02).
+func TestRepository_AdminAdjustmentSchemaRequiresReasonAndActor(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "admin-schema@arena.example.com")
+	if err := q.EnsureWalletAccount(ctx, acc.ID); err != nil {
+		t.Fatalf("ensure wallet: %v", err)
+	}
+
+	validReason := pgtype.Text{String: "schema probe", Valid: true}
+	blankReason := pgtype.Text{String: "   ", Valid: true}
+	missingReason := pgtype.Text{}
+	missingActor := pgtype.UUID{}
+
+	probes := []struct {
+		name          string
+		operationType string
+		reason        pgtype.Text
+		actor         pgtype.UUID
+		wantCode      string
+	}{
+		{name: "admin without reason", operationType: "credit_admin", reason: missingReason, actor: acc.ID, wantCode: "23514"},
+		{name: "admin without actor", operationType: "credit_admin", reason: validReason, actor: missingActor, wantCode: "23514"},
+		{name: "admin debt without reason", operationType: "debit_admin", reason: missingReason, actor: acc.ID, wantCode: "23514"},
+		{name: "admin with blank reason", operationType: "debit_admin", reason: blankReason, actor: acc.ID, wantCode: "23514"},
+		{name: "reason too long", operationType: "credit_free", reason: pgtype.Text{String: strings.Repeat("a", 501), Valid: true}, actor: missingActor, wantCode: "23514"},
+		{name: "regular without audit fields", operationType: "credit_free", reason: missingReason, actor: missingActor, wantCode: ""},
+		{name: "regular with reason", operationType: "debit_argument", reason: validReason, actor: acc.ID, wantCode: ""},
+	}
+
+	for i, probe := range probes {
+		t.Run(probe.name, func(t *testing.T) {
+			_, err := q.CreateWalletOperation(ctx, platformpg.CreateWalletOperationParams{
+				AccountID:      acc.ID,
+				OperationType:  probe.operationType,
+				IdempotencyKey: fmt.Sprintf("schema-probe-%d", i),
+				Reference:      "schema:probe",
+				Reason:         probe.reason,
+				ActorAccountID: probe.actor,
+			})
+			if probe.wantCode == "" {
+				if err != nil {
+					t.Fatalf("operation rejected: %v", err)
+				}
+				return
+			}
+			var pgErr *pgconn.PgError
+			if !errors.As(err, &pgErr) || pgErr.Code != probe.wantCode {
+				t.Fatalf("error = %v, want SQLSTATE %s", err, probe.wantCode)
+			}
+		})
+	}
+}
+
+func TestRepository_AdminAdjustmentInsufficientDebitIsControlled(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	operator := mustWalletAccount(t, ctx, q, "admin-insufficient-operator@arena.example.com")
+	target := mustWalletAccount(t, ctx, q, "admin-insufficient-target@arena.example.com")
+	operatorID := domain.AccountID(uuidString(operator.ID))
+	targetID := domain.AccountID(uuidString(target.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, targetID, domain.BucketFree, domain.OperationCreditFree, 100, "free:seed", "admin-insufficient:seed",
+	)); err != nil {
+		t.Fatalf("seed credit error = %v", err)
+	}
+	baseline := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", target.ID)
+
+	request := mustDebitRequest(t, targetID, domain.OperationDebitAdmin, 101, "admin:ticket-79", "admin-insufficient:debit")
+	request.Reason, request.ActorAccountID = mustAdminAudit(t, operatorID, "reversão acima do saldo")
+	if _, err := repo.ApplyDebit(ctx, request); !errors.Is(err, domain.ErrInsufficientInk) {
+		t.Fatalf("insufficient admin debit error = %v, want ErrInsufficientInk", err)
+	}
+
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", target.ID); got != baseline {
+		t.Fatalf("operations after failure = %d, want %d (no partial state)", got, baseline)
+	}
+	balance, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, targetID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if balance.Free.Int64() != 100 {
+		t.Fatalf("balance_free = %d, want 100 untouched", balance.Free.Int64())
+	}
+}
+
+func TestRepository_AdminAdjustmentReplayKeepsSingleOperation(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	operator := mustWalletAccount(t, ctx, q, "admin-replay-operator@arena.example.com")
+	target := mustWalletAccount(t, ctx, q, "admin-replay-target@arena.example.com")
+	operatorID := domain.AccountID(uuidString(operator.ID))
+	targetID := domain.AccountID(uuidString(target.ID))
+
+	request := mustCreditRequest(t, targetID, domain.BucketPurchased, domain.OperationCreditAdmin, 700, "admin:ticket-80", "admin-replay:80")
+	request.Reason, request.ActorAccountID = mustAdminAudit(t, operatorID, "ajuste único")
+
+	first, err := repo.ApplyCredit(ctx, request)
+	if err != nil {
+		t.Fatalf("first ApplyCredit() error = %v", err)
+	}
+	second, err := repo.ApplyCredit(ctx, request)
+	if err != nil {
+		t.Fatalf("second ApplyCredit() error = %v", err)
+	}
+	if !second.Replayed || second.Operation.ID() != first.Operation.ID() {
+		t.Fatalf("replay = %+v, want the original operation", second)
+	}
+	if second.Operation.Reason().String() != "ajuste único" || second.Operation.ActorAccountID() != operatorID {
+		t.Fatalf("replay lost audit fields: %+v", second.Operation)
+	}
+
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", target.ID); got != 1 {
+		t.Fatalf("operations = %d, want exactly 1", got)
+	}
+	balance, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, targetID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if balance.Purchased.Int64() != 700 {
+		t.Fatalf("balance_purchased = %d, want 700 applied once", balance.Purchased.Int64())
+	}
+}
+
+type allowAllAuthorizer struct {
+	calls int
+}
+
+func (a *allowAllAuthorizer) EnsureAdministrator(_ context.Context, _ domain.AccountID) error {
+	a.calls++
+	return nil
+}
+
+type denyAllAuthorizer struct {
+	calls int
+}
+
+func (a *denyAllAuthorizer) EnsureAdministrator(_ context.Context, _ domain.AccountID) error {
+	a.calls++
+	return application.ErrNotAuthorized
+}
+
+type captureAuditRecorder struct {
+	events []application.AdminAdjustmentEvent
+}
+
+func (r *captureAuditRecorder) RecordAdminAdjustment(_ context.Context, event application.AdminAdjustmentEvent) error {
+	r.events = append(r.events, event)
+	return nil
+}
+
+func TestRepository_AdminAdjustmentEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	operator := mustWalletAccount(t, ctx, q, "admin-e2e-operator@arena.example.com")
+	target := mustWalletAccount(t, ctx, q, "admin-e2e-target@arena.example.com")
+	operatorID := domain.AccountID(uuidString(operator.ID))
+	targetID := domain.AccountID(uuidString(target.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, targetID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:seed", "admin-e2e:seed",
+	)); err != nil {
+		t.Fatalf("seed credit error = %v", err)
+	}
+
+	authorizer := &allowAllAuthorizer{}
+	audit := &captureAuditRecorder{}
+	useCase := application.NewAdjustInkUseCase(repo, repo, authorizer, audit, testClock{now: time.Now().UTC()})
+
+	// Positive adjustment.
+	credited, err := useCase.Execute(ctx, application.AdjustInkCommand{
+		ActorAccountID: operatorID.String(),
+		AccountID:      targetID.String(),
+		Bucket:         "FREE_INK",
+		OperationType:  "credit_admin",
+		Amount:         1000,
+		Reference:      "admin:ticket-81",
+		Reason:         "concessão aprovada no ticket 81",
+		IdempotencyKey: "admin-e2e:81",
+	})
+	if err != nil {
+		t.Fatalf("positive adjustment error = %v", err)
+	}
+	if credited.Replayed || credited.Operation.Type() != domain.OperationCreditAdmin {
+		t.Fatalf("positive adjustment = %+v", credited)
+	}
+
+	// Negative adjustment follows the FREE-first priority.
+	debited, err := useCase.Execute(ctx, application.AdjustInkCommand{
+		ActorAccountID: operatorID.String(),
+		AccountID:      targetID.String(),
+		OperationType:  "debit_admin",
+		Amount:         4000,
+		Reference:      "admin:ticket-82",
+		Reason:         "reversão aprovada no ticket 82",
+		IdempotencyKey: "admin-e2e:82",
+	})
+	if err != nil {
+		t.Fatalf("negative adjustment error = %v", err)
+	}
+	if debited.Replayed || debited.Allocation.FromFree().Int64() != 4000 {
+		t.Fatalf("negative adjustment = %+v, want 4000 from FREE_INK", debited)
+	}
+
+	balance, err := application.NewGetWalletBalanceUseCase(repo).Execute(ctx, targetID)
+	if err != nil {
+		t.Fatalf("derived balance error = %v", err)
+	}
+	if balance.Free.Int64() != 2000 || balance.Purchased.Int64() != 0 {
+		t.Fatalf("balance = %d/%d, want 2000/0", balance.Free.Int64(), balance.Purchased.Int64())
+	}
+	if len(audit.events) != 2 {
+		t.Fatalf("audit events = %d, want 2", len(audit.events))
+	}
+	for i, event := range audit.events {
+		if event.Replayed || event.ActorAccountID != operatorID || event.Reason.IsZero() {
+			t.Fatalf("audit event %d = %+v, want a fresh justified record", i, event)
+		}
+	}
+
+	// Controlled insufficient balance.
+	if _, err := useCase.Execute(ctx, application.AdjustInkCommand{
+		ActorAccountID: operatorID.String(),
+		AccountID:      targetID.String(),
+		OperationType:  "debit_admin",
+		Amount:         5000,
+		Reference:      "admin:ticket-83",
+		Reason:         "reversão acima do saldo",
+		IdempotencyKey: "admin-e2e:83",
+	}); !errors.Is(err, domain.ErrInsufficientInk) {
+		t.Fatalf("insufficient error = %v, want ErrInsufficientInk", err)
+	}
+	if len(audit.events) != 2 {
+		t.Fatalf("audit events after failure = %d, want 2", len(audit.events))
+	}
+
+	// Negative authorization: nothing is written and nothing is audited.
+	denied := &denyAllAuthorizer{}
+	deniedUseCase := application.NewAdjustInkUseCase(repo, repo, denied, audit, testClock{now: time.Now().UTC()})
+	if _, err := deniedUseCase.Execute(ctx, application.AdjustInkCommand{
+		ActorAccountID: operatorID.String(),
+		AccountID:      targetID.String(),
+		Bucket:         "FREE_INK",
+		OperationType:  "credit_admin",
+		Amount:         1000,
+		Reference:      "admin:ticket-84",
+		Reason:         "tentativa sem autorização",
+		IdempotencyKey: "admin-e2e:84",
+	}); !errors.Is(err, application.ErrNotAuthorized) {
+		t.Fatalf("denied actor error = %v, want ErrNotAuthorized", err)
+	}
+	if len(audit.events) != 2 {
+		t.Fatalf("audit events after denial = %d, want 2", len(audit.events))
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", target.ID); got != 3 {
+		t.Fatalf("operations = %d, want 3 (seed + 2 adjustments)", got)
 	}
 }

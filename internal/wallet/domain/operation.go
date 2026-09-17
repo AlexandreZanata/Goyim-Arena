@@ -16,14 +16,17 @@ func (id OperationID) IsZero() bool {
 }
 
 // Operation is the immutable, reconstituted record of a logical INK
-// operation: its type, idempotency key, cause reference and creation
-// instant. It is the entity returned when a retry replays an existing key.
+// operation: its type, idempotency key, cause reference, optional
+// administrative justification and actor, and creation instant. It is the
+// entity returned when a retry replays an existing key.
 type Operation struct {
 	id             OperationID
 	accountID      AccountID
 	operationType  OperationType
 	idempotencyKey IdempotencyKey
 	reference      Reference
+	reason         Reason
+	actor          AccountID
 	createdAt      time.Time
 }
 
@@ -35,6 +38,8 @@ func ReconstituteOperation(
 	operationType OperationType,
 	idempotencyKey IdempotencyKey,
 	reference Reference,
+	reason Reason,
+	actor AccountID,
 	createdAt time.Time,
 ) (*Operation, error) {
 	if id.IsZero() {
@@ -52,6 +57,14 @@ func ReconstituteOperation(
 	if reference.IsZero() {
 		return nil, ErrEmptyReference
 	}
+	if operationType.IsAdmin() {
+		if reason.IsZero() {
+			return nil, ErrEmptyReason
+		}
+		if actor.IsZero() {
+			return nil, ErrActorRequired
+		}
+	}
 
 	return &Operation{
 		id:             id,
@@ -59,6 +72,8 @@ func ReconstituteOperation(
 		operationType:  operationType,
 		idempotencyKey: idempotencyKey,
 		reference:      reference,
+		reason:         reason,
+		actor:          actor,
 		createdAt:      createdAt,
 	}, nil
 }
@@ -86,6 +101,18 @@ func (o *Operation) IdempotencyKey() IdempotencyKey {
 // Reference returns the stable cause reference of the operation.
 func (o *Operation) Reference() Reference {
 	return o.reference
+}
+
+// Reason returns the administrative justification; the zero value means the
+// operation carries none.
+func (o *Operation) Reason() Reason {
+	return o.reason
+}
+
+// ActorAccountID returns the acting administrator of an adjustment; the
+// zero value means the operation was not administrative.
+func (o *Operation) ActorAccountID() AccountID {
+	return o.actor
 }
 
 // CreatedAt returns the operation creation instant.

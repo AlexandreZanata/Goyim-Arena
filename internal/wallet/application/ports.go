@@ -20,6 +20,10 @@ type CreditRequest struct {
 	OperationType  domain.OperationType
 	IdempotencyKey domain.IdempotencyKey
 	Reference      domain.Reference
+	// Reason and ActorAccountID are mandatory for administrative types and
+	// zero for regular credits.
+	Reason         domain.Reason
+	ActorAccountID domain.AccountID
 	// Delta is the signed ledger amount produced by the operation direction
 	// (positive for credits).
 	Delta     int64
@@ -50,6 +54,10 @@ type DebitRequest struct {
 	OperationType  domain.OperationType
 	IdempotencyKey domain.IdempotencyKey
 	Reference      domain.Reference
+	// Reason and ActorAccountID are mandatory for administrative types and
+	// zero for regular debits.
+	Reason         domain.Reason
+	ActorAccountID domain.AccountID
 	Amount         domain.Ink
 	ChangedAt      time.Time
 }

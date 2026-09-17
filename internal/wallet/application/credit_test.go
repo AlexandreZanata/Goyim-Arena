@@ -57,6 +57,7 @@ func TestCreditInkUseCaseValidatesInput(t *testing.T) {
 		{name: "invalid bucket", mutate: func(cmd *application.CreditInkCommand) { cmd.Bucket = "GOLD_INK" }, want: domain.ErrInvalidBucket},
 		{name: "invalid operation type", mutate: func(cmd *application.CreditInkCommand) { cmd.OperationType = "mint_ink" }, want: domain.ErrInvalidOperationType},
 		{name: "debit is not a credit", mutate: func(cmd *application.CreditInkCommand) { cmd.OperationType = "debit_argument" }, want: domain.ErrNotACredit},
+		{name: "admin credit is restricted", mutate: func(cmd *application.CreditInkCommand) { cmd.OperationType = "credit_admin" }, want: domain.ErrAdminOpsRestricted},
 		{name: "expiry is not a credit", mutate: func(cmd *application.CreditInkCommand) { cmd.OperationType = "expire_free" }, want: domain.ErrNotACredit},
 		{name: "negative amount", mutate: func(cmd *application.CreditInkCommand) { cmd.Amount = -1 }, want: domain.ErrNegativeInk},
 		{name: "zero amount", mutate: func(cmd *application.CreditInkCommand) { cmd.Amount = 0 }, want: domain.ErrZeroAmount},
@@ -96,6 +97,8 @@ func TestCreditInkUseCaseBuildsValidatedRequest(t *testing.T) {
 		domain.OperationCreditFree,
 		mustIdempotencyKey(t, "free:2026-09:018f6b2a"),
 		mustReference(t, "free:2026-09"),
+		domain.Reason{},
+		domain.AccountID(""),
 		clock.now,
 	)
 	if err != nil {
@@ -149,6 +152,8 @@ func TestCreditInkUseCasePropagatesReplayAndErrors(t *testing.T) {
 		domain.OperationCreditFree,
 		mustIdempotencyKey(t, "free:2026-09:018f6b2a"),
 		mustReference(t, "free:2026-09"),
+		domain.Reason{},
+		domain.AccountID(""),
 		clock.now,
 	)
 	if err != nil {

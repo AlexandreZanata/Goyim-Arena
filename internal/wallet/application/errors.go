@@ -17,4 +17,8 @@ var (
 	// ErrWalletNotFound indicates the account has no wallet yet, so no free
 	// cycle has ever started for it.
 	ErrWalletNotFound = errors.New("application: wallet not found")
+
+	// ErrNotAuthorized indicates the acting account is not allowed to perform
+	// administrative adjustments.
+	ErrNotAuthorized = errors.New("application: actor is not authorized for administrative adjustments")
 )

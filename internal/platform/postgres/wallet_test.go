@@ -155,6 +155,8 @@ func TestWalletIdempotencyKeyUnique(t *testing.T) {
 		OperationType:  "credit_free",
 		IdempotencyKey: "idem-unique-1",
 		Reference:      "free:2026-09",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	if err != nil {
 		t.Fatalf("first operation: %v", err)
@@ -165,6 +167,8 @@ func TestWalletIdempotencyKeyUnique(t *testing.T) {
 		OperationType:  "credit_free",
 		IdempotencyKey: "idem-unique-1",
 		Reference:      "free:2026-09-retry",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	assertPgCode(t, err, "23505")
 
@@ -174,6 +178,8 @@ func TestWalletIdempotencyKeyUnique(t *testing.T) {
 		OperationType:  "credit_free",
 		IdempotencyKey: "idem-unique-1",
 		Reference:      "free:2026-09",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	assertPgCode(t, err, "23505")
 
@@ -209,6 +215,8 @@ func TestWalletOperationTypeAndReferenceConstraints(t *testing.T) {
 			OperationType:  operationType,
 			IdempotencyKey: "type-" + operationType + "-" + string(rune('a'+i)),
 			Reference:      "ref-" + operationType,
+			Reason:         pgtype.Text{String: "schema probe justification", Valid: true},
+			ActorAccountID: acc.ID,
 		}); err != nil {
 			t.Fatalf("valid operation type %q rejected: %v", operationType, err)
 		}
@@ -219,6 +227,8 @@ func TestWalletOperationTypeAndReferenceConstraints(t *testing.T) {
 		OperationType:  "mint_ink",
 		IdempotencyKey: "type-invalid",
 		Reference:      "ref-invalid",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	assertPgCode(t, err, "23514")
 
@@ -227,6 +237,8 @@ func TestWalletOperationTypeAndReferenceConstraints(t *testing.T) {
 		OperationType:  "credit_free",
 		IdempotencyKey: "blank-ref",
 		Reference:      "   ",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	assertPgCode(t, err, "23514")
 
@@ -235,6 +247,8 @@ func TestWalletOperationTypeAndReferenceConstraints(t *testing.T) {
 		OperationType:  "credit_free",
 		IdempotencyKey: "",
 		Reference:      "ref",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	assertPgCode(t, err, "23514")
 }
@@ -256,6 +270,8 @@ func TestWalletTransactionConstraints(t *testing.T) {
 		OperationType:  "debit_argument",
 		IdempotencyKey: "tx-constraints-1",
 		Reference:      "argument-1",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	if err != nil {
 		t.Fatalf("create operation: %v", err)
@@ -321,6 +337,8 @@ func TestWalletTransactionConstraints(t *testing.T) {
 		OperationType:  "credit_free",
 		IdempotencyKey: "tx-orphan-operation",
 		Reference:      "ref",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	assertPgCode(t, err, "23503")
 
@@ -428,6 +446,8 @@ func TestWalletQuantitiesAreBigint(t *testing.T) {
 		OperationType:  "credit_admin",
 		IdempotencyKey: "bigint-max-1",
 		Reference:      "bigint-probe",
+		Reason:         pgtype.Text{String: "bigint boundary probe", Valid: true},
+		ActorAccountID: acc.ID,
 	})
 	if err != nil {
 		t.Fatalf("create operation: %v", err)
@@ -497,6 +517,8 @@ func TestWalletTransactionsAreListedNewestFirst(t *testing.T) {
 		OperationType:  "credit_free",
 		IdempotencyKey: "statement-1",
 		Reference:      "free:2026-09",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	if err != nil {
 		t.Fatalf("create first operation: %v", err)
@@ -514,6 +536,8 @@ func TestWalletTransactionsAreListedNewestFirst(t *testing.T) {
 		OperationType:  "debit_argument",
 		IdempotencyKey: "statement-2",
 		Reference:      "argument-42",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	if err != nil {
 		t.Fatalf("create second operation: %v", err)
@@ -531,6 +555,8 @@ func TestWalletTransactionsAreListedNewestFirst(t *testing.T) {
 		OperationType:  "credit_free",
 		IdempotencyKey: "statement-other",
 		Reference:      "free:2026-09",
+		Reason:         pgtype.Text{},
+		ActorAccountID: pgtype.UUID{},
 	})
 	if err != nil {
 		t.Fatalf("create other operation: %v", err)

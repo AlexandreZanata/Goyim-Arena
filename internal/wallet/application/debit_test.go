@@ -84,7 +84,7 @@ func TestDebitInkUseCaseValidatesInput(t *testing.T) {
 	}
 }
 
-func TestDebitInkUseCaseAcceptsDebitAdmin(t *testing.T) {
+func TestDebitInkUseCaseRejectsAdminAdjustments(t *testing.T) {
 	repo := &fakeDebitRepo{}
 	clock := &fakeClock{now: testClockInstant}
 	useCase := application.NewDebitInkUseCase(repo, clock)
@@ -93,11 +93,11 @@ func TestDebitInkUseCaseAcceptsDebitAdmin(t *testing.T) {
 	command.OperationType = "debit_admin"
 	command.IdempotencyKey = "admin-adjust:1"
 
-	if _, err := useCase.Execute(context.Background(), command); err != nil {
-		t.Fatalf("debit_admin Execute() error = %v", err)
+	if _, err := useCase.Execute(context.Background(), command); !errors.Is(err, domain.ErrAdminOpsRestricted) {
+		t.Fatalf("debit_admin Execute() error = %v, want ErrAdminOpsRestricted", err)
 	}
-	if len(repo.requests) != 1 || repo.requests[0].OperationType != domain.OperationDebitAdmin {
-		t.Fatalf("requests = %+v, want a debit_admin request", repo.requests)
+	if len(repo.requests) != 0 {
+		t.Fatalf("repository was called %d times for a restricted type", len(repo.requests))
 	}
 }
 
@@ -108,6 +108,8 @@ func TestDebitInkUseCaseBuildsValidatedRequest(t *testing.T) {
 		domain.OperationDebitArgument,
 		mustIdempotencyKey(t, "argument-publish:018f6b2a"),
 		mustReference(t, "argument:018f6b2a"),
+		domain.Reason{},
+		domain.AccountID(""),
 		testClockInstant,
 	)
 	if err != nil {
@@ -163,6 +165,8 @@ func TestDebitInkUseCasePropagatesReplayInsufficientAndErrors(t *testing.T) {
 		domain.OperationDebitArgument,
 		mustIdempotencyKey(t, "argument-publish:018f6b2a"),
 		mustReference(t, "argument:018f6b2a"),
+		domain.Reason{},
+		domain.AccountID(""),
 		testClockInstant,
 	)
 	if err != nil {

@@ -52,6 +52,11 @@ func (uc *CreditInkUseCase) Execute(ctx context.Context, cmd CreditInkCommand) (
 	if !operationType.IsCredit() {
 		return nil, domain.ErrNotACredit
 	}
+	if operationType.IsAdmin() {
+		// Administrative credits only enter through the restricted, audited
+		// adjustment path (P06-T07).
+		return nil, domain.ErrAdminOpsRestricted
+	}
 
 	amount, err := domain.NewInk(cmd.Amount)
 	if err != nil {

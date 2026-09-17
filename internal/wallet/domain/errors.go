@@ -18,6 +18,12 @@ const (
 	CodeInvalidOperationType  ErrorCode = "WALLET_INVALID_OPERATION_TYPE"
 	CodeNotACredit            ErrorCode = "WALLET_NOT_A_CREDIT"
 	CodeNotADebit             ErrorCode = "WALLET_NOT_A_DEBIT"
+	CodeAdminOpsRestricted    ErrorCode = "WALLET_ADMIN_OPERATION_RESTRICTED"
+	CodeNotAdminAdjustment    ErrorCode = "WALLET_NOT_ADMIN_ADJUSTMENT"
+	CodeActorRequired         ErrorCode = "WALLET_ACTOR_REQUIRED"
+	CodeEmptyReason           ErrorCode = "WALLET_EMPTY_REASON"
+	CodeInvalidReason         ErrorCode = "WALLET_INVALID_REASON"
+	CodeReasonTooLong         ErrorCode = "WALLET_REASON_TOO_LONG"
 	CodeEmptyReference        ErrorCode = "WALLET_EMPTY_REFERENCE"
 	CodeInvalidReference      ErrorCode = "WALLET_INVALID_REFERENCE"
 	CodeReferenceTooLong      ErrorCode = "WALLET_REFERENCE_TOO_LONG"
@@ -57,6 +63,12 @@ var (
 	ErrInvalidOperationType  = DomainError{Code: CodeInvalidOperationType, Message: "ink operation type is unrecognized"}
 	ErrNotACredit            = DomainError{Code: CodeNotACredit, Message: "operation type is not a credit"}
 	ErrNotADebit             = DomainError{Code: CodeNotADebit, Message: "operation type is not a debit"}
+	ErrAdminOpsRestricted    = DomainError{Code: CodeAdminOpsRestricted, Message: "administrative operations require the audited adjustment path"}
+	ErrNotAdminAdjustment    = DomainError{Code: CodeNotAdminAdjustment, Message: "operation type is not an administrative adjustment"}
+	ErrActorRequired         = DomainError{Code: CodeActorRequired, Message: "administrative adjustments require an acting administrator"}
+	ErrEmptyReason           = DomainError{Code: CodeEmptyReason, Message: "administrative adjustments require a reason"}
+	ErrInvalidReason         = DomainError{Code: CodeInvalidReason, Message: "reason contains unsupported characters"}
+	ErrReasonTooLong         = DomainError{Code: CodeReasonTooLong, Message: "reason exceeds the maximum allowed length"}
 	ErrEmptyReference        = DomainError{Code: CodeEmptyReference, Message: "operation reference cannot be empty"}
 	ErrInvalidReference      = DomainError{Code: CodeInvalidReference, Message: "operation reference contains unsupported characters"}
 	ErrReferenceTooLong      = DomainError{Code: CodeReferenceTooLong, Message: "operation reference exceeds the maximum allowed length"}

@@ -26,10 +26,10 @@ ON CONFLICT (account_id) DO NOTHING;
 -- idempotency key. On a conflict it returns no row, which tells the adapter
 -- to replay the original operation (P06-T03).
 -- name: CreateWalletOperationIfAbsent :one
-INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference)
-VALUES ($1, $2, $3, $4)
+INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference, reason, actor_account_id)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (idempotency_key) DO NOTHING
-RETURNING id, account_id, operation_type, idempotency_key, reference, created_at;
+RETURNING id, account_id, operation_type, idempotency_key, reference, created_at, reason, actor_account_id;
 
 -- CreditFreeBalance adds the delta to the FREE_INK balance projection. The
 -- CHECK (balance_free >= 0) guards the invariant even here.
@@ -117,12 +117,12 @@ ORDER BY t.created_at DESC, t.id DESC
 LIMIT sqlc.arg(page_limit);
 
 -- name: CreateWalletOperation :one
-INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference)
-VALUES ($1, $2, $3, $4)
-RETURNING id, account_id, operation_type, idempotency_key, reference, created_at;
+INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference, reason, actor_account_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, account_id, operation_type, idempotency_key, reference, created_at, reason, actor_account_id;
 
 -- name: GetWalletOperationByIdempotencyKey :one
-SELECT id, account_id, operation_type, idempotency_key, reference, created_at
+SELECT id, account_id, operation_type, idempotency_key, reference, created_at, reason, actor_account_id
 FROM app.wallet_operations
 WHERE idempotency_key = $1;
 

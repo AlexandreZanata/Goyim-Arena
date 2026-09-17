@@ -45,6 +45,11 @@ func (uc *DebitInkUseCase) Execute(ctx context.Context, cmd DebitInkCommand) (*D
 	if !operationType.IsDebit() {
 		return nil, domain.ErrNotADebit
 	}
+	if operationType.IsAdmin() {
+		// Administrative debits only enter through the restricted, audited
+		// adjustment path (P06-T07).
+		return nil, domain.ErrAdminOpsRestricted
+	}
 
 	amount, err := domain.NewInk(cmd.Amount)
 	if err != nil {

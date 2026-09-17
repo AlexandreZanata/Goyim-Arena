@@ -114,6 +114,8 @@ func mustOperation(t *testing.T, id string) *domain.Operation {
 		domain.OperationCreditFree,
 		key,
 		reference,
+		domain.Reason{},
+		domain.AccountID(""),
 		time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC),
 	)
 	if err != nil {
@@ -154,6 +156,8 @@ func TestReconstituteOperation(t *testing.T) {
 		domain.OperationDebitArgument,
 		debitKey,
 		debitReference,
+		domain.Reason{},
+		domain.AccountID(""),
 		time.Now(),
 	)
 	if err != nil {
@@ -176,6 +180,8 @@ func TestReconstituteOperationValidatesInvariants(t *testing.T) {
 		operationType domain.OperationType
 		key           domain.IdempotencyKey
 		reference     domain.Reference
+		reason        domain.Reason
+		actor         domain.AccountID
 		want          error
 	}{
 		{
@@ -227,7 +233,7 @@ func TestReconstituteOperationValidatesInvariants(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			operation, err := domain.ReconstituteOperation(
-				tc.id, tc.accountID, tc.operationType, tc.key, tc.reference, time.Now(),
+				tc.id, tc.accountID, tc.operationType, tc.key, tc.reference, tc.reason, tc.actor, time.Now(),
 			)
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want %v", err, tc.want)

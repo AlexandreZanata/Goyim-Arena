@@ -102,9 +102,9 @@ func (q *Queries) CreateWalletAccount(ctx context.Context, accountID pgtype.UUID
 }
 
 const createWalletOperation = `-- name: CreateWalletOperation :one
-INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference)
-VALUES ($1, $2, $3, $4)
-RETURNING id, account_id, operation_type, idempotency_key, reference, created_at
+INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference, reason, actor_account_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, account_id, operation_type, idempotency_key, reference, created_at, reason, actor_account_id
 `
 
 type CreateWalletOperationParams struct {
@@ -112,6 +112,8 @@ type CreateWalletOperationParams struct {
 	OperationType  string
 	IdempotencyKey string
 	Reference      string
+	Reason         pgtype.Text
+	ActorAccountID pgtype.UUID
 }
 
 func (q *Queries) CreateWalletOperation(ctx context.Context, arg CreateWalletOperationParams) (AppWalletOperation, error) {
@@ -120,6 +122,8 @@ func (q *Queries) CreateWalletOperation(ctx context.Context, arg CreateWalletOpe
 		arg.OperationType,
 		arg.IdempotencyKey,
 		arg.Reference,
+		arg.Reason,
+		arg.ActorAccountID,
 	)
 	var i AppWalletOperation
 	err := row.Scan(
@@ -129,15 +133,17 @@ func (q *Queries) CreateWalletOperation(ctx context.Context, arg CreateWalletOpe
 		&i.IdempotencyKey,
 		&i.Reference,
 		&i.CreatedAt,
+		&i.Reason,
+		&i.ActorAccountID,
 	)
 	return i, err
 }
 
 const createWalletOperationIfAbsent = `-- name: CreateWalletOperationIfAbsent :one
-INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference)
-VALUES ($1, $2, $3, $4)
+INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference, reason, actor_account_id)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (idempotency_key) DO NOTHING
-RETURNING id, account_id, operation_type, idempotency_key, reference, created_at
+RETURNING id, account_id, operation_type, idempotency_key, reference, created_at, reason, actor_account_id
 `
 
 type CreateWalletOperationIfAbsentParams struct {
@@ -145,6 +151,8 @@ type CreateWalletOperationIfAbsentParams struct {
 	OperationType  string
 	IdempotencyKey string
 	Reference      string
+	Reason         pgtype.Text
+	ActorAccountID pgtype.UUID
 }
 
 // CreateWalletOperationIfAbsent inserts the operation exactly once per
@@ -156,6 +164,8 @@ func (q *Queries) CreateWalletOperationIfAbsent(ctx context.Context, arg CreateW
 		arg.OperationType,
 		arg.IdempotencyKey,
 		arg.Reference,
+		arg.Reason,
+		arg.ActorAccountID,
 	)
 	var i AppWalletOperation
 	err := row.Scan(
@@ -165,6 +175,8 @@ func (q *Queries) CreateWalletOperationIfAbsent(ctx context.Context, arg CreateW
 		&i.IdempotencyKey,
 		&i.Reference,
 		&i.CreatedAt,
+		&i.Reason,
+		&i.ActorAccountID,
 	)
 	return i, err
 }
@@ -345,7 +357,7 @@ func (q *Queries) GetWalletFreeCycleAnchor(ctx context.Context, accountID pgtype
 }
 
 const getWalletOperationByIdempotencyKey = `-- name: GetWalletOperationByIdempotencyKey :one
-SELECT id, account_id, operation_type, idempotency_key, reference, created_at
+SELECT id, account_id, operation_type, idempotency_key, reference, created_at, reason, actor_account_id
 FROM app.wallet_operations
 WHERE idempotency_key = $1
 `
@@ -360,6 +372,8 @@ func (q *Queries) GetWalletOperationByIdempotencyKey(ctx context.Context, idempo
 		&i.IdempotencyKey,
 		&i.Reference,
 		&i.CreatedAt,
+		&i.Reason,
+		&i.ActorAccountID,
 	)
 	return i, err
 }

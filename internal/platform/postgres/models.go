@@ -132,6 +132,10 @@ type AppWalletOperation struct {
 	// Stable identifier of the cause (argument, Stripe event, moderation case, billing period)
 	Reference string
 	CreatedAt pgtype.Timestamptz
+	// Mandatory justification of administrative adjustments; optional for regular operations
+	Reason pgtype.Text
+	// Acting administrator account for administrative adjustments; never modified after insert
+	ActorAccountID pgtype.UUID
 }
 
 // Append-only INK ledger: signed bucket deltas (positive credit, negative debit); never updated or deleted at runtime
