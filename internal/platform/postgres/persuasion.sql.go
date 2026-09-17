@@ -249,6 +249,79 @@ func (q *Queries) ListAttributionCandidates(ctx context.Context, argumentIds []p
 	return items, nil
 }
 
+const listAuthorArenaReputation = `-- name: ListAuthorArenaReputation :many
+SELECT
+    ar.id AS arena_id,
+    ar.category,
+    ar.language,
+    count(DISTINCT pa.attributor_id)::bigint AS distinct_people,
+    count(*)::bigint AS valid_attributions
+FROM app.persuasion_attributions pa
+JOIN app.arguments a ON a.id = pa.argument_id
+JOIN app.arenas ar ON ar.id = a.arena_id
+JOIN app.accounts attributor ON attributor.id = pa.attributor_id
+    AND attributor.status = 'active'
+    AND attributor.email_verified_at IS NOT NULL
+WHERE a.author_id = $1::uuid
+  AND pa.status = 'valid'
+GROUP BY ar.id, ar.category, ar.language
+ORDER BY ar.id
+`
+
+type ListAuthorArenaReputationRow struct {
+	ArenaID           pgtype.UUID
+	Category          string
+	Language          string
+	DistinctPeople    int64
+	ValidAttributions int64
+}
+
+// ListAuthorArenaReputation derives the reputation projection of one
+// author (P11-T05; BR §5.1, §6, §7): one row per Arena where the author
+// received at least one valid attribution, with the eligible people the
+// author influenced there and the valid attribution events received there.
+//
+// Rules encoded here:
+//  1. Only valid attributions count: invalidated ones never integrate the
+//     valid totals (BR §6) and the row is retained for the administrative
+//     trail (P11-T04).
+//  2. DistinctPeople counts eligible attributors once per author and
+//     Arena (BR §6), so repeated attributions by the same person never
+//     inflate the headline.
+//  3. Eligible attributor means an active account with a verified email
+//     (BR §7), the same predicate the professional aggregates use.
+//  4. Attribution events are facts: withdrawing or removing an argument
+//     does not rewrite historical counts (BR §10); the attribution itself
+//     is the exclusion unit.
+//
+// The result carries counts only — attributor identifiers never leave the
+// database.
+func (q *Queries) ListAuthorArenaReputation(ctx context.Context, authorID pgtype.UUID) ([]ListAuthorArenaReputationRow, error) {
+	rows, err := q.db.Query(ctx, listAuthorArenaReputation, authorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuthorArenaReputationRow{}
+	for rows.Next() {
+		var i ListAuthorArenaReputationRow
+		if err := rows.Scan(
+			&i.ArenaID,
+			&i.Category,
+			&i.Language,
+			&i.DistinctPeople,
+			&i.ValidAttributions,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const restoreAttribution = `-- name: RestoreAttribution :one
 UPDATE app.persuasion_attributions
 SET status = 'valid',

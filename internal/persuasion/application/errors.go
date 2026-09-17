@@ -23,4 +23,17 @@ var (
 	// validity between the locked read and the guarded write, so the decision
 	// was not applied. Callers re-read and retry.
 	ErrModerationConflict = errors.New("persuasion: attribution moderation conflict")
+
+	// ErrInvalidReputationProjection indicates an incoherent reputation
+	// projection: missing identity, repeated Arena, missing dimension label,
+	// negative count or more people than events. Publishing it would silently
+	// inflate public reputation, so it is refused instead.
+	ErrInvalidReputationProjection = errors.New("persuasion: reputation projection is incoherent")
+
+	// ErrInvalidAuthorID indicates the author identifier cannot address an
+	// account at all, so no reputation fact can be derived from it. An
+	// identifier that addresses an author without valid attributions derives
+	// zeroed facts instead of this error: existence belongs to the profile
+	// layer, not to the metric.
+	ErrInvalidAuthorID = errors.New("persuasion: author identifier is invalid")
 )

@@ -226,6 +226,26 @@ type Querier interface {
 	// arguments: arena, author, creation instant and status. Relation is
 	// deliberately not read: it never restricts eligibility (P11-T02).
 	ListAttributionCandidates(ctx context.Context, argumentIds []pgtype.UUID) ([]ListAttributionCandidatesRow, error)
+	// ListAuthorArenaReputation derives the reputation projection of one
+	// author (P11-T05; BR §5.1, §6, §7): one row per Arena where the author
+	// received at least one valid attribution, with the eligible people the
+	// author influenced there and the valid attribution events received there.
+	//
+	// Rules encoded here:
+	//   1. Only valid attributions count: invalidated ones never integrate the
+	//      valid totals (BR §6) and the row is retained for the administrative
+	//      trail (P11-T04).
+	//   2. DistinctPeople counts eligible attributors once per author and
+	//      Arena (BR §6), so repeated attributions by the same person never
+	//      inflate the headline.
+	//   3. Eligible attributor means an active account with a verified email
+	//      (BR §7), the same predicate the professional aggregates use.
+	//   4. Attribution events are facts: withdrawing or removing an argument
+	//      does not rewrite historical counts (BR §10); the attribution itself
+	//      is the exclusion unit.
+	// The result carries counts only — attributor identifiers never leave the
+	// database.
+	ListAuthorArenaReputation(ctx context.Context, authorID pgtype.UUID) ([]ListAuthorArenaReputationRow, error)
 	// ListAvailablePassLotsForUpdate locks the consumable lots of an account in
 	// consumption order: nearest expiration first, then lots that never expire.
 	// Expired lots are never candidates, so they can never be consumed (P07-T03).

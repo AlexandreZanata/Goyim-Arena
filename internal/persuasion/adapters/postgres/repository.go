@@ -27,6 +27,7 @@ type Repository struct {
 var (
 	_ application.AttributionRepository           = (*Repository)(nil)
 	_ application.AttributionModerationRepository = (*Repository)(nil)
+	_ application.AuthorReputationRepository      = (*Repository)(nil)
 )
 
 // NewRepository creates a PostgreSQL repository adapter for persuasion.
@@ -328,6 +329,37 @@ func moderationAttribution(
 		}
 	}
 	return attribution, nil
+}
+
+// ListAuthorArenaReputation derives the per-Arena reputation projection of
+// one author: the eligible people influenced there and the valid attribution
+// events received there. Counts only leave the database.
+func (r *Repository) ListAuthorArenaReputation(ctx context.Context, authorID domain.AuthorID) ([]application.ArenaReputation, error) {
+	param, ok := uuidParam(authorID.String())
+	if !ok {
+		return nil, application.ErrInvalidAuthorID
+	}
+
+	rows, err := r.queriesFor(ctx).ListAuthorArenaReputation(ctx, param)
+	if err != nil {
+		return nil, fmt.Errorf("list author arena reputation: %w", err)
+	}
+
+	arenas := make([]application.ArenaReputation, 0, len(rows))
+	for _, row := range rows {
+		arenaID, err := domain.ParseArenaID(uuidToString(row.ArenaID))
+		if err != nil {
+			return nil, fmt.Errorf("stored arena id is invalid: %w", err)
+		}
+		arenas = append(arenas, application.ArenaReputation{
+			ArenaID:           arenaID,
+			Category:          row.Category,
+			Language:          row.Language,
+			DistinctPeople:    row.DistinctPeople,
+			ValidAttributions: row.ValidAttributions,
+		})
+	}
+	return arenas, nil
 }
 
 // uuidParam parses a canonical UUID string into its database parameter.

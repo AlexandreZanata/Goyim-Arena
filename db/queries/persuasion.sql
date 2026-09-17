@@ -69,6 +69,43 @@ WHERE id = sqlc.arg(attribution_id)::uuid
 RETURNING id, position_change_id, attributor_id, argument_id, status, created_at,
           moderation_reason, moderated_by, moderated_at;
 
+-- ListAuthorArenaReputation derives the reputation projection of one
+-- author (P11-T05; BR §5.1, §6, §7): one row per Arena where the author
+-- received at least one valid attribution, with the eligible people the
+-- author influenced there and the valid attribution events received there.
+--
+-- Rules encoded here:
+--   1. Only valid attributions count: invalidated ones never integrate the
+--      valid totals (BR §6) and the row is retained for the administrative
+--      trail (P11-T04).
+--   2. DistinctPeople counts eligible attributors once per author and
+--      Arena (BR §6), so repeated attributions by the same person never
+--      inflate the headline.
+--   3. Eligible attributor means an active account with a verified email
+--      (BR §7), the same predicate the professional aggregates use.
+--   4. Attribution events are facts: withdrawing or removing an argument
+--      does not rewrite historical counts (BR §10); the attribution itself
+--      is the exclusion unit.
+-- The result carries counts only — attributor identifiers never leave the
+-- database.
+-- name: ListAuthorArenaReputation :many
+SELECT
+    ar.id AS arena_id,
+    ar.category,
+    ar.language,
+    count(DISTINCT pa.attributor_id)::bigint AS distinct_people,
+    count(*)::bigint AS valid_attributions
+FROM app.persuasion_attributions pa
+JOIN app.arguments a ON a.id = pa.argument_id
+JOIN app.arenas ar ON ar.id = a.arena_id
+JOIN app.accounts attributor ON attributor.id = pa.attributor_id
+    AND attributor.status = 'active'
+    AND attributor.email_verified_at IS NOT NULL
+WHERE a.author_id = sqlc.arg(author_id)::uuid
+  AND pa.status = 'valid'
+GROUP BY ar.id, ar.category, ar.language
+ORDER BY ar.id;
+
 -- RestoreAttribution reverses one invalidation on the same retained row,
 -- recording the restore decision: the row moves back to valid and the
 -- decision record is replaced by the newest one, never erased.
