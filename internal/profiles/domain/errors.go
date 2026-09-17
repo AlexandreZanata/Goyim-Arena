@@ -6,6 +6,7 @@ import "fmt"
 type ErrorCode string
 
 const (
+	CodeEmptyAccountID          ErrorCode = "PROFILE_EMPTY_ACCOUNT_ID"
 	CodeEmptyUsername           ErrorCode = "PROFILE_EMPTY_USERNAME"
 	CodeUsernameTooShort        ErrorCode = "PROFILE_USERNAME_TOO_SHORT"
 	CodeUsernameTooLong         ErrorCode = "PROFILE_USERNAME_TOO_LONG"
@@ -40,6 +41,7 @@ func (e DomainError) Is(target error) bool {
 }
 
 var (
+	ErrEmptyAccountID          = DomainError{Code: CodeEmptyAccountID, Message: "account identifier cannot be empty"}
 	ErrEmptyUsername           = DomainError{Code: CodeEmptyUsername, Message: "username cannot be empty"}
 	ErrUsernameTooShort        = DomainError{Code: CodeUsernameTooShort, Message: "username is shorter than the minimum allowed length"}
 	ErrUsernameTooLong         = DomainError{Code: CodeUsernameTooLong, Message: "username is longer than the maximum allowed length"}

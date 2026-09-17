@@ -52,19 +52,40 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (A
 }
 
 const createUsernameHistoryEntry = `-- name: CreateUsernameHistoryEntry :exec
-INSERT INTO app.username_history (account_id, username, username_normalized)
-VALUES ($1, $2, $3)
+INSERT INTO app.username_history (account_id, username, username_normalized, changed_at)
+VALUES ($1, $2, $3, $4)
 `
 
 type CreateUsernameHistoryEntryParams struct {
 	AccountID          pgtype.UUID
 	Username           string
 	UsernameNormalized string
+	ChangedAt          pgtype.Timestamptz
 }
 
 func (q *Queries) CreateUsernameHistoryEntry(ctx context.Context, arg CreateUsernameHistoryEntryParams) error {
-	_, err := q.db.Exec(ctx, createUsernameHistoryEntry, arg.AccountID, arg.Username, arg.UsernameNormalized)
+	_, err := q.db.Exec(ctx, createUsernameHistoryEntry,
+		arg.AccountID,
+		arg.Username,
+		arg.UsernameNormalized,
+		arg.ChangedAt,
+	)
 	return err
+}
+
+const getLastUsernameChangeAt = `-- name: GetLastUsernameChangeAt :one
+SELECT max(changed_at)::timestamptz AS changed_at
+FROM app.username_history
+WHERE account_id = $1
+`
+
+// GetLastUsernameChangeAt returns the most recent username audit instant for
+// the account, or NULL when the account has no history yet.
+func (q *Queries) GetLastUsernameChangeAt(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLastUsernameChangeAt, accountID)
+	var changed_at pgtype.Timestamptz
+	err := row.Scan(&changed_at)
+	return changed_at, err
 }
 
 const getProfileByAccountID = `-- name: GetProfileByAccountID :one
@@ -107,6 +128,22 @@ func (q *Queries) GetPublicProfileByUsername(ctx context.Context, usernameNormal
 	var i GetPublicProfileByUsernameRow
 	err := row.Scan(&i.Username, &i.InterfaceLocale, &i.CreatedAt)
 	return i, err
+}
+
+const isAccountEligibleForProfile = `-- name: IsAccountEligibleForProfile :one
+SELECT (status = 'active' AND email_verified_at IS NOT NULL) AS eligible
+FROM app.accounts
+WHERE id = $1
+`
+
+// IsAccountEligibleForProfile projects the single bit the profiles module
+// needs for negative authorization: the account exists, is active and has a
+// verified email. It never reads email, credentials or payment identifiers.
+func (q *Queries) IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error) {
+	row := q.db.QueryRow(ctx, isAccountEligibleForProfile, id)
+	var eligible pgtype.Bool
+	err := row.Scan(&eligible)
+	return eligible, err
 }
 
 const listUsernameHistoryByAccountID = `-- name: ListUsernameHistoryByAccountID :many

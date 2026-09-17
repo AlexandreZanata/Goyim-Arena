@@ -38,6 +38,9 @@ type Querier interface {
 	// Health metadata and connectivity queries for the PostgreSQL platform adapter.
 	// GetHealthMetadata retrieves the latest applied migration metadata from app.schema_metadata.
 	GetHealthMetadata(ctx context.Context) (GetHealthMetadataRow, error)
+	// GetLastUsernameChangeAt returns the most recent username audit instant for
+	// the account, or NULL when the account has no history yet.
+	GetLastUsernameChangeAt(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error)
 	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetProfileByAccountID(ctx context.Context, accountID pgtype.UUID) (AppProfile, error)
@@ -48,6 +51,10 @@ type Querier interface {
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
 	InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error
+	// IsAccountEligibleForProfile projects the single bit the profiles module
+	// needs for negative authorization: the account exists, is active and has a
+	// verified email. It never reads email, credentials or payment identifiers.
+	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)

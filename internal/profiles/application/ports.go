@@ -1,0 +1,49 @@
+package application
+
+import (
+	"context"
+	"time"
+
+	"github.com/AlexandreZanata/Goyim-Arena/internal/profiles/domain"
+)
+
+// Clock exposes wall-clock time to profiles use cases, keeping the domain
+// and the application deterministic under test (ADR-012).
+type Clock interface {
+	Now() time.Time
+}
+
+// ProfileRepository persists profiles and their auditable username history.
+// Writes that combine a profile mutation with an audit entry must be atomic.
+type ProfileRepository interface {
+	// CreateProfileWithUsernameHistory atomically creates the profile and its
+	// first username_history entry. It returns ErrUsernameTaken when the
+	// normalized username is already claimed and ErrProfileAlreadyExists when
+	// the account already owns a profile.
+	CreateProfileWithUsernameHistory(ctx context.Context, accountID domain.AccountID, username domain.Username, locale domain.Locale, changedAt time.Time) (*domain.Profile, error)
+
+	// GetProfileByAccountID retrieves the profile owned by an account.
+	GetProfileByAccountID(ctx context.Context, accountID domain.AccountID) (*domain.Profile, error)
+
+	// LastUsernameChangeAt returns the most recent username audit instant, or
+	// the zero time when the account has no history yet.
+	LastUsernameChangeAt(ctx context.Context, accountID domain.AccountID) (time.Time, error)
+
+	// ApplyUsernameChange atomically applies a planned username change to the
+	// profile and appends the audit entry. It returns ErrUsernameTaken when
+	// the proposed handle is already claimed.
+	ApplyUsernameChange(ctx context.Context, accountID domain.AccountID, change domain.UsernameChange) (*domain.Profile, error)
+
+	// UpdateProfileLocale replaces the interface locale preference.
+	UpdateProfileLocale(ctx context.Context, accountID domain.AccountID, locale domain.Locale, updatedAt time.Time) (*domain.Profile, error)
+}
+
+// AccountEligibility is the consumer-oriented port that answers whether an
+// account may own or mutate a profile. The PostgreSQL adapter implements it
+// against the minimal account status/verification projection; tests provide
+// fakes. It never exposes account data beyond eligibility.
+type AccountEligibility interface {
+	// EnsureEligible returns ErrAccountNotEligible when the account is
+	// missing, unverified, suspended or deleted.
+	EnsureEligible(ctx context.Context, accountID domain.AccountID) error
+}

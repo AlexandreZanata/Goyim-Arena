@@ -249,6 +249,7 @@ func TestProfileForeignKeyAndCascade(t *testing.T) {
 		AccountID:          orphan,
 		Username:           "orphan-user",
 		UsernameNormalized: "orphan-user",
+		ChangedAt:          pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	})
 	assertPgErrorCode(t, err, "23503")
 
@@ -260,6 +261,7 @@ func TestProfileForeignKeyAndCascade(t *testing.T) {
 			AccountID:          acc.ID,
 			Username:           name,
 			UsernameNormalized: name,
+			ChangedAt:          pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		}); err != nil {
 			t.Fatalf("create history entry %s: %v", name, err)
 		}
@@ -383,16 +385,21 @@ func TestUsernameHistoryAuditTrail(t *testing.T) {
 	acc := mustCreateAccount(t, ctx, q, "history@arena.example.com")
 	mustCreateProfile(t, ctx, q, acc.ID, "FirstChoice", "firstchoice", "pt-BR")
 
-	history := []struct{ username, normalized string }{
-		{"FirstChoice", "firstchoice"},
-		{"SecondChoice", "secondchoice"},
-		{"ThirdChoice", "thirdchoice"},
+	history := []struct {
+		username   string
+		normalized string
+		changedAt  time.Time
+	}{
+		{"FirstChoice", "firstchoice", time.Now().Add(-2 * time.Minute)},
+		{"SecondChoice", "secondchoice", time.Now().Add(-1 * time.Minute)},
+		{"ThirdChoice", "thirdchoice", time.Now()},
 	}
 	for _, entry := range history {
 		if err := q.CreateUsernameHistoryEntry(ctx, postgres.CreateUsernameHistoryEntryParams{
 			AccountID:          acc.ID,
 			Username:           entry.username,
 			UsernameNormalized: entry.normalized,
+			ChangedAt:          pgtype.Timestamptz{Time: entry.changedAt, Valid: true},
 		}); err != nil {
 			t.Fatalf("append history %s: %v", entry.username, err)
 		}
