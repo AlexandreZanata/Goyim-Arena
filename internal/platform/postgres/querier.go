@@ -11,6 +11,10 @@ import (
 )
 
 type Querier interface {
+	// ApplyWalletDebit subtracts the planned bucket consumptions in a single
+	// statement; the CHECK (balance >= 0) guards the invariant even if a caller
+	// gets the plan wrong.
+	ApplyWalletDebit(ctx context.Context, arg ApplyWalletDebitParams) (AppWalletAccount, error)
 	// Identity and authentication queries for the PostgreSQL platform adapter.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (AppAccount, error)
 	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
@@ -76,6 +80,10 @@ type Querier interface {
 	GetPublicProfileByUsername(ctx context.Context, usernameNormalized string) (GetPublicProfileByUsernameRow, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	GetWalletAccount(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
+	// GetWalletAccountForUpdate locks the balance projection row of an account
+	// for the duration of the transaction, serializing concurrent debits so no
+	// double spend can pass the balance check (THR-WAL-01).
+	GetWalletAccountForUpdate(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
 	GetWalletOperationByIdempotencyKey(ctx context.Context, idempotencyKey string) (AppWalletOperation, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
 	InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error
@@ -86,6 +94,7 @@ type Querier interface {
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	ListWalletTransactionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListWalletTransactionsByAccountRow, error)
+	ListWalletTransactionsByOperationID(ctx context.Context, operationID pgtype.UUID) ([]AppWalletTransaction, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.

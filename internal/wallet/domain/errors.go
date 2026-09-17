@@ -17,6 +17,7 @@ const (
 	CodeInvalidBucket         ErrorCode = "WALLET_INVALID_BUCKET"
 	CodeInvalidOperationType  ErrorCode = "WALLET_INVALID_OPERATION_TYPE"
 	CodeNotACredit            ErrorCode = "WALLET_NOT_A_CREDIT"
+	CodeNotADebit             ErrorCode = "WALLET_NOT_A_DEBIT"
 	CodeEmptyReference        ErrorCode = "WALLET_EMPTY_REFERENCE"
 	CodeInvalidReference      ErrorCode = "WALLET_INVALID_REFERENCE"
 	CodeReferenceTooLong      ErrorCode = "WALLET_REFERENCE_TOO_LONG"
@@ -55,6 +56,7 @@ var (
 	ErrInvalidBucket         = DomainError{Code: CodeInvalidBucket, Message: "ink bucket is unrecognized"}
 	ErrInvalidOperationType  = DomainError{Code: CodeInvalidOperationType, Message: "ink operation type is unrecognized"}
 	ErrNotACredit            = DomainError{Code: CodeNotACredit, Message: "operation type is not a credit"}
+	ErrNotADebit             = DomainError{Code: CodeNotADebit, Message: "operation type is not a debit"}
 	ErrEmptyReference        = DomainError{Code: CodeEmptyReference, Message: "operation reference cannot be empty"}
 	ErrInvalidReference      = DomainError{Code: CodeInvalidReference, Message: "operation reference contains unsupported characters"}
 	ErrReferenceTooLong      = DomainError{Code: CodeReferenceTooLong, Message: "operation reference exceeds the maximum allowed length"}

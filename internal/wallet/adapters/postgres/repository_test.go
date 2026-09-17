@@ -397,3 +397,424 @@ func TestRepository_ApplyCreditRollsBackOnBalanceFailure(t *testing.T) {
 		t.Fatalf("balance_free = %d, want the untouched ceiling", wallet.BalanceFree)
 	}
 }
+
+func mustDebitRequest(
+	t *testing.T,
+	accountID domain.AccountID,
+	operationType domain.OperationType,
+	amount int64,
+	reference, idempotencyKey string,
+) application.DebitRequest {
+	t.Helper()
+	ink, err := domain.NewInk(amount)
+	if err != nil {
+		t.Fatalf("NewInk(%d): %v", amount, err)
+	}
+	ref, err := domain.ParseReference(reference)
+	if err != nil {
+		t.Fatalf("ParseReference(%q): %v", reference, err)
+	}
+	key, err := domain.ParseIdempotencyKey(idempotencyKey)
+	if err != nil {
+		t.Fatalf("ParseIdempotencyKey(%q): %v", idempotencyKey, err)
+	}
+	return application.DebitRequest{
+		AccountID:      accountID,
+		OperationType:  operationType,
+		IdempotencyKey: key,
+		Reference:      ref,
+		Amount:         ink,
+		ChangedAt:      time.Now().UTC(),
+	}
+}
+
+func mustUUID(t *testing.T, raw string) pgtype.UUID {
+	t.Helper()
+	var id pgtype.UUID
+	if err := id.Scan(raw); err != nil {
+		t.Fatalf("scan uuid %q: %v", raw, err)
+	}
+	return id
+}
+
+func assertAllocation(t *testing.T, allocation domain.Allocation, wantFree, wantPurchased int64) {
+	t.Helper()
+	if allocation.FromFree().Int64() != wantFree || allocation.FromPurchased().Int64() != wantPurchased {
+		t.Fatalf("allocation = %d/%d, want %d/%d",
+			allocation.FromFree().Int64(), allocation.FromPurchased().Int64(), wantFree, wantPurchased)
+	}
+}
+
+func TestRepository_ApplyDebitFreeOnly(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "debit-free@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:2026-09", "debit-free:credit",
+	)); err != nil {
+		t.Fatalf("seed credit error = %v", err)
+	}
+
+	result, err := repo.ApplyDebit(ctx, mustDebitRequest(
+		t, accountID, domain.OperationDebitArgument, 3000, "argument:1", "debit-free:debit",
+	))
+	if err != nil {
+		t.Fatalf("ApplyDebit() error = %v", err)
+	}
+	if result.Replayed {
+		t.Fatal("fresh debit must not be a replay")
+	}
+	assertAllocation(t, result.Allocation, 3000, 0)
+
+	wallet, err := q.GetWalletAccount(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	if wallet.BalanceFree != 2000 || wallet.BalancePurchased != 0 {
+		t.Fatalf("balances = %d/%d, want 2000/0", wallet.BalanceFree, wallet.BalancePurchased)
+	}
+
+	entries, err := q.ListWalletTransactionsByAccount(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("list transactions: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("transactions = %d, want 2 (credit + debit)", len(entries))
+	}
+	if entries[0].Amount != -3000 || entries[0].Bucket != "FREE_INK" || entries[0].OperationType != "debit_argument" {
+		t.Fatalf("newest entry = %+v, want a -3000 FREE_INK debit", entries[0])
+	}
+	if entries[1].Amount != 5000 {
+		t.Fatalf("oldest entry = %+v, want the +5000 credit", entries[1])
+	}
+}
+
+func TestRepository_ApplyDebitSplitsAcrossBuckets(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "debit-split@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:2026-09", "debit-split:free",
+	)); err != nil {
+		t.Fatalf("free credit error = %v", err)
+	}
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketPurchased, domain.OperationCreditPurchase, 10000, "stripe:evt_split", "debit-split:purchased",
+	)); err != nil {
+		t.Fatalf("purchased credit error = %v", err)
+	}
+
+	result, err := repo.ApplyDebit(ctx, mustDebitRequest(
+		t, accountID, domain.OperationDebitArgument, 12000, "argument:2", "debit-split:debit",
+	))
+	if err != nil {
+		t.Fatalf("ApplyDebit() error = %v", err)
+	}
+	assertAllocation(t, result.Allocation, 5000, 7000)
+
+	wallet, err := q.GetWalletAccount(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	if wallet.BalanceFree != 0 || wallet.BalancePurchased != 3000 {
+		t.Fatalf("balances = %d/%d, want 0/3000", wallet.BalanceFree, wallet.BalancePurchased)
+	}
+
+	lines, err := q.ListWalletTransactionsByOperationID(ctx, mustUUID(t, result.Operation.ID().String()))
+	if err != nil {
+		t.Fatalf("list debit lines: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("debit lines = %d, want 2 (split)", len(lines))
+	}
+	if lines[0].Bucket != "FREE_INK" || lines[0].Amount != -5000 {
+		t.Errorf("line 0 = %s/%d, want FREE_INK/-5000", lines[0].Bucket, lines[0].Amount)
+	}
+	if lines[1].Bucket != "PURCHASED_INK" || lines[1].Amount != -7000 {
+		t.Errorf("line 1 = %s/%d, want PURCHASED_INK/-7000", lines[1].Bucket, lines[1].Amount)
+	}
+}
+
+func TestRepository_ApplyDebitPurchasedOnly(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "debit-purchased@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketPurchased, domain.OperationCreditPurchase, 10000, "stripe:evt_only", "debit-purchased:credit",
+	)); err != nil {
+		t.Fatalf("credit error = %v", err)
+	}
+
+	result, err := repo.ApplyDebit(ctx, mustDebitRequest(
+		t, accountID, domain.OperationDebitAdmin, 1000, "admin:ticket-1", "debit-purchased:debit",
+	))
+	if err != nil {
+		t.Fatalf("ApplyDebit() error = %v", err)
+	}
+	assertAllocation(t, result.Allocation, 0, 1000)
+
+	wallet, err := q.GetWalletAccount(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	if wallet.BalanceFree != 0 || wallet.BalancePurchased != 9000 {
+		t.Fatalf("balances = %d/%d, want 0/9000", wallet.BalanceFree, wallet.BalancePurchased)
+	}
+}
+
+func TestRepository_ApplyDebitInsufficientLeavesNoPartialState(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "debit-insufficient@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 100, "free:seed", "insufficient:seed",
+	)); err != nil {
+		t.Fatalf("seed credit error = %v", err)
+	}
+	baselineOperations := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", acc.ID)
+	baselineTransactions := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_transactions")
+
+	request := mustDebitRequest(t, accountID, domain.OperationDebitArgument, 101, "argument:3", "insufficient:debit")
+	if _, err := repo.ApplyDebit(ctx, request); !errors.Is(err, domain.ErrInsufficientInk) {
+		t.Fatalf("insufficient debit error = %v, want ErrInsufficientInk", err)
+	}
+
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", acc.ID); got != baselineOperations {
+		t.Fatalf("operations after failure = %d, want %d", got, baselineOperations)
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_transactions"); got != baselineTransactions {
+		t.Fatalf("transactions after failure = %d, want %d", got, baselineTransactions)
+	}
+	wallet, err := q.GetWalletAccount(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	if wallet.BalanceFree != 100 {
+		t.Fatalf("balance_free = %d, want 100 untouched", wallet.BalanceFree)
+	}
+
+	// The failed attempt did not burn the idempotency key: after funding,
+	// the same request succeeds with the same key.
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 1000, "free:refill", "insufficient:refill",
+	)); err != nil {
+		t.Fatalf("refill credit error = %v", err)
+	}
+	result, err := repo.ApplyDebit(ctx, request)
+	if err != nil {
+		t.Fatalf("retry after funding error = %v", err)
+	}
+	if result.Replayed || result.Operation.Reference().String() != "argument:3" {
+		t.Fatalf("retry result = %+v, want a fresh debit of argument:3", result)
+	}
+}
+
+func TestRepository_ApplyDebitWithoutWalletIsInsufficient(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "debit-no-wallet@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyDebit(ctx, mustDebitRequest(
+		t, accountID, domain.OperationDebitArgument, 1, "argument:4", "no-wallet:debit",
+	)); !errors.Is(err, domain.ErrInsufficientInk) {
+		t.Fatalf("debit without wallet error = %v, want ErrInsufficientInk", err)
+	}
+
+	if _, err := q.GetWalletAccount(ctx, acc.ID); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("wallet error = %v, want ErrNoRows (no wallet created)", err)
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", acc.ID); got != 0 {
+		t.Fatalf("operations = %d, want 0", got)
+	}
+}
+
+func TestRepository_ApplyDebitIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "debit-idempotent@arena.example.com")
+	other := mustWalletAccount(t, ctx, q, "debit-idempotent-other@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+	otherID := domain.AccountID(uuidString(other.ID))
+
+	for _, credit := range []application.CreditRequest{
+		mustCreditRequest(t, accountID, domain.BucketFree, domain.OperationCreditFree, 5000, "free:2026-09", "debit-idempotent:free"),
+		mustCreditRequest(t, accountID, domain.BucketPurchased, domain.OperationCreditPurchase, 10000, "stripe:evt_idem", "debit-idempotent:purchased"),
+	} {
+		if _, err := repo.ApplyCredit(ctx, credit); err != nil {
+			t.Fatalf("seed credit error = %v", err)
+		}
+	}
+
+	request := mustDebitRequest(t, accountID, domain.OperationDebitArgument, 12000, "argument:5", "debit-idempotent:debit")
+	first, err := repo.ApplyDebit(ctx, request)
+	if err != nil {
+		t.Fatalf("first ApplyDebit() error = %v", err)
+	}
+	assertAllocation(t, first.Allocation, 5000, 7000)
+
+	second, err := repo.ApplyDebit(ctx, request)
+	if err != nil {
+		t.Fatalf("second ApplyDebit() error = %v", err)
+	}
+	if !second.Replayed {
+		t.Fatal("second attempt with the same key must be a replay")
+	}
+	if second.Operation.ID() != first.Operation.ID() {
+		t.Fatalf("replay operation = %q, want %q", second.Operation.ID(), first.Operation.ID())
+	}
+	if !second.Allocation.Equals(first.Allocation) {
+		t.Fatalf("replay allocation = %d/%d, want %d/%d",
+			second.Allocation.FromFree().Int64(), second.Allocation.FromPurchased().Int64(),
+			first.Allocation.FromFree().Int64(), first.Allocation.FromPurchased().Int64())
+	}
+
+	// The key is global: another account cannot replay it.
+	if _, err := repo.ApplyDebit(ctx, mustDebitRequest(
+		t, otherID, domain.OperationDebitArgument, 12000, "argument:5", "debit-idempotent:debit",
+	)); !errors.Is(err, application.ErrIdempotencyMismatch) {
+		t.Fatalf("cross-account replay error = %v, want ErrIdempotencyMismatch", err)
+	}
+
+	wallet, err := q.GetWalletAccount(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	if wallet.BalanceFree != 0 || wallet.BalancePurchased != 3000 {
+		t.Fatalf("balances = %d/%d, want 0/3000 (debited exactly once)", wallet.BalanceFree, wallet.BalancePurchased)
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", acc.ID); got != 3 {
+		t.Fatalf("operations = %d, want 3 (2 credits + 1 debit)", got)
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_transactions"); got != 4 {
+		t.Fatalf("transactions = %d, want 4 (2 credits + 1 split debit)", got)
+	}
+}
+
+// TestRepository_ApplyDebitConcurrentNoDoubleSpend is the THR-WAL-01 probe:
+// fifty concurrent debits compete for a balance that funds exactly one
+// operation. Exactly one succeeds, forty-nine fail with insufficient ink,
+// and the balance never goes negative.
+func TestRepository_ApplyDebitConcurrentNoDoubleSpend(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t, dbtest.WithPoolLimits(50, 1))
+	pool := testDB.Pool.Pool()
+	repo := walletpg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := mustWalletAccount(t, ctx, q, "debit-race@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	if _, err := repo.ApplyCredit(ctx, mustCreditRequest(
+		t, accountID, domain.BucketFree, domain.OperationCreditFree, 10000, "free:2026-09", "debit-race:seed",
+	)); err != nil {
+		t.Fatalf("seed credit error = %v", err)
+	}
+
+	// Build every request before spawning goroutines: testing.T must not
+	// fail from a non-test goroutine.
+	const attempts = 50
+	requests := make([]application.DebitRequest, attempts)
+	for i := range requests {
+		requests[i] = mustDebitRequest(
+			t, accountID, domain.OperationDebitArgument, 10000,
+			fmt.Sprintf("argument:%d", i), fmt.Sprintf("debit-race:%d", i),
+		)
+	}
+
+	var (
+		successes    atomic.Int32
+		insufficient atomic.Int32
+		wg           sync.WaitGroup
+	)
+	unexpected := make([]error, attempts)
+	results := make([]*application.DebitResult, attempts)
+
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			result, err := repo.ApplyDebit(ctx, requests[index])
+			if err != nil {
+				if errors.Is(err, domain.ErrInsufficientInk) {
+					insufficient.Add(1)
+				} else {
+					unexpected[index] = err
+				}
+				return
+			}
+			successes.Add(1)
+			results[index] = result
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range unexpected {
+		if err != nil {
+			t.Fatalf("attempt %d unexpected error = %v", i, err)
+		}
+	}
+	if successes.Load() != 1 {
+		t.Fatalf("successes = %d, want exactly 1", successes.Load())
+	}
+	if insufficient.Load() != attempts-1 {
+		t.Fatalf("insufficient = %d, want %d", insufficient.Load(), attempts-1)
+	}
+
+	wallet, err := q.GetWalletAccount(ctx, acc.ID)
+	if err != nil {
+		t.Fatalf("get wallet: %v", err)
+	}
+	if wallet.BalanceFree != 0 || wallet.BalancePurchased != 0 {
+		t.Fatalf("balances = %d/%d, want 0/0 (no double spend, never negative)", wallet.BalanceFree, wallet.BalancePurchased)
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_operations WHERE account_id = $1", acc.ID); got != 2 {
+		t.Fatalf("operations = %d, want 2 (1 credit + 1 debit)", got)
+	}
+	if got := countRows(t, ctx, pool, "SELECT count(*) FROM app.wallet_transactions"); got != 2 {
+		t.Fatalf("transactions = %d, want 2 (1 credit + 1 debit)", got)
+	}
+
+	var winner *application.DebitResult
+	for _, result := range results {
+		if result != nil {
+			winner = result
+		}
+	}
+	if winner == nil {
+		t.Fatal("no successful debit produced an operation")
+	}
+	assertAllocation(t, winner.Allocation, 10000, 0)
+}

@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const applyWalletDebit = `-- name: ApplyWalletDebit :one
+UPDATE app.wallet_accounts
+SET balance_free = balance_free - $2,
+    balance_purchased = balance_purchased - $3,
+    updated_at = now()
+WHERE account_id = $1
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at
+`
+
+type ApplyWalletDebitParams struct {
+	AccountID        pgtype.UUID
+	BalanceFree      int64
+	BalancePurchased int64
+}
+
+// ApplyWalletDebit subtracts the planned bucket consumptions in a single
+// statement; the CHECK (balance >= 0) guards the invariant even if a caller
+// gets the plan wrong.
+func (q *Queries) ApplyWalletDebit(ctx context.Context, arg ApplyWalletDebitParams) (AppWalletAccount, error) {
+	row := q.db.QueryRow(ctx, applyWalletDebit, arg.AccountID, arg.BalanceFree, arg.BalancePurchased)
+	var i AppWalletAccount
+	err := row.Scan(
+		&i.AccountID,
+		&i.BalanceFree,
+		&i.BalancePurchased,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createWalletAccount = `-- name: CreateWalletAccount :one
 
 INSERT INTO app.wallet_accounts (account_id)
@@ -216,6 +247,29 @@ func (q *Queries) GetWalletAccount(ctx context.Context, accountID pgtype.UUID) (
 	return i, err
 }
 
+const getWalletAccountForUpdate = `-- name: GetWalletAccountForUpdate :one
+SELECT account_id, balance_free, balance_purchased, created_at, updated_at
+FROM app.wallet_accounts
+WHERE account_id = $1
+FOR UPDATE
+`
+
+// GetWalletAccountForUpdate locks the balance projection row of an account
+// for the duration of the transaction, serializing concurrent debits so no
+// double spend can pass the balance check (THR-WAL-01).
+func (q *Queries) GetWalletAccountForUpdate(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error) {
+	row := q.db.QueryRow(ctx, getWalletAccountForUpdate, accountID)
+	var i AppWalletAccount
+	err := row.Scan(
+		&i.AccountID,
+		&i.BalanceFree,
+		&i.BalancePurchased,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getWalletOperationByIdempotencyKey = `-- name: GetWalletOperationByIdempotencyKey :one
 SELECT id, account_id, operation_type, idempotency_key, reference, created_at
 FROM app.wallet_operations
@@ -272,6 +326,39 @@ func (q *Queries) ListWalletTransactionsByAccount(ctx context.Context, accountID
 			&i.CreatedAt,
 			&i.OperationType,
 			&i.Reference,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWalletTransactionsByOperationID = `-- name: ListWalletTransactionsByOperationID :many
+SELECT id, operation_id, bucket, amount, created_at
+FROM app.wallet_transactions
+WHERE operation_id = $1
+ORDER BY bucket
+`
+
+func (q *Queries) ListWalletTransactionsByOperationID(ctx context.Context, operationID pgtype.UUID) ([]AppWalletTransaction, error) {
+	rows, err := q.db.Query(ctx, listWalletTransactionsByOperationID, operationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppWalletTransaction{}
+	for rows.Next() {
+		var i AppWalletTransaction
+		if err := rows.Scan(
+			&i.ID,
+			&i.OperationID,
+			&i.Bucket,
+			&i.Amount,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

@@ -47,6 +47,32 @@ SET balance_purchased = balance_purchased + $2,
 WHERE account_id = $1
 RETURNING account_id, balance_free, balance_purchased, created_at, updated_at;
 
+-- GetWalletAccountForUpdate locks the balance projection row of an account
+-- for the duration of the transaction, serializing concurrent debits so no
+-- double spend can pass the balance check (THR-WAL-01).
+-- name: GetWalletAccountForUpdate :one
+SELECT account_id, balance_free, balance_purchased, created_at, updated_at
+FROM app.wallet_accounts
+WHERE account_id = $1
+FOR UPDATE;
+
+-- ApplyWalletDebit subtracts the planned bucket consumptions in a single
+-- statement; the CHECK (balance >= 0) guards the invariant even if a caller
+-- gets the plan wrong.
+-- name: ApplyWalletDebit :one
+UPDATE app.wallet_accounts
+SET balance_free = balance_free - $2,
+    balance_purchased = balance_purchased - $3,
+    updated_at = now()
+WHERE account_id = $1
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at;
+
+-- name: ListWalletTransactionsByOperationID :many
+SELECT id, operation_id, bucket, amount, created_at
+FROM app.wallet_transactions
+WHERE operation_id = $1
+ORDER BY bucket;
+
 -- name: CreateWalletOperation :one
 INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference)
 VALUES ($1, $2, $3, $4)

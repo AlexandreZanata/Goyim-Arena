@@ -41,3 +41,34 @@ type CreditRepository interface {
 	// balance. The same key resolves to the original operation untouched.
 	ApplyCredit(ctx context.Context, request CreditRequest) (*CreditResult, error)
 }
+
+// DebitRequest is a validated INK debit to persist atomically. The bucket
+// split is not part of the request: it is computed inside the repository
+// transaction, under the wallet lock, following the mandatory priority.
+type DebitRequest struct {
+	AccountID      domain.AccountID
+	OperationType  domain.OperationType
+	IdempotencyKey domain.IdempotencyKey
+	Reference      domain.Reference
+	Amount         domain.Ink
+	ChangedAt      time.Time
+}
+
+// DebitResult is the outcome of a debit: the operation the idempotency key
+// resolves to, the consumption plan actually applied (reconstructed from the
+// ledger on replays) and whether it was a replay.
+type DebitResult struct {
+	Operation  domain.Operation
+	Allocation domain.Allocation
+	Replayed   bool
+}
+
+// DebitRepository persists debits and their idempotency registry.
+type DebitRepository interface {
+	// ApplyDebit locks the wallet, plans the bucket consumption by priority,
+	// stores the operation under its idempotency key, records one line per
+	// consumed bucket and updates the balances atomically. Insufficient
+	// balance leaves no partial state. The same key resolves to the original
+	// operation untouched.
+	ApplyDebit(ctx context.Context, request DebitRequest) (*DebitResult, error)
+}

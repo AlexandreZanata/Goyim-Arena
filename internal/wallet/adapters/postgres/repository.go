@@ -26,7 +26,10 @@ type Repository struct {
 	queries *platformpg.Queries
 }
 
-var _ application.CreditRepository = (*Repository)(nil)
+var (
+	_ application.CreditRepository = (*Repository)(nil)
+	_ application.DebitRepository  = (*Repository)(nil)
+)
 
 // NewRepository creates a PostgreSQL repository adapter for the wallet.
 func NewRepository(pool *pgxpool.Pool) *Repository {
@@ -116,6 +119,179 @@ func replayCredit(ctx context.Context, qtx *platformpg.Queries, request applicat
 		return nil, err
 	}
 	return &application.CreditResult{Operation: *operation, Replayed: true}, nil
+}
+
+// ApplyDebit locks the wallet, plans the bucket consumption by priority,
+// stores the operation under its idempotency key, records one line per
+// consumed bucket and updates the balances atomically. Insufficient balance
+// leaves no partial state, and concurrent debits cannot double spend
+// (THR-WAL-01).
+func (r *Repository) ApplyDebit(ctx context.Context, request application.DebitRequest) (*application.DebitResult, error) {
+	pgUUID, err := pgUUIDFromAccountID(request.AccountID)
+	if err != nil {
+		return nil, fmt.Errorf("apply debit: %w", err)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := r.queries.WithTx(tx)
+
+	// Fast path: an already processed key replays without locking the wallet.
+	if result, found, err := replayDebit(ctx, qtx, request); err != nil {
+		return nil, err
+	} else if found {
+		return result, nil
+	}
+
+	accountRow, err := qtx.GetWalletAccountForUpdate(ctx, pgUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// No wallet means no balance: nothing can be debited.
+			return nil, domain.ErrInsufficientInk
+		}
+		return nil, fmt.Errorf("lock wallet account: %w", err)
+	}
+
+	// Re-check under the wallet lock: concurrent retries of the same key for
+	// this account are serialized here and must replay, never debit twice.
+	if result, found, err := replayDebit(ctx, qtx, request); err != nil {
+		return nil, err
+	} else if found {
+		return result, nil
+	}
+
+	availableFree, err := domain.NewInk(accountRow.BalanceFree)
+	if err != nil {
+		return nil, fmt.Errorf("stored free balance is invalid: %w", err)
+	}
+	availablePurchased, err := domain.NewInk(accountRow.BalancePurchased)
+	if err != nil {
+		return nil, fmt.Errorf("stored purchased balance is invalid: %w", err)
+	}
+
+	allocation, err := domain.AllocateDebit(request.Amount, availableFree, availablePurchased)
+	if err != nil {
+		return nil, err
+	}
+
+	operationRow, err := qtx.CreateWalletOperationIfAbsent(ctx, platformpg.CreateWalletOperationIfAbsentParams{
+		AccountID:      pgUUID,
+		OperationType:  request.OperationType.String(),
+		IdempotencyKey: request.IdempotencyKey.String(),
+		Reference:      request.Reference.String(),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Cross-account key conflict: the wallet lock did not serialize it.
+		if result, found, replayErr := replayDebit(ctx, qtx, request); replayErr != nil {
+			return nil, replayErr
+		} else if found {
+			return result, nil
+		}
+		return nil, errors.New("idempotency conflict without a stored operation")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create wallet operation: %w", err)
+	}
+
+	for _, line := range allocation.Lines() {
+		delta, err := domain.DirectionDebit.Apply(line.Amount)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := qtx.CreateWalletTransaction(ctx, platformpg.CreateWalletTransactionParams{
+			OperationID: operationRow.ID,
+			Bucket:      line.Bucket.String(),
+			Amount:      delta,
+		}); err != nil {
+			return nil, fmt.Errorf("create wallet transaction: %w", err)
+		}
+	}
+
+	if _, err := qtx.ApplyWalletDebit(ctx, platformpg.ApplyWalletDebitParams{
+		AccountID:        pgUUID,
+		BalanceFree:      allocation.FromFree().Int64(),
+		BalancePurchased: allocation.FromPurchased().Int64(),
+	}); err != nil {
+		return nil, fmt.Errorf("apply wallet debit: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	operation, err := mapOperationRow(operationRow)
+	if err != nil {
+		return nil, err
+	}
+	return &application.DebitResult{Operation: *operation, Allocation: allocation}, nil
+}
+
+// replayDebit resolves a key that was already processed to its original
+// operation and reconstructs the consumption plan from the stored ledger
+// lines. The second result reports whether a replay was found.
+func replayDebit(ctx context.Context, qtx *platformpg.Queries, request application.DebitRequest) (*application.DebitResult, bool, error) {
+	existingRow, err := qtx.GetWalletOperationByIdempotencyKey(ctx, request.IdempotencyKey.String())
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("load replayed operation: %w", err)
+	}
+
+	if uuidToString(existingRow.AccountID) != request.AccountID.String() {
+		return nil, false, application.ErrIdempotencyMismatch
+	}
+
+	operation, err := mapOperationRow(existingRow)
+	if err != nil {
+		return nil, false, err
+	}
+
+	allocation, err := reconstructAllocation(ctx, qtx, existingRow.ID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return &application.DebitResult{Operation: *operation, Allocation: allocation, Replayed: true}, true, nil
+}
+
+// reconstructAllocation rebuilds the consumption plan of a stored debit from
+// its ledger lines; stored debit lines carry negative amounts.
+func reconstructAllocation(ctx context.Context, qtx *platformpg.Queries, operationID pgtype.UUID) (domain.Allocation, error) {
+	rows, err := qtx.ListWalletTransactionsByOperationID(ctx, operationID)
+	if err != nil {
+		return domain.Allocation{}, fmt.Errorf("load operation lines: %w", err)
+	}
+
+	var fromFree, fromPurchased domain.Ink
+	for _, row := range rows {
+		magnitude := row.Amount
+		if magnitude < 0 {
+			magnitude = -magnitude
+		}
+		amount, err := domain.NewInk(magnitude)
+		if err != nil {
+			return domain.Allocation{}, fmt.Errorf("stored line amount is invalid: %w", err)
+		}
+
+		switch domain.Bucket(row.Bucket) {
+		case domain.BucketFree:
+			fromFree, err = fromFree.Add(amount)
+		case domain.BucketPurchased:
+			fromPurchased, err = fromPurchased.Add(amount)
+		default:
+			return domain.Allocation{}, fmt.Errorf("stored bucket is invalid: %q", row.Bucket)
+		}
+		if err != nil {
+			return domain.Allocation{}, fmt.Errorf("sum stored lines: %w", err)
+		}
+	}
+
+	return domain.NewAllocation(fromFree, fromPurchased), nil
 }
 
 // creditBalance adds the signed delta to the balance projection of the
