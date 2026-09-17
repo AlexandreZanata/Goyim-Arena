@@ -69,6 +69,42 @@ func (q *Queries) CreateWalletOperation(ctx context.Context, arg CreateWalletOpe
 	return i, err
 }
 
+const createWalletOperationIfAbsent = `-- name: CreateWalletOperationIfAbsent :one
+INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (idempotency_key) DO NOTHING
+RETURNING id, account_id, operation_type, idempotency_key, reference, created_at
+`
+
+type CreateWalletOperationIfAbsentParams struct {
+	AccountID      pgtype.UUID
+	OperationType  string
+	IdempotencyKey string
+	Reference      string
+}
+
+// CreateWalletOperationIfAbsent inserts the operation exactly once per
+// idempotency key. On a conflict it returns no row, which tells the adapter
+// to replay the original operation (P06-T03).
+func (q *Queries) CreateWalletOperationIfAbsent(ctx context.Context, arg CreateWalletOperationIfAbsentParams) (AppWalletOperation, error) {
+	row := q.db.QueryRow(ctx, createWalletOperationIfAbsent,
+		arg.AccountID,
+		arg.OperationType,
+		arg.IdempotencyKey,
+		arg.Reference,
+	)
+	var i AppWalletOperation
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.OperationType,
+		&i.IdempotencyKey,
+		&i.Reference,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createWalletTransaction = `-- name: CreateWalletTransaction :one
 INSERT INTO app.wallet_transactions (operation_id, bucket, amount)
 VALUES ($1, $2, $3)
@@ -92,6 +128,73 @@ func (q *Queries) CreateWalletTransaction(ctx context.Context, arg CreateWalletT
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const creditFreeBalance = `-- name: CreditFreeBalance :one
+UPDATE app.wallet_accounts
+SET balance_free = balance_free + $2,
+    updated_at = now()
+WHERE account_id = $1
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at
+`
+
+type CreditFreeBalanceParams struct {
+	AccountID   pgtype.UUID
+	BalanceFree int64
+}
+
+// CreditFreeBalance adds the delta to the FREE_INK balance projection. The
+// CHECK (balance_free >= 0) guards the invariant even here.
+func (q *Queries) CreditFreeBalance(ctx context.Context, arg CreditFreeBalanceParams) (AppWalletAccount, error) {
+	row := q.db.QueryRow(ctx, creditFreeBalance, arg.AccountID, arg.BalanceFree)
+	var i AppWalletAccount
+	err := row.Scan(
+		&i.AccountID,
+		&i.BalanceFree,
+		&i.BalancePurchased,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const creditPurchasedBalance = `-- name: CreditPurchasedBalance :one
+UPDATE app.wallet_accounts
+SET balance_purchased = balance_purchased + $2,
+    updated_at = now()
+WHERE account_id = $1
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at
+`
+
+type CreditPurchasedBalanceParams struct {
+	AccountID        pgtype.UUID
+	BalancePurchased int64
+}
+
+func (q *Queries) CreditPurchasedBalance(ctx context.Context, arg CreditPurchasedBalanceParams) (AppWalletAccount, error) {
+	row := q.db.QueryRow(ctx, creditPurchasedBalance, arg.AccountID, arg.BalancePurchased)
+	var i AppWalletAccount
+	err := row.Scan(
+		&i.AccountID,
+		&i.BalanceFree,
+		&i.BalancePurchased,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const ensureWalletAccount = `-- name: EnsureWalletAccount :exec
+INSERT INTO app.wallet_accounts (account_id)
+VALUES ($1)
+ON CONFLICT (account_id) DO NOTHING
+`
+
+// EnsureWalletAccount materializes the balance projection row for an
+// account; a pre-existing row is left untouched, including its balances.
+func (q *Queries) EnsureWalletAccount(ctx context.Context, accountID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, ensureWalletAccount, accountID)
+	return err
 }
 
 const getWalletAccount = `-- name: GetWalletAccount :one

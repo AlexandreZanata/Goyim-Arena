@@ -15,6 +15,38 @@ SELECT account_id, balance_free, balance_purchased, created_at, updated_at
 FROM app.wallet_accounts
 WHERE account_id = $1;
 
+-- EnsureWalletAccount materializes the balance projection row for an
+-- account; a pre-existing row is left untouched, including its balances.
+-- name: EnsureWalletAccount :exec
+INSERT INTO app.wallet_accounts (account_id)
+VALUES ($1)
+ON CONFLICT (account_id) DO NOTHING;
+
+-- CreateWalletOperationIfAbsent inserts the operation exactly once per
+-- idempotency key. On a conflict it returns no row, which tells the adapter
+-- to replay the original operation (P06-T03).
+-- name: CreateWalletOperationIfAbsent :one
+INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (idempotency_key) DO NOTHING
+RETURNING id, account_id, operation_type, idempotency_key, reference, created_at;
+
+-- CreditFreeBalance adds the delta to the FREE_INK balance projection. The
+-- CHECK (balance_free >= 0) guards the invariant even here.
+-- name: CreditFreeBalance :one
+UPDATE app.wallet_accounts
+SET balance_free = balance_free + $2,
+    updated_at = now()
+WHERE account_id = $1
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at;
+
+-- name: CreditPurchasedBalance :one
+UPDATE app.wallet_accounts
+SET balance_purchased = balance_purchased + $2,
+    updated_at = now()
+WHERE account_id = $1
+RETURNING account_id, balance_free, balance_purchased, created_at, updated_at;
+
 -- name: CreateWalletOperation :one
 INSERT INTO app.wallet_operations (account_id, operation_type, idempotency_key, reference)
 VALUES ($1, $2, $3, $4)

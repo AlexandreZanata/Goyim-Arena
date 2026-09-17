@@ -35,8 +35,19 @@ type Querier interface {
 	// database (THR-WAL-02).
 	CreateWalletAccount(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
 	CreateWalletOperation(ctx context.Context, arg CreateWalletOperationParams) (AppWalletOperation, error)
+	// CreateWalletOperationIfAbsent inserts the operation exactly once per
+	// idempotency key. On a conflict it returns no row, which tells the adapter
+	// to replay the original operation (P06-T03).
+	CreateWalletOperationIfAbsent(ctx context.Context, arg CreateWalletOperationIfAbsentParams) (AppWalletOperation, error)
 	CreateWalletTransaction(ctx context.Context, arg CreateWalletTransactionParams) (AppWalletTransaction, error)
+	// CreditFreeBalance adds the delta to the FREE_INK balance projection. The
+	// CHECK (balance_free >= 0) guards the invariant even here.
+	CreditFreeBalance(ctx context.Context, arg CreditFreeBalanceParams) (AppWalletAccount, error)
+	CreditPurchasedBalance(ctx context.Context, arg CreditPurchasedBalanceParams) (AppWalletAccount, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	// EnsureWalletAccount materializes the balance projection row for an
+	// account; a pre-existing row is left untouched, including its balances.
+	EnsureWalletAccount(ctx context.Context, accountID pgtype.UUID) error
 	GetAccountByEmail(ctx context.Context, lower string) (AppAccount, error)
 	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
 	// GetAccountProfile retrieves account profile data without ever reading or exposing password credentials.

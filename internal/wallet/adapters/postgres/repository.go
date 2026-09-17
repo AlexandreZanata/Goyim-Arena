@@ -1,0 +1,185 @@
+// Package postgres is the PostgreSQL outbound adapter of the wallet module.
+// It implements the application credit port against the append-only ledger
+// schema (migration 00008): the operation registry is written with ON
+// CONFLICT DO NOTHING so retries resolve the original operation, and the
+// operation, transaction and balance projection change in a single
+// transaction.
+package postgres
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	platformpg "github.com/AlexandreZanata/Goyim-Arena/internal/platform/postgres"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/wallet/application"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/wallet/domain"
+)
+
+// Repository implements the wallet application ports using PostgreSQL.
+type Repository struct {
+	pool    *pgxpool.Pool
+	queries *platformpg.Queries
+}
+
+var _ application.CreditRepository = (*Repository)(nil)
+
+// NewRepository creates a PostgreSQL repository adapter for the wallet.
+func NewRepository(pool *pgxpool.Pool) *Repository {
+	return &Repository{
+		pool:    pool,
+		queries: platformpg.New(pool),
+	}
+}
+
+// ApplyCredit atomically ensures the wallet, stores the operation under its
+// idempotency key, records the bucket transaction and updates the balance.
+// When the key was already processed, no write happens and the original
+// operation is returned with Replayed set.
+func (r *Repository) ApplyCredit(ctx context.Context, request application.CreditRequest) (*application.CreditResult, error) {
+	pgUUID, err := pgUUIDFromAccountID(request.AccountID)
+	if err != nil {
+		return nil, fmt.Errorf("apply credit: %w", err)
+	}
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := r.queries.WithTx(tx)
+
+	if err := qtx.EnsureWalletAccount(ctx, pgUUID); err != nil {
+		return nil, fmt.Errorf("ensure wallet account: %w", err)
+	}
+
+	operationRow, err := qtx.CreateWalletOperationIfAbsent(ctx, platformpg.CreateWalletOperationIfAbsentParams{
+		AccountID:      pgUUID,
+		OperationType:  request.OperationType.String(),
+		IdempotencyKey: request.IdempotencyKey.String(),
+		Reference:      request.Reference.String(),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return replayCredit(ctx, qtx, request)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create wallet operation: %w", err)
+	}
+
+	if _, err := qtx.CreateWalletTransaction(ctx, platformpg.CreateWalletTransactionParams{
+		OperationID: operationRow.ID,
+		Bucket:      request.Bucket.String(),
+		Amount:      request.Delta,
+	}); err != nil {
+		return nil, fmt.Errorf("create wallet transaction: %w", err)
+	}
+
+	if err := creditBalance(ctx, qtx, pgUUID, request); err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	operation, err := mapOperationRow(operationRow)
+	if err != nil {
+		return nil, err
+	}
+	return &application.CreditResult{Operation: *operation}, nil
+}
+
+// replayCredit resolves a conflicting idempotency key to its original
+// operation. The key is global: a replay from another account is refused
+// instead of leaking the original reference. Nothing was written on this
+// path, so the surrounding transaction is rolled back untouched.
+func replayCredit(ctx context.Context, qtx *platformpg.Queries, request application.CreditRequest) (*application.CreditResult, error) {
+	existingRow, err := qtx.GetWalletOperationByIdempotencyKey(ctx, request.IdempotencyKey.String())
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, errors.New("idempotency conflict without a stored operation")
+		}
+		return nil, fmt.Errorf("load replayed operation: %w", err)
+	}
+
+	if uuidToString(existingRow.AccountID) != request.AccountID.String() {
+		return nil, application.ErrIdempotencyMismatch
+	}
+
+	operation, err := mapOperationRow(existingRow)
+	if err != nil {
+		return nil, err
+	}
+	return &application.CreditResult{Operation: *operation, Replayed: true}, nil
+}
+
+// creditBalance adds the signed delta to the balance projection of the
+// credited bucket.
+func creditBalance(ctx context.Context, qtx *platformpg.Queries, accountID pgtype.UUID, request application.CreditRequest) error {
+	switch request.Bucket {
+	case domain.BucketFree:
+		if _, err := qtx.CreditFreeBalance(ctx, platformpg.CreditFreeBalanceParams{
+			AccountID:   accountID,
+			BalanceFree: request.Delta,
+		}); err != nil {
+			return fmt.Errorf("credit free balance: %w", err)
+		}
+	case domain.BucketPurchased:
+		if _, err := qtx.CreditPurchasedBalance(ctx, platformpg.CreditPurchasedBalanceParams{
+			AccountID:        accountID,
+			BalancePurchased: request.Delta,
+		}); err != nil {
+			return fmt.Errorf("credit purchased balance: %w", err)
+		}
+	default:
+		return domain.ErrInvalidBucket
+	}
+	return nil
+}
+
+func mapOperationRow(row platformpg.AppWalletOperation) (*domain.Operation, error) {
+	operationType, err := domain.ParseOperationType(row.OperationType)
+	if err != nil {
+		return nil, fmt.Errorf("stored operation type is invalid: %w", err)
+	}
+	idempotencyKey, err := domain.ParseIdempotencyKey(row.IdempotencyKey)
+	if err != nil {
+		return nil, fmt.Errorf("stored idempotency key is invalid: %w", err)
+	}
+	reference, err := domain.ParseReference(row.Reference)
+	if err != nil {
+		return nil, fmt.Errorf("stored reference is invalid: %w", err)
+	}
+
+	return domain.ReconstituteOperation(
+		domain.OperationID(uuidToString(row.ID)),
+		domain.AccountID(uuidToString(row.AccountID)),
+		operationType,
+		idempotencyKey,
+		reference,
+		row.CreatedAt.Time,
+	)
+}
+
+func pgUUIDFromAccountID(id domain.AccountID) (pgtype.UUID, error) {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(id.String()); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("invalid account id format: %w", err)
+	}
+	return pgUUID, nil
+}
+
+func uuidToString(u pgtype.UUID) string {
+	if !u.Valid {
+		return ""
+	}
+	b := u.Bytes
+	return fmt.Sprintf("%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+		b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+		b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15])
+}
