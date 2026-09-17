@@ -36,10 +36,14 @@ type ArenaFeedPage struct {
 	NextCursor string
 }
 
-// ArenaFeedRepository exposes the public feed. Drafts and removed Arenas are
-// never candidates, independently of the filters.
+// ArenaFeedRepository exposes the public reads. Drafts and removed Arenas
+// are never candidates, independently of the filters.
 type ArenaFeedRepository interface {
 	// ListPublicArenas returns up to limit Arenas strictly older than the
 	// cursor position, newest first.
 	ListPublicArenas(ctx context.Context, filter ArenaFeedFilter, after *FeedPosition, limit int) ([]domain.Arena, error)
+
+	// GetPublicArenaBySlug resolves a public Arena address; drafts and
+	// removed Arenas are not found.
+	GetPublicArenaBySlug(ctx context.Context, slug domain.Slug) (*domain.Arena, error)
 }

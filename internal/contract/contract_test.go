@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
@@ -89,6 +90,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 			continue
 		}
 		if route.Path == "/api/v1/me/passes" || route.Path == "/api/v1/me/passes/history" {
+			continue
+		}
+		if strings.HasPrefix(route.Path, "/api/v1/me/arenas") || route.Path == "/api/v1/arenas" || strings.HasPrefix(route.Path, "/api/v1/arenas/") {
 			continue
 		}
 		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
@@ -272,6 +276,117 @@ func TestContractProfileSchemasExposeOnlyAllowedFields(t *testing.T) {
 	}
 	if !strings.Contains(string(privatePath["get"]), `"SessionCookie"`) {
 		t.Error("private profile operation must require the SessionCookie scheme")
+	}
+}
+
+// TestContractArenaSchemasExposeOnlyAllowedFields is the contract-level proof
+// of P08-T07: private and public arena documents declare exactly the allowed
+// properties, no schema declares forbidden markers (email, credentials,
+// payment identifiers, antifraud flags or administrative notes), the public
+// statuses never include draft or removed, authenticated routes require the
+// session cookie and the public reads document the ETag revalidation.
+func TestContractArenaSchemasExposeOnlyAllowedFields(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"ArenaDraftRequest":       {"statement", "context", "category", "language"},
+		"ArenaDraftUpdateRequest": {"statement", "context", "category", "language", "expected_version"},
+		"PrivateArena":            {"id", "slug", "statement", "context", "category", "language", "status", "version", "created_at", "published_at", "closes_at"},
+		"PrivateArenaList":        {"items"},
+		"PublicArenaSummary":      {"id", "slug", "statement", "category", "language", "status", "published_at", "closes_at"},
+		"PublicArena":             {"id", "slug", "statement", "context", "category", "language", "status", "published_at", "closes_at"},
+		"ArenaFeed":               {"items", "next_cursor"},
+	}
+	forbiddenMarkers := []string{
+		"email", "account_id", "password", "credential", "creator",
+		"stripe", "customer", "billing", "payment", "fraud", "admin",
+		"reason", "actor", "notes", "ip", "user_agent",
+	}
+
+	for name, expectedProperties := range expected {
+		raw, ok := document.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", name)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if len(schema.Properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(schema.Properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := schema.Properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range schema.Properties {
+			for _, marker := range forbiddenMarkers {
+				if strings.Contains(strings.ToLower(property), marker) {
+					t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+				}
+			}
+		}
+	}
+
+	// The public status enums never include non-public states.
+	for _, name := range []string{"PublicArenaSummary", "PublicArena"} {
+		raw := document.Components.Schemas[name]
+		var schema struct {
+			Properties map[string]struct {
+				Enum []string `json:"enum"`
+			} `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		status, ok := schema.Properties["status"]
+		if !ok {
+			t.Fatalf("%s is missing the status property", name)
+		}
+		if strings.Join(status.Enum, ",") != "published,closed,restricted" {
+			t.Errorf("%s.status enum = %v, want only published, closed and restricted", name, status.Enum)
+		}
+	}
+
+	// Authenticated arena routes require the session cookie.
+	for _, path := range []string{
+		"/api/v1/me/arenas/drafts",
+		"/api/v1/me/arenas/drafts/{id}",
+		"/api/v1/me/arenas/drafts/{id}/publish",
+		"/api/v1/me/arenas/{id}/close",
+	} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		for method, operation := range operations {
+			if !strings.Contains(string(operation), `"SessionCookie"`) {
+				t.Errorf("%s %s must require the SessionCookie scheme", strings.ToUpper(method), path)
+			}
+		}
+	}
+
+	// The public reads document the ETag revalidation and the public cache
+	// policy; the private draft list stays no-store.
+	for _, path := range []string{"/api/v1/arenas", "/api/v1/arenas/{slug}"} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		operation := string(operations["get"])
+		if strings.Contains(operation, `"SessionCookie"`) {
+			t.Errorf("%s must stay public", path)
+		}
+		for _, marker := range []string{"ETag", "public, max-age=60", `"304"`, "If-None-Match"} {
+			if !strings.Contains(operation, marker) {
+				t.Errorf("%s operation must document %q", path, marker)
+			}
+		}
 	}
 }
 

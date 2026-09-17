@@ -118,6 +118,9 @@ type Querier interface {
 	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetProfileByAccountID(ctx context.Context, accountID pgtype.UUID) (AppProfile, error)
+	// GetPublicArenaBySlug resolves a public Arena address. Drafts are never
+	// addressable and removed Arenas are not found for the public (P08-T07).
+	GetPublicArenaBySlug(ctx context.Context, slug pgtype.Text) (AppArena, error)
 	// GetPublicProfileByUsername returns only the publicly allowed profile fields.
 	// It never selects email, credentials, internal financial identifiers or
 	// administrative flags, and deliberately omits account_id.

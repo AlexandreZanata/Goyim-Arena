@@ -111,3 +111,10 @@ WHERE status IN ('published', 'closed', 'restricted')
   )
 ORDER BY published_at DESC, id DESC
 LIMIT sqlc.arg(page_limit);
+
+-- GetPublicArenaBySlug resolves a public Arena address. Drafts are never
+-- addressable and removed Arenas are not found for the public (P08-T07).
+-- name: GetPublicArenaBySlug :one
+SELECT id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
+FROM app.arenas
+WHERE slug = $1 AND status IN ('published', 'closed', 'restricted');

@@ -26,6 +26,19 @@ type fakeFeedRepo struct {
 	calls     int
 }
 
+func (r *fakeFeedRepo) GetPublicArenaBySlug(_ context.Context, slug domain.Slug) (*domain.Arena, error) {
+	if r.err != nil {
+		return nil, r.err
+	}
+	for _, arena := range r.arenas {
+		if arena.Slug().Equals(slug) {
+			copied := arena
+			return &copied, nil
+		}
+	}
+	return nil, application.ErrArenaNotFound
+}
+
 func (r *fakeFeedRepo) ListPublicArenas(_ context.Context, filter application.ArenaFeedFilter, after *application.FeedPosition, limit int) ([]domain.Arena, error) {
 	r.calls++
 	r.filter = filter

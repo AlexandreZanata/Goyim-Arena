@@ -341,6 +341,19 @@ func (r *Repository) ListPublicArenas(ctx context.Context, filter application.Ar
 	return arenas, nil
 }
 
+// GetPublicArenaBySlug resolves a public Arena address; drafts and removed
+// Arenas are not found.
+func (r *Repository) GetPublicArenaBySlug(ctx context.Context, slug domain.Slug) (*domain.Arena, error) {
+	row, err := r.queriesFor(ctx).GetPublicArenaBySlug(ctx, pgtype.Text{String: slug.String(), Valid: true})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrArenaNotFound
+		}
+		return nil, fmt.Errorf("get public arena by slug: %w", err)
+	}
+	return mapArenaRow(row)
+}
+
 // diagnoseCloseMiss explains why the closing affected no row.
 func (r *Repository) diagnoseCloseMiss(ctx context.Context, arenaUUID, creatorUUID pgtype.UUID, expectedVersion int32) error {
 	state, err := r.queriesFor(ctx).GetArenaStateForCreator(ctx, platformpg.GetArenaStateForCreatorParams{

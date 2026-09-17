@@ -386,6 +386,315 @@
         }
       }
     },
+    "/api/v1/me/arenas/drafts": {
+      "post": {
+        "operationId": "createArenaDraft",
+        "summary": "Create a private draft",
+        "description": "Creates a private Arena draft owned by the authenticated account. Drafts never consume an Arena Pass, are never publicly visible and are served with Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ArenaDraftRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Draft created.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PrivateArena" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "get": {
+        "operationId": "listArenaDrafts",
+        "summary": "Owner draft list",
+        "description": "Returns the drafts owned by the authenticated account, newest first. The collection is bounded by the account's own drafts and stays private.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "Owner drafts.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PrivateArenaList" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/me/arenas/drafts/{id}": {
+      "get": {
+        "operationId": "getArenaDraft",
+        "summary": "Read an owned draft",
+        "description": "Returns the draft owned by the authenticated account. An Arena that does not exist or belongs to another account is not found.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier returned by the draft creation.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owned draft.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PrivateArena" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      },
+      "patch": {
+        "operationId": "updateArenaDraft",
+        "summary": "Replace an owned draft",
+        "description": "Applies a full replacement under the optimistic version check. A stale expected_version fails with the version_conflict code and no write happens.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier returned by the draft creation.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ArenaDraftUpdateRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Draft replaced.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PrivateArena" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      },
+      "delete": {
+        "operationId": "deleteArenaDraft",
+        "summary": "Discard an owned draft",
+        "description": "Discards a private draft. Only drafts are deletable: published content is retained (P08-T01). The response has no body.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier returned by the draft creation.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Draft discarded." },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/me/arenas/drafts/{id}/publish": {
+      "post": {
+        "operationId": "publishArenaDraft",
+        "summary": "Publish a draft",
+        "description": "Publishes the draft according to the creator rule, consuming exactly one Arena Pass in the same transaction. Without an available pass nothing is written and the code no_pass_available is returned; retries resolve the published Arena without consuming again.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier returned by the draft creation.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published Arena.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PrivateArena" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/me/arenas/{id}/close": {
+      "post": {
+        "operationId": "closeArena",
+        "summary": "Close a published Arena",
+        "description": "Closes the creator's published Arena. Only the creator may close, it is not deletable, and retries resolve the closed Arena without a second transition.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier returned by the draft creation.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Closed Arena.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PrivateArena" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/arenas": {
+      "get": {
+        "operationId": "getArenaFeed",
+        "summary": "Public Arena feed",
+        "description": "Returns the public feed, newest first, as a keyset cursor page. Optional filters by language, category and publicly visible status; drafts and removed Arenas never appear. The response carries an ETag and public cache headers and may be revalidated with If-None-Match.",
+        "tags": ["arenas"],
+        "parameters": [
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "description": "Content language filter.",
+            "schema": { "type": "string", "enum": ["pt-BR", "en-US"] }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "description": "Editorial category filter.",
+            "schema": { "type": "string", "enum": ["technology", "science", "philosophy", "politics", "economics", "health", "culture", "society"] }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Publicly visible status filter.",
+            "schema": { "type": "string", "enum": ["published", "closed", "restricted"] }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque server-signed cursor returned as next_cursor by the previous page.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1..100); defaults to 20.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One feed page.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArenaFeed" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "400": { "$ref": "#/components/responses/Validation" }
+        }
+      }
+    },
+    "/api/v1/arenas/{slug}": {
+      "get": {
+        "operationId": "getPublicArena",
+        "summary": "Public Arena document",
+        "description": "Returns the public Arena addressed by its slug. Drafts are never addressable and removed Arenas are not found. The response carries an ETag and public cache headers and may be revalidated with If-None-Match.",
+        "tags": ["arenas"],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "description": "Stable public Arena address.",
+            "schema": { "type": "string", "minLength": 3, "maxLength": 80 }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public Arena.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PublicArena" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
     "/api/v1/profiles/{username}": {
       "get": {
         "operationId": "getPublicProfile",
@@ -579,6 +888,95 @@
           "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
         }
       },
+      "ArenaDraftRequest": {
+        "type": "object",
+        "description": "Private draft formulation. Limits are versioned policy (statement 10..280 runes, context up to 2000); categories are the seeded editorial slugs.",
+        "required": ["statement", "category", "language"],
+        "properties": {
+          "statement": { "type": "string", "minLength": 10, "maxLength": 280 },
+          "context": { "type": "string", "maxLength": 2000 },
+          "category": { "type": "string", "enum": ["technology", "science", "philosophy", "politics", "economics", "health", "culture", "society"] },
+          "language": { "type": "string", "enum": ["pt-BR", "en-US"] }
+        }
+      },
+      "ArenaDraftUpdateRequest": {
+        "type": "object",
+        "description": "Full replacement of a private draft under the optimistic version check.",
+        "required": ["statement", "category", "language", "expected_version"],
+        "properties": {
+          "statement": { "type": "string", "minLength": 10, "maxLength": 280 },
+          "context": { "type": "string", "maxLength": 2000 },
+          "category": { "type": "string", "enum": ["technology", "science", "philosophy", "politics", "economics", "health", "culture", "society"] },
+          "language": { "type": "string", "enum": ["pt-BR", "en-US"] },
+          "expected_version": { "type": "integer", "minimum": 1, "description": "Version returned by the last read; a stale value fails with version_conflict." }
+        }
+      },
+      "PrivateArena": {
+        "type": "object",
+        "description": "Owner projection of an Arena. Never contains email, payment or moderation data; draft responses stay private and no-store.",
+        "required": ["id", "statement", "category", "language", "status", "version", "created_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "slug": { "type": ["string", "null"], "description": "Stable public address; null while the Arena is a draft." },
+          "statement": { "type": "string" },
+          "context": { "type": ["string", "null"] },
+          "category": { "type": "string" },
+          "language": { "type": "string", "enum": ["pt-BR", "en-US"] },
+          "status": { "type": "string", "enum": ["draft", "published", "closed", "restricted", "removed"] },
+          "version": { "type": "integer", "minimum": 1 },
+          "created_at": { "type": "string", "format": "date-time" },
+          "published_at": { "type": ["string", "null"], "format": "date-time" },
+          "closes_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "PrivateArenaList": {
+        "type": "object",
+        "description": "Drafts owned by the authenticated account, newest first. Bounded by the account's own drafts and never cached publicly.",
+        "required": ["items"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/PrivateArena" } }
+        }
+      },
+      "PublicArenaSummary": {
+        "type": "object",
+        "description": "One public feed entry. No context, no version and no internal identifiers beyond the stable public id and slug.",
+        "required": ["id", "slug", "statement", "category", "language", "status", "published_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "slug": { "type": "string", "minLength": 3, "maxLength": 80 },
+          "statement": { "type": "string" },
+          "category": { "type": "string" },
+          "language": { "type": "string", "enum": ["pt-BR", "en-US"] },
+          "status": { "type": "string", "enum": ["published", "closed", "restricted"] },
+          "published_at": { "type": "string", "format": "date-time" },
+          "closes_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "PublicArena": {
+        "type": "object",
+        "description": "Public Arena document addressed by slug. Drafts are never addressable and removed Arenas are not found.",
+        "required": ["id", "slug", "statement", "context", "category", "language", "status", "published_at"],
+        "properties": {
+          "id": { "type": "string" },
+          "slug": { "type": "string", "minLength": 3, "maxLength": 80 },
+          "statement": { "type": "string" },
+          "context": { "type": ["string", "null"] },
+          "category": { "type": "string" },
+          "language": { "type": "string", "enum": ["pt-BR", "en-US"] },
+          "status": { "type": "string", "enum": ["published", "closed", "restricted"] },
+          "published_at": { "type": "string", "format": "date-time" },
+          "closes_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "ArenaFeed": {
+        "type": "object",
+        "description": "Cursor page of the public Arena feed, newest first. Drafts and removed Arenas never appear.",
+        "required": ["items", "next_cursor"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/PublicArenaSummary" } },
+          "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
+        }
+      },
       "HealthStatus": {
         "type": "object",
         "required": ["status"],
@@ -741,6 +1139,7 @@
     { "name": "auth", "description": "Authentication, registration, session management and recovery." },
     { "name": "profiles", "description": "Public and private profile projections." },
     { "name": "wallet", "description": "Authenticated INK balance and statement reads." },
-    { "name": "passes", "description": "Authenticated Arena Pass summary and consumption history." }
+    { "name": "passes", "description": "Authenticated Arena Pass summary and consumption history." },
+    { "name": "arenas", "description": "Arena drafts, publication, closing and the public feed." }
   ]
 }

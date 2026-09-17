@@ -212,6 +212,34 @@ func (q *Queries) GetArenaStateForCreator(ctx context.Context, arg GetArenaState
 	return i, err
 }
 
+const getPublicArenaBySlug = `-- name: GetPublicArenaBySlug :one
+SELECT id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
+FROM app.arenas
+WHERE slug = $1 AND status IN ('published', 'closed', 'restricted')
+`
+
+// GetPublicArenaBySlug resolves a public Arena address. Drafts are never
+// addressable and removed Arenas are not found for the public (P08-T07).
+func (q *Queries) GetPublicArenaBySlug(ctx context.Context, slug pgtype.Text) (AppArena, error) {
+	row := q.db.QueryRow(ctx, getPublicArenaBySlug, slug)
+	var i AppArena
+	err := row.Scan(
+		&i.ID,
+		&i.CreatorID,
+		&i.Slug,
+		&i.Statement,
+		&i.Context,
+		&i.Category,
+		&i.Language,
+		&i.Status,
+		&i.Version,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.ClosesAt,
+	)
+	return i, err
+}
+
 const listArenaDraftsForCreator = `-- name: ListArenaDraftsForCreator :many
 SELECT id, creator_id, slug, statement, context, category, language, status, version, created_at, published_at, closes_at
 FROM app.arenas
