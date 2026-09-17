@@ -8,7 +8,7 @@ GO ?= go
 GOFMT ?= gofmt
 NPM ?= npm
 
-.PHONY: fmt fmt-check test-unit typecheck build-web test-contract generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration typecheck build-web test-contract generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -33,6 +33,11 @@ fmt-check:
 test-unit:
 	$(GO) test ./...
 	@echo "test-unit: ok"
+
+# test-integration executa os testes de integração contra PostgreSQL real descartável (P03-T05).
+test-integration:
+	$(GO) test -v -race ./internal/platform/dbpool/... ./internal/platform/dbtest/...
+	@echo "test-integration: ok"
 
 # typecheck roda a checagem estrita de tipos do frontend (tsc --noEmit).
 # npm ci garante instalação reprodutível a partir do package-lock.json.
@@ -73,7 +78,7 @@ generate-check:
 verify: fmt-check generate-check test-unit test-contract typecheck build-web
 	@echo "verify: gates presentes, porém não implementados (falham explicitamente ao serem invocados):"
 	@echo "verify: gates ainda não criados:"
-	@for gate in lint test-integration test-security test-e2e test-race test-load-smoke vuln; do \
+	@for gate in lint test-security test-e2e test-race test-load-smoke vuln; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."
