@@ -19,6 +19,25 @@ type AppAccount struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+// Arena aggregation root: immutable published statement and fixed content language, mutable lifecycle status
+type AppArena struct {
+	ID        pgtype.UUID
+	CreatorID pgtype.UUID
+	// Stable public address assigned at publication; never an identity substitute
+	Slug      pgtype.Text
+	Statement string
+	Context   pgtype.Text
+	Category  string
+	// Immutable content language of the Arena (pt-BR or en-US); independent from the interface locale
+	Language string
+	Status   string
+	// Optimistic concurrency version, incremented on every accepted mutation
+	Version     int32
+	CreatedAt   pgtype.Timestamptz
+	PublishedAt pgtype.Timestamptz
+	ClosesAt    pgtype.Timestamptz
+}
+
 // Append-only Arena Pass consumptions; one row per published Arena, never updated or deleted at runtime
 type AppArenaPassConsumption struct {
 	ID         pgtype.UUID
@@ -39,6 +58,22 @@ type AppArenaPassLot struct {
 	ExpiresAt pgtype.Timestamptz
 	Reference string
 	CreatedAt pgtype.Timestamptz
+}
+
+// Substitution/continuation notes linking one Arena to another (never to itself)
+type AppArenaRelation struct {
+	ID             pgtype.UUID
+	ArenaID        pgtype.UUID
+	RelatedArenaID pgtype.UUID
+	Relation       string
+	CreatedAt      pgtype.Timestamptz
+}
+
+// Editorial Arena categories; seeded by migrations, display names resolve through the versioned i18n catalogs
+type AppCategory struct {
+	Slug         string
+	DisplayOrder int32
+	CreatedAt    pgtype.Timestamptz
 }
 
 // Explicit communication opt-ins per account; marketing defaults to false and is never opted in implicitly
