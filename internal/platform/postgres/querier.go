@@ -179,6 +179,9 @@ type Querier interface {
 	// Expiration is never written back: the predicate is evaluated at read time,
 	// so the sweep is a pure derivation and repeated runs are identical (P07-T04).
 	ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredArenaPassLotsParams) ([]AppArenaPassLot, error)
+	// ListPositionChanges returns the private change history of one account in
+	// one Arena, newest first; the chain order is the version (P09-T06).
+	ListPositionChanges(ctx context.Context, arg ListPositionChangesParams) ([]AppPositionChange, error)
 	// ListPublicArenasPage returns one keyset page of the public feed, newest
 	// first, with optional language, category and status filters. Only publicly
 	// visible statuses are ever candidates: drafts and removed Arenas can never

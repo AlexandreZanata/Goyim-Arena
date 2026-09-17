@@ -44,6 +44,13 @@ type UnitOfWork interface {
 	WithinTransaction(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
+// PositionChangeRecord is one stored history row: the append-only change
+// plus its database identifier, kept for later attribution.
+type PositionChangeRecord struct {
+	ID     string
+	Change domain.PositionChange
+}
+
 // PositionRepository persists the private position projection and its
 // append-only history.
 type PositionRepository interface {
@@ -66,6 +73,10 @@ type PositionRepository interface {
 	// ErrVersionConflict and a missing projection reports
 	// ErrPositionNotFound.
 	UpdateCurrentPosition(ctx context.Context, change domain.PositionChange, expectedVersion int32) error
+
+	// ListPositionChanges returns the account's change history in one
+	// Arena, newest first.
+	ListPositionChanges(ctx context.Context, arenaID domain.ArenaID, accountID domain.AccountID) ([]PositionChangeRecord, error)
 }
 
 // PositionDistribution is the count of one dimension of an aggregate: how

@@ -154,6 +154,36 @@ func (r *Repository) UpdateCurrentPosition(ctx context.Context, change domain.Po
 	return nil
 }
 
+// ListPositionChanges returns the account's change history in one Arena,
+// newest first.
+func (r *Repository) ListPositionChanges(ctx context.Context, arenaID domain.ArenaID, accountID domain.AccountID) ([]application.PositionChangeRecord, error) {
+	arenaParam, accountParam, err := positionScope(arenaID, accountID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := r.queriesFor(ctx).ListPositionChanges(ctx, platformpg.ListPositionChangesParams{
+		ArenaID:   arenaParam,
+		AccountID: accountParam,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list position changes: %w", err)
+	}
+
+	records := make([]application.PositionChangeRecord, 0, len(rows))
+	for _, row := range rows {
+		change, err := mapPositionChange(row)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, application.PositionChangeRecord{
+			ID:     uuidToString(row.ID),
+			Change: change,
+		})
+	}
+	return records, nil
+}
+
 // CountEligiblePositions derives the public aggregate of one Arena. The
 // projection counts only active accounts (BUSINESS_RULES §7) and returns
 // counts only: no account identifier leaves the database.
@@ -244,6 +274,31 @@ func mapDebatePosition(row platformpg.AppDebatePosition) (*domain.DebatePosition
 		return nil, fmt.Errorf("stored debate position is invalid: %w", err)
 	}
 	return position, nil
+}
+
+// mapPositionChange rebuilds one history row from stored state.
+func mapPositionChange(row platformpg.AppPositionChange) (domain.PositionChange, error) {
+	arenaID, err := domain.ParseArenaID(uuidToString(row.ArenaID))
+	if err != nil {
+		return domain.PositionChange{}, fmt.Errorf("stored arena id is invalid: %w", err)
+	}
+	accountID, err := domain.ParseAccountID(uuidToString(row.AccountID))
+	if err != nil {
+		return domain.PositionChange{}, fmt.Errorf("stored account id is invalid: %w", err)
+	}
+	from, err := domain.ParsePosition(row.FromPosition)
+	if err != nil {
+		return domain.PositionChange{}, fmt.Errorf("stored from position is invalid: %w", err)
+	}
+	to, err := domain.ParsePosition(row.ToPosition)
+	if err != nil {
+		return domain.PositionChange{}, fmt.Errorf("stored to position is invalid: %w", err)
+	}
+	change, err := domain.NewPositionChange(arenaID, accountID, from, to, row.Version, row.ChangedAt.Time)
+	if err != nil {
+		return domain.PositionChange{}, fmt.Errorf("stored position change is invalid: %w", err)
+	}
+	return change, nil
 }
 
 // uuidToString renders a database UUID in canonical form.

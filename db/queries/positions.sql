@@ -48,6 +48,15 @@ WHERE arena_id = sqlc.arg(arena_id)::uuid
   AND account_id = sqlc.arg(account_id)::uuid
   AND version = sqlc.arg(expected_version)::integer;
 
+-- ListPositionChanges returns the private change history of one account in
+-- one Arena, newest first; the chain order is the version (P09-T06).
+-- name: ListPositionChanges :many
+SELECT id, arena_id, account_id, from_position, to_position, version, changed_at
+FROM app.position_changes
+WHERE arena_id = sqlc.arg(arena_id)::uuid
+  AND account_id = sqlc.arg(account_id)::uuid
+ORDER BY version DESC;
+
 -- CountEligiblePositionsByArena derives the public aggregate of one Arena:
 -- the initial and current distributions over eligible participants plus the
 -- eligible total. This is the explicitly approved read-only projection of

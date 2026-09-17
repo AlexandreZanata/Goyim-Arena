@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -297,6 +298,28 @@ func (r *fakePositionRepo) writeStored(ctx context.Context, key string, projecti
 	defer r.mu.Unlock()
 	r.stored[key] = projection
 	r.inserts++
+}
+
+func (r *fakePositionRepo) ListPositionChanges(_ context.Context, arenaID domain.ArenaID, accountID domain.AccountID) ([]application.PositionChangeRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	matching := make([]domain.PositionChange, 0, len(r.changes))
+	for _, change := range r.changes {
+		if change.ArenaID().Equals(arenaID) && change.AccountID().Equals(accountID) {
+			matching = append(matching, change)
+		}
+	}
+	sort.Slice(matching, func(i, j int) bool { return matching[i].Version() > matching[j].Version() })
+
+	records := make([]application.PositionChangeRecord, 0, len(matching))
+	for index, change := range matching {
+		records = append(records, application.PositionChangeRecord{
+			ID:     fmt.Sprintf("change-%d", len(matching)-index),
+			Change: change,
+		})
+	}
+	return records, nil
 }
 
 func (r *fakePositionRepo) changeCount() int {

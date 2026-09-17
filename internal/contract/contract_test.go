@@ -15,6 +15,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/positions/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/profiles/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/adapters/http"
 )
@@ -415,6 +416,108 @@ func TestContractArenaDocumentRoute(t *testing.T) {
 	} {
 		if !strings.Contains(operation, marker) {
 			t.Errorf("/d/{slug} operation must document %q", marker)
+		}
+	}
+}
+
+// TestContractPositionSchemasExposeOnlyAllowedFields is the contract-level
+// proof of P09-T06: private and public position documents declare exactly
+// the allowed properties, no schema declares forbidden markers, the private
+// routes require the session cookie, the public aggregate stays public with
+// its ETag revalidation and the position vocabulary is closed.
+func TestContractPositionSchemasExposeOnlyAllowedFields(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"PositionRequest":       {"position"},
+		"PrivatePosition":       {"arena_id", "initial_position", "current_position", "version", "created_at", "updated_at"},
+		"PositionConfirmation":  {"position", "replayed"},
+		"PositionChangeRecord":  {"change_id", "position"},
+		"PositionChangeEntry":   {"change_id", "from_position", "to_position", "version", "changed_at"},
+		"PositionChangeHistory": {"items"},
+		"PositionDistribution":  {"agree", "disagree", "undecided"},
+		"PositionAggregate":     {"participants_total", "suppressed", "initial", "current", "checked_at"},
+	}
+	forbiddenMarkers := []string{
+		"account", "email", "password", "credential", "creator", "user",
+		"stripe", "customer", "billing", "payment", "fraud", "admin",
+		"reason", "actor", "notes", "ip", "user_agent",
+	}
+
+	for name, expectedProperties := range expected {
+		raw, ok := document.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", name)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if len(schema.Properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(schema.Properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := schema.Properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range schema.Properties {
+			// Snake-case tokens compare exactly: "participants_total" must
+			// not match the "ip" marker.
+			for _, token := range strings.Split(strings.ToLower(property), "_") {
+				for _, marker := range forbiddenMarkers {
+					if token == marker {
+						t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+					}
+				}
+			}
+		}
+	}
+
+	// The position vocabulary is closed in every schema that carries it.
+	for _, name := range []string{"PositionRequest", "PrivatePosition", "PositionChangeEntry"} {
+		raw := string(document.Components.Schemas[name])
+		if !strings.Contains(raw, `"agree"`) || !strings.Contains(raw, `"disagree"`) || !strings.Contains(raw, `"undecided"`) {
+			t.Errorf("%s must declare the closed position vocabulary", name)
+		}
+		for _, forbidden := range []string{`"maybe"`, `"neutral"`, `"yes"`, `"no"`} {
+			if strings.Contains(raw, forbidden) {
+				t.Errorf("%s declares a position outside the vocabulary: %s", name, forbidden)
+			}
+		}
+	}
+
+	// Private routes require the session cookie; the aggregate stays public.
+	for _, path := range []string{
+		"/api/v1/me/arenas/{id}/position",
+		"/api/v1/me/arenas/{id}/position/changes",
+	} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		for method, operation := range operations {
+			if !strings.Contains(string(operation), `"SessionCookie"`) {
+				t.Errorf("%s %s must require the SessionCookie scheme", strings.ToUpper(method), path)
+			}
+		}
+	}
+
+	operations, ok := document.Paths["/api/v1/arenas/{id}/positions"]
+	if !ok {
+		t.Fatal("contract is missing /api/v1/arenas/{id}/positions")
+	}
+	aggregateOperation := string(operations["get"])
+	if strings.Contains(aggregateOperation, `"SessionCookie"`) {
+		t.Error("the aggregate must stay public")
+	}
+	for _, marker := range []string{"ETag", "public, max-age=60", `"304"`, "If-None-Match", "suppressed"} {
+		if !strings.Contains(aggregateOperation, marker) {
+			t.Errorf("aggregate operation must document %q", marker)
 		}
 	}
 }

@@ -168,6 +168,49 @@ func (q *Queries) GetDebatePosition(ctx context.Context, arg GetDebatePositionPa
 	return i, err
 }
 
+const listPositionChanges = `-- name: ListPositionChanges :many
+SELECT id, arena_id, account_id, from_position, to_position, version, changed_at
+FROM app.position_changes
+WHERE arena_id = $1::uuid
+  AND account_id = $2::uuid
+ORDER BY version DESC
+`
+
+type ListPositionChangesParams struct {
+	ArenaID   pgtype.UUID
+	AccountID pgtype.UUID
+}
+
+// ListPositionChanges returns the private change history of one account in
+// one Arena, newest first; the chain order is the version (P09-T06).
+func (q *Queries) ListPositionChanges(ctx context.Context, arg ListPositionChangesParams) ([]AppPositionChange, error) {
+	rows, err := q.db.Query(ctx, listPositionChanges, arg.ArenaID, arg.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppPositionChange{}
+	for rows.Next() {
+		var i AppPositionChange
+		if err := rows.Scan(
+			&i.ID,
+			&i.ArenaID,
+			&i.AccountID,
+			&i.FromPosition,
+			&i.ToPosition,
+			&i.Version,
+			&i.ChangedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateCurrentPosition = `-- name: UpdateCurrentPosition :execrows
 UPDATE app.debate_positions
 SET current_position = $1::text,

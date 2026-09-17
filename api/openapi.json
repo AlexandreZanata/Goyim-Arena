@@ -695,6 +695,183 @@
         }
       }
     },
+    "/api/v1/me/arenas/{id}/position": {
+      "post": {
+        "operationId": "confirmPosition",
+        "summary": "Confirm the initial position",
+        "description": "Confirms the authenticated account's first position in one Arena. The call is idempotent: retrying the same value resolves the recorded projection, while a different value conflicts because the initial choice is immutable history. A first confirmation requires an eligible account and a published, open Arena; drafts and removed Arenas are not found. Private responses always carry Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["positions"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PositionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Recorded projection (fresh or replayed).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PositionConfirmation" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      },
+      "get": {
+        "operationId": "getMyPosition",
+        "summary": "Read my position",
+        "description": "Returns the authenticated account's position projection in one Arena. A pair without a confirmed position is not found; another account's projection is unreachable.",
+        "tags": ["positions"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner position projection.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PrivatePosition" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/me/arenas/{id}/position/changes": {
+      "post": {
+        "operationId": "changePosition",
+        "summary": "Change my position",
+        "description": "Records one position change: the immutable history row is appended and the current-position projection moves in the same transaction under the optimistic version check. A concurrent change either advances the chain or answers version_conflict; a closed Arena accepts no new changes and changing to the current position conflicts. The response carries the change identifier, kept for later attribution.",
+        "tags": ["positions"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PositionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Recorded change and updated projection.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PositionChangeRecord" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      },
+      "get": {
+        "operationId": "listMyPositionChanges",
+        "summary": "List my position changes",
+        "description": "Returns the authenticated account's change history in one Arena, newest first. The history is private by default and bounded by the account's own changes in the Arena.",
+        "tags": ["positions"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner change history.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PositionChangeHistory" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/arenas/{id}/positions": {
+      "get": {
+        "operationId": "getPositionAggregate",
+        "summary": "Public position aggregate",
+        "description": "Returns the public aggregate of one Arena: the initial and current distributions over eligible participants, the eligible total and the derivation instant. Below the configured privacy threshold every count is withheld (suppressed: true), so a small sample never reveals an individual position. The local visitor choice gates the UI, never the API: the aggregate is not a secret. The response carries an ETag and short public cache headers and may be revalidated with If-None-Match.",
+        "tags": ["positions"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Opaque Arena identifier.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Privacy-safe aggregate.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Short public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PositionAggregate" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "400": { "$ref": "#/components/responses/Validation" }
+        }
+      }
+    },
     "/d/{slug}": {
       "get": {
         "operationId": "getArenaDocument",
@@ -1030,6 +1207,87 @@
         "properties": {
           "items": { "type": "array", "items": { "$ref": "#/components/schemas/PublicArenaSummary" } },
           "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
+        }
+      },
+      "PositionRequest": {
+        "type": "object",
+        "description": "The chosen position: the closed vocabulary agree, disagree or undecided. No plan, payment or reputation weight is attached.",
+        "required": ["position"],
+        "properties": {
+          "position": { "type": "string", "enum": ["agree", "disagree", "undecided"] }
+        }
+      },
+      "PrivatePosition": {
+        "type": "object",
+        "description": "Owner projection of one position in one Arena. Private by default: another account's projection is never addressable.",
+        "required": ["arena_id", "initial_position", "current_position", "version", "created_at", "updated_at"],
+        "properties": {
+          "arena_id": { "type": "string" },
+          "initial_position": { "type": "string", "enum": ["agree", "disagree", "undecided"], "description": "Immutable first confirmed position." },
+          "current_position": { "type": "string", "enum": ["agree", "disagree", "undecided"], "description": "Derived projection of the chain tip." },
+          "version": { "type": "integer", "minimum": 1 },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PositionConfirmation": {
+        "type": "object",
+        "description": "Outcome of the idempotent initial confirmation.",
+        "required": ["position", "replayed"],
+        "properties": {
+          "position": { "$ref": "#/components/schemas/PrivatePosition" },
+          "replayed": { "type": "boolean", "description": "True when the call resolved an existing confirmation instead of writing." }
+        }
+      },
+      "PositionChangeRecord": {
+        "type": "object",
+        "description": "Outcome of one recorded change: the stored change identifier (kept for later attribution) and the updated projection.",
+        "required": ["change_id", "position"],
+        "properties": {
+          "change_id": { "type": "string" },
+          "position": { "$ref": "#/components/schemas/PrivatePosition" }
+        }
+      },
+      "PositionChangeEntry": {
+        "type": "object",
+        "description": "One row of the owner change history.",
+        "required": ["change_id", "from_position", "to_position", "version", "changed_at"],
+        "properties": {
+          "change_id": { "type": "string" },
+          "from_position": { "type": "string", "enum": ["agree", "disagree", "undecided"] },
+          "to_position": { "type": "string", "enum": ["agree", "disagree", "undecided"] },
+          "version": { "type": "integer", "minimum": 2 },
+          "changed_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PositionChangeHistory": {
+        "type": "object",
+        "description": "Owner change history, newest first; bounded by the account's own changes in the Arena.",
+        "required": ["items"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/PositionChangeEntry" } }
+        }
+      },
+      "PositionDistribution": {
+        "type": "object",
+        "description": "Count of one aggregate dimension. Counts only: no account identifier is ever part of an aggregate.",
+        "required": ["agree", "disagree", "undecided"],
+        "properties": {
+          "agree": { "type": "integer", "minimum": 0 },
+          "disagree": { "type": "integer", "minimum": 0 },
+          "undecided": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "PositionAggregate": {
+        "type": "object",
+        "description": "Privacy-safe public aggregate of one Arena. Below the configured threshold every count is withheld (suppressed true and zeroed counts), so a small sample never reveals an individual position.",
+        "required": ["participants_total", "suppressed", "initial", "current", "checked_at"],
+        "properties": {
+          "participants_total": { "type": "integer", "minimum": 0, "description": "Eligible participants counted at checked_at; zero when suppressed." },
+          "suppressed": { "type": "boolean" },
+          "initial": { "$ref": "#/components/schemas/PositionDistribution" },
+          "current": { "$ref": "#/components/schemas/PositionDistribution" },
+          "checked_at": { "type": "string", "format": "date-time" }
         }
       },
       "HealthStatus": {

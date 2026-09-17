@@ -484,6 +484,70 @@ func TestChangePositionRollbackLeavesNoDivergence(t *testing.T) {
 	}
 }
 
+func TestListPositionChangesReturnsTheStoredChain(t *testing.T) {
+	ctx := context.Background()
+	db := dbtest.New(t)
+	pool := db.Pool.Pool()
+	q := platformpg.New(pool)
+
+	account := mustPositionAccount(t, ctx, q, "positions-history@arena.example.com")
+	other := mustPositionAccount(t, ctx, q, "positions-history-other@arena.example.com")
+	arena := mustPositionArena(t, ctx, pool, account)
+	repo := positionspg.NewRepository(pool)
+	clock := clockseed.NewClock()
+
+	confirm := application.NewConfirmInitialPositionUseCase(repo, eligibleAccounts{}, openArenas{}, clock)
+	if _, err := confirm.Execute(ctx, confirmCommandFor(arena, account, domain.PositionAgree)); err != nil {
+		t.Fatalf("confirm Execute() error = %v", err)
+	}
+	if _, err := confirm.Execute(ctx, confirmCommandFor(arena, other, domain.PositionDisagree)); err != nil {
+		t.Fatalf("other confirm Execute() error = %v", err)
+	}
+
+	change := application.NewChangePositionUseCase(repo, openArenas{}, platformpg.NewTxManager(pool), clock)
+	first, err := change.Execute(ctx, changeCommandFor(arena, account, domain.PositionDisagree))
+	if err != nil {
+		t.Fatalf("first change Execute() error = %v", err)
+	}
+	second, err := change.Execute(ctx, changeCommandFor(arena, account, domain.PositionUndecided))
+	if err != nil {
+		t.Fatalf("second change Execute() error = %v", err)
+	}
+
+	list := application.NewListPositionChangesUseCase(repo)
+	records, err := list.Execute(ctx, application.ListPositionChangesQuery{
+		AccountID: uuidText(account),
+		ArenaID:   uuidText(arena),
+	})
+	if err != nil {
+		t.Fatalf("list Execute() error = %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("records = %d, want the two owner changes", len(records))
+	}
+	if records[0].ID != second.ChangeID || records[1].ID != first.ChangeID {
+		t.Fatalf("history ids = %q, %q, want newest first (%q, %q)", records[0].ID, records[1].ID, second.ChangeID, first.ChangeID)
+	}
+	if records[0].Change.Version() != 3 || records[1].Change.Version() != 2 {
+		t.Fatalf("versions = %d, %d, want 3 then 2", records[0].Change.Version(), records[1].Change.Version())
+	}
+	if !records[0].Change.From().Equals(mustPositionValue(t, domain.PositionDisagree)) || !records[0].Change.To().Equals(mustPositionValue(t, domain.PositionUndecided)) {
+		t.Fatal("history row lost its transition")
+	}
+
+	// The other account never sees the owner history.
+	otherRecords, err := list.Execute(ctx, application.ListPositionChangesQuery{
+		AccountID: uuidText(other),
+		ArenaID:   uuidText(arena),
+	})
+	if err != nil {
+		t.Fatalf("other list Execute() error = %v", err)
+	}
+	if len(otherRecords) != 0 {
+		t.Fatalf("other records = %d, want none", len(otherRecords))
+	}
+}
+
 func TestPositionRepositoryRejectsMalformedIdentifiers(t *testing.T) {
 	ctx := context.Background()
 	db := dbtest.New(t)
