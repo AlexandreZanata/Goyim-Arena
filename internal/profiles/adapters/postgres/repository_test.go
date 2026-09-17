@@ -339,6 +339,77 @@ func TestRepository_EligibilityNegativeAuthorization(t *testing.T) {
 	}
 }
 
+func TestRepository_GetPublicProfileProjection(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := profilespg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := createEligibleAccount(t, ctx, q, "public-projection@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+	if _, err := repo.CreateProfileWithUsernameHistory(ctx, accountID, mustUsername(t, "PublicHero"), mustLocale(t, "en-US"), time.Now().UTC()); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	// The public lookup resolves exclusively by the canonical normalized form.
+	public, err := repo.GetPublicProfileByUsername(ctx, "publichero")
+	if err != nil {
+		t.Fatalf("GetPublicProfileByUsername() error = %v", err)
+	}
+	if public.Username != "PublicHero" {
+		t.Errorf("Username = %q, want PublicHero", public.Username)
+	}
+	if public.InterfaceLocale != domain.LocaleAmericanEnglish {
+		t.Errorf("InterfaceLocale = %q, want en-US", public.InterfaceLocale)
+	}
+	if public.CreatedAt.IsZero() {
+		t.Error("CreatedAt is zero")
+	}
+
+	// Casing variants are not the adapter's job: the use case normalizes
+	// before reaching the repository.
+	if _, err := repo.GetPublicProfileByUsername(ctx, "PublicHero"); !errors.Is(err, application.ErrProfileNotFound) {
+		t.Fatalf("non-canonical lookup error = %v, want ErrProfileNotFound", err)
+	}
+	if _, err := repo.GetPublicProfileByUsername(ctx, "ghosthandle"); !errors.Is(err, application.ErrProfileNotFound) {
+		t.Fatalf("unknown lookup error = %v, want ErrProfileNotFound", err)
+	}
+}
+
+func TestRepository_GetPrivateProfileProjection(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := profilespg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := createEligibleAccount(t, ctx, q, "private-projection@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+	if _, err := repo.CreateProfileWithUsernameHistory(ctx, accountID, mustUsername(t, "PrivateHero"), mustLocale(t, "pt-BR"), time.Now().UTC()); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	private, err := repo.GetPrivateProfileByAccountID(ctx, accountID)
+	if err != nil {
+		t.Fatalf("GetPrivateProfileByAccountID() error = %v", err)
+	}
+	if private.Username != "PrivateHero" || private.InterfaceLocale != domain.LocaleBrazilianPortuguese {
+		t.Errorf("profile = %+v, want PrivateHero/pt-BR", private)
+	}
+	if private.CreatedAt.IsZero() || private.UpdatedAt.IsZero() {
+		t.Error("timestamps are zero")
+	}
+
+	withoutProfile := createEligibleAccount(t, ctx, q, "private-missing@arena.example.com")
+	if _, err := repo.GetPrivateProfileByAccountID(ctx, domain.AccountID(uuidString(withoutProfile.ID))); !errors.Is(err, application.ErrProfileNotFound) {
+		t.Fatalf("missing profile error = %v, want ErrProfileNotFound", err)
+	}
+	if _, err := repo.GetPrivateProfileByAccountID(ctx, domain.AccountID("not-a-uuid")); !errors.Is(err, application.ErrProfileNotFound) {
+		t.Fatalf("malformed id error = %v, want ErrProfileNotFound", err)
+	}
+}
+
 func TestRepository_UpdateProfileLocale(t *testing.T) {
 	ctx := context.Background()
 	testDB := dbtest.New(t)

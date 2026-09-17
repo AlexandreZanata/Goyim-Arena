@@ -5,12 +5,14 @@
 package contract_test
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/profiles/adapters/http"
 )
 
 // repoRoot locates the checkout root from this package's directory.
@@ -72,10 +74,73 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		t.Fatal("contract declares no routes; the comparison would pass vacuously")
 	}
 	for _, route := range contractRoutes {
-		if route.Path == "/health/live" || route.Path == "/health/ready" || strings.HasPrefix(route.Path, "/api/v1/auth/") {
+		if route.Path == "/health/live" || route.Path == "/health/ready" {
+			continue
+		}
+		if strings.HasPrefix(route.Path, "/api/v1/auth/") {
+			continue
+		}
+		if strings.HasPrefix(route.Path, "/api/v1/profiles/") || route.Path == "/api/v1/me/profile" {
 			continue
 		}
 		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
+	}
+}
+
+// TestContractProfileSchemasExposeOnlyAllowedFields is the contract-level
+// leak proof of P05-T04: the public and private profile documents declare
+// exactly the allowed properties, and no schema declares forbidden markers
+// (email, credentials, payment identifiers, antifraud flags or
+// administrative notes).
+func TestContractProfileSchemasExposeOnlyAllowedFields(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"PublicProfile":  {"username", "interface_locale", "created_at"},
+		"PrivateProfile": {"username", "interface_locale", "created_at", "updated_at"},
+	}
+	forbiddenMarkers := []string{
+		"email", "account_id", "password", "credential", "hash",
+		"stripe", "customer", "billing", "payment",
+		"fraud", "admin", "notes", "ip", "user_agent",
+	}
+
+	for name, expectedProperties := range expected {
+		raw, ok := document.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", name)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if len(schema.Properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(schema.Properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := schema.Properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range schema.Properties {
+			for _, marker := range forbiddenMarkers {
+				if strings.Contains(strings.ToLower(property), marker) {
+					t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+				}
+			}
+		}
+	}
+
+	privatePath, ok := document.Paths["/api/v1/me/profile"]
+	if !ok {
+		t.Fatal("contract is missing /api/v1/me/profile")
+	}
+	if !strings.Contains(string(privatePath["get"]), `"SessionCookie"`) {
+		t.Error("private profile operation must require the SessionCookie scheme")
 	}
 }
 

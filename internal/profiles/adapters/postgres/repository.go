@@ -31,8 +31,9 @@ type Repository struct {
 }
 
 var (
-	_ application.ProfileRepository  = (*Repository)(nil)
-	_ application.AccountEligibility = (*Repository)(nil)
+	_ application.ProfileRepository      = (*Repository)(nil)
+	_ application.ProfileQueryRepository = (*Repository)(nil)
+	_ application.AccountEligibility     = (*Repository)(nil)
 )
 
 // NewRepository creates a PostgreSQL repository adapter for profiles.
@@ -191,6 +192,47 @@ func (r *Repository) UpdateProfileLocale(ctx context.Context, accountID domain.A
 		return nil, fmt.Errorf("update profile locale: %w", err)
 	}
 	return mapProfileRow(row)
+}
+
+// GetPublicProfileByUsername returns the explicit public projection of the
+// profile that owns the normalized username. It deliberately selects only
+// username, interface locale and creation instant: no email, no account
+// identifier, no payment, antifraud or moderation data.
+func (r *Repository) GetPublicProfileByUsername(ctx context.Context, normalizedUsername string) (*application.PublicProfile, error) {
+	row, err := r.queries.GetPublicProfileByUsername(ctx, normalizedUsername)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrProfileNotFound
+		}
+		return nil, fmt.Errorf("get public profile: %w", err)
+	}
+	return &application.PublicProfile{
+		Username:        row.Username,
+		InterfaceLocale: row.InterfaceLocale,
+		CreatedAt:       row.CreatedAt.Time.UTC(),
+	}, nil
+}
+
+// GetPrivateProfileByAccountID returns the owner projection of a profile.
+func (r *Repository) GetPrivateProfileByAccountID(ctx context.Context, accountID domain.AccountID) (*application.PrivateProfile, error) {
+	pgUUID, err := pgUUIDFromAccountID(accountID)
+	if err != nil {
+		return nil, application.ErrProfileNotFound
+	}
+
+	row, err := r.queries.GetProfileByAccountID(ctx, pgUUID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrProfileNotFound
+		}
+		return nil, fmt.Errorf("get private profile: %w", err)
+	}
+	return &application.PrivateProfile{
+		Username:        row.Username,
+		InterfaceLocale: row.InterfaceLocale,
+		CreatedAt:       row.CreatedAt.Time.UTC(),
+		UpdatedAt:       row.UpdatedAt.Time.UTC(),
+	}, nil
 }
 
 // EnsureEligible asserts the account exists, is active and has a verified

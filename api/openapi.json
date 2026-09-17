@@ -250,6 +250,55 @@
           "429": { "$ref": "#/components/responses/RateLimited" }
         }
       }
+    },
+    "/api/v1/me/profile": {
+      "get": {
+        "operationId": "getPrivateProfile",
+        "summary": "Owner profile",
+        "description": "Returns the profile projection of the authenticated owner. Private responses always carry Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["profiles"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "Private profile of the authenticated account.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PrivateProfile" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/profiles/{username}": {
+      "get": {
+        "operationId": "getPublicProfile",
+        "summary": "Public profile",
+        "description": "Returns the public projection of a profile: username, interface locale and creation instant. Email, internal identifiers, payment data, antifraud flags and administrative notes are never part of this document.",
+        "tags": ["profiles"],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "description": "Public username, matched case-insensitively.",
+            "schema": { "type": "string", "minLength": 3, "maxLength": 30 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public profile.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/PublicProfile" }
+              }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
     }
   },
   "components": {
@@ -305,6 +354,27 @@
         "required": ["status"],
         "properties": {
           "status": { "type": "string" }
+        }
+      },
+      "PublicProfile": {
+        "type": "object",
+        "description": "Public projection of a profile. Never contains email, internal identifiers, payment data, antifraud flags or administrative notes.",
+        "required": ["username", "interface_locale", "created_at"],
+        "properties": {
+          "username": { "type": "string", "minLength": 3, "maxLength": 30 },
+          "interface_locale": { "type": "string", "enum": ["pt-BR", "en-US"] },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "PrivateProfile": {
+        "type": "object",
+        "description": "Owner projection of a profile. Adds only the mutation instant to the public fields; account, payment, antifraud and moderation data stay in their owning modules.",
+        "required": ["username", "interface_locale", "created_at", "updated_at"],
+        "properties": {
+          "username": { "type": "string", "minLength": 3, "maxLength": 30 },
+          "interface_locale": { "type": "string", "enum": ["pt-BR", "en-US"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
         }
       },
       "HealthStatus": {
@@ -466,6 +536,7 @@
   "security": [],
   "tags": [
     { "name": "health", "description": "Process probes consumed by the supervisor." },
-    { "name": "auth", "description": "Authentication, registration, session management and recovery." }
+    { "name": "auth", "description": "Authentication, registration, session management and recovery." },
+    { "name": "profiles", "description": "Public and private profile projections." }
   ]
 }
