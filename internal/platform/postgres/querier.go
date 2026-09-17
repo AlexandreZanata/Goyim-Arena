@@ -26,6 +26,12 @@ type Querier interface {
 	ConsumeArenaPassLot(ctx context.Context, id pgtype.UUID) (int64, error)
 	// Identity and authentication queries for the PostgreSQL platform adapter.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (AppAccount, error)
+	// Arena draft queries for the PostgreSQL platform adapter.
+	//
+	// Drafts are private: every query is scoped by the creator and public
+	// projections never select a draft. Creating or editing a draft never
+	// touches the Arena Pass ledger (P08-T03).
+	CreateArena(ctx context.Context, arg CreateArenaParams) (AppArena, error)
 	CreateArenaPassConsumption(ctx context.Context, arg CreateArenaPassConsumptionParams) (AppArenaPassConsumption, error)
 	// Arena Pass entitlement queries for the PostgreSQL platform adapter.
 	//
@@ -68,6 +74,7 @@ type Querier interface {
 	// CHECK (balance_free >= 0) guards the invariant even here.
 	CreditFreeBalance(ctx context.Context, arg CreditFreeBalanceParams) (AppWalletAccount, error)
 	CreditPurchasedBalance(ctx context.Context, arg CreditPurchasedBalanceParams) (AppWalletAccount, error)
+	DeleteArenaDraft(ctx context.Context, arg DeleteArenaDraftParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	// EnsureWalletAccount materializes the balance projection row for an
 	// account; a pre-existing row is left untouched, including its balances.
@@ -79,9 +86,13 @@ type Querier interface {
 	GetActiveEmailVerificationToken(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
 	GetActivePasswordResetToken(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetActiveSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
+	GetArenaForCreator(ctx context.Context, arg GetArenaForCreatorParams) (AppArena, error)
 	GetArenaPassConsumptionByArena(ctx context.Context, arenaID pgtype.UUID) (AppArenaPassConsumption, error)
 	GetArenaPassLot(ctx context.Context, id pgtype.UUID) (AppArenaPassLot, error)
 	GetArenaPassLotByGrant(ctx context.Context, arg GetArenaPassLotByGrantParams) (AppArenaPassLot, error)
+	// GetArenaStateForCreator diagnoses why a scoped draft write affected no
+	// row: missing or foreign arena, non-draft status, or stale version.
+	GetArenaStateForCreator(ctx context.Context, arg GetArenaStateForCreatorParams) (GetArenaStateForCreatorRow, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
 	// app.profiles with the explicit opt-ins. A missing preferences row resolves
 	// to the conservative default (marketing opt-in false), never to an implicit
@@ -119,6 +130,7 @@ type Querier interface {
 	// needs for negative authorization: the account exists, is active and has a
 	// verified email. It never reads email, credentials or payment identifiers.
 	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
+	ListArenaDraftsForCreator(ctx context.Context, creatorID pgtype.UUID) ([]AppArena, error)
 	ListArenaPassConsumptionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListArenaPassConsumptionsByAccountRow, error)
 	// ListArenaPassConsumptionsPage returns one keyset-paginated page of the
 	// owner's consumption history, newest first. NULL after_* parameters select
@@ -151,6 +163,9 @@ type Querier interface {
 	SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAccount, error)
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateAccountStatus(ctx context.Context, arg UpdateAccountStatusParams) (AppAccount, error)
+	// UpdateArenaDraft replaces the mutable draft fields under an optimistic
+	// version check: a stale expected version affects no row (P08-T03).
+	UpdateArenaDraft(ctx context.Context, arg UpdateArenaDraftParams) (AppArena, error)
 	UpdatePasswordCredential(ctx context.Context, arg UpdatePasswordCredentialParams) error
 	UpdateProfileLocale(ctx context.Context, arg UpdateProfileLocaleParams) (AppProfile, error)
 	UpdateProfileTimezone(ctx context.Context, arg UpdateProfileTimezoneParams) (AppProfile, error)
