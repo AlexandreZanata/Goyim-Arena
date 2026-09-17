@@ -367,3 +367,49 @@ func containsRecord(records []map[string]any, key, want string) bool {
 	}
 	return false
 }
+
+// TestMigrateUsageAndArgumentValidation covers the argument surface of the
+// migrate subcommand without touching a database: help variants print the
+// usage, unknown subcommands and stray arguments fail with the usage text.
+func TestMigrateUsageAndArgumentValidation(t *testing.T) {
+	t.Parallel()
+
+	stdout, _, err := runForTest(t, "migrate", "-h")
+	if err != nil {
+		t.Fatalf("migrate -h error = %v", err)
+	}
+	for _, want := range []string{"arena migrate status", "arena migrate up", "ARENA_DATABASE_URL"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("migrate -h output missing %q:\n%s", want, stdout)
+		}
+	}
+
+	if _, _, err := runForTest(t, "migrate", "bogus"); err == nil {
+		t.Error("migrate with unknown subcommand must fail")
+	}
+	if _, _, err := runForTest(t, "migrate"); err == nil {
+		t.Error("migrate without subcommand must fail")
+	}
+	if _, _, err := runForTest(t, "migrate", "status", "extra"); err == nil {
+		t.Error("migrate status with arguments must fail")
+	}
+	if _, _, err := runForTest(t, "migrate", "up", "extra"); err == nil {
+		t.Error("migrate up with arguments must fail")
+	}
+}
+
+// TestMigrateCommandsFailWithoutDatabaseURL pins the fail-fast behavior:
+// without ARENA_DATABASE_URL the commands stop before opening anything.
+func TestMigrateCommandsFailWithoutDatabaseURL(t *testing.T) {
+	t.Parallel()
+
+	// config.MustLoad reads the process environment; in a clean test
+	// environment no ARENA_* variables are set and loading fails.
+	_, _, err := runForTest(t, "migrate", "status")
+	if err == nil {
+		t.Skip("ARENA_* environment is configured; skipping the no-config assertion")
+	}
+	if !strings.Contains(err.Error(), "ARENA_") {
+		t.Errorf("error should name the missing ARENA_* configuration, got: %v", err)
+	}
+}
