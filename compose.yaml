@@ -1,0 +1,45 @@
+# Development-only Compose for Goyim Arena (P03-T01).
+#
+# Isolation policy:
+#   - image pinned by patch version (never :latest, never floating);
+#   - named volume so `docker compose down` keeps data and `down -v` is the
+#     explicit wipe;
+#   - the port is published on the loopback interface only; a non-default
+#     host port (54329) avoids colliding with other local PostgreSQL
+#     instances that commonly own 5432;
+#   - credentials below are for local development ONLY: they are not
+#     reusable in staging/production, which provision their own secrets.
+#   - no external network: the default compose network is enough; the app
+#     connects from the host (dev binary) or from a container attached to
+#     the same default network — no host network, no published data port.
+#
+# Production runs a managed PostgreSQL; this file is never used there.
+
+services:
+  db:
+    image: postgres:18.4
+    container_name: goyim-arena-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: arena
+      POSTGRES_PASSWORD: arena-local-dev
+      POSTGRES_DB: arena
+      # Deterministic collation/ctype for index correctness in tests.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      # Speed up throwaway CI/dev initializations; harmless locally.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      # postgres:18+ layout: a single mount at /var/lib/postgresql (data
+      # goes into a subdirectory, keeping pg_upgrade --link usable).
+      - goyim-arena-db-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arena -d arena"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+volumes:
+  goyim-arena-db-data:
