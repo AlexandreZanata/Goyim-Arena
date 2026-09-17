@@ -108,3 +108,36 @@ type AppUsernameHistory struct {
 	UsernameNormalized string
 	ChangedAt          pgtype.Timestamptz
 }
+
+// Cached INK balance projection per account and bucket; the append-only transaction ledger is the source of truth
+type AppWalletAccount struct {
+	AccountID pgtype.UUID
+	// FREE_INK balance (plan franchise, consumed before purchased INK); never negative
+	BalanceFree int64
+	// PURCHASED_INK balance (bought INK, consumed after the franchise); never negative
+	BalancePurchased int64
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
+// Append-only idempotency registry of logical INK operations (credit, debit, expiry)
+type AppWalletOperation struct {
+	ID            pgtype.UUID
+	AccountID     pgtype.UUID
+	OperationType string
+	// Globally unique retry key: the same key is accepted exactly once
+	IdempotencyKey string
+	// Stable identifier of the cause (argument, Stripe event, moderation case, billing period)
+	Reference string
+	CreatedAt pgtype.Timestamptz
+}
+
+// Append-only INK ledger: signed bucket deltas (positive credit, negative debit); never updated or deleted at runtime
+type AppWalletTransaction struct {
+	ID          pgtype.UUID
+	OperationID pgtype.UUID
+	Bucket      string
+	// Signed INK delta in bigint: positive credits the bucket, negative debits it; zero is forbidden
+	Amount    int64
+	CreatedAt pgtype.Timestamptz
+}

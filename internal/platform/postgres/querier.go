@@ -27,6 +27,15 @@ type Querier interface {
 	CreateProfile(ctx context.Context, arg CreateProfileParams) (AppProfile, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (AppSession, error)
 	CreateUsernameHistoryEntry(ctx context.Context, arg CreateUsernameHistoryEntryParams) error
+	// Wallet ledger queries for the PostgreSQL platform adapter.
+	//
+	// The ledger is append-only: these queries only create wallet rows, insert
+	// operations/transactions and read them back. No query updates or deletes a
+	// transaction, and the runtime grants enforce the same boundary in the
+	// database (THR-WAL-02).
+	CreateWalletAccount(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
+	CreateWalletOperation(ctx context.Context, arg CreateWalletOperationParams) (AppWalletOperation, error)
+	CreateWalletTransaction(ctx context.Context, arg CreateWalletTransactionParams) (AppWalletTransaction, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	GetAccountByEmail(ctx context.Context, lower string) (AppAccount, error)
 	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
@@ -55,6 +64,8 @@ type Querier interface {
 	// administrative flags, and deliberately omits account_id.
 	GetPublicProfileByUsername(ctx context.Context, usernameNormalized string) (GetPublicProfileByUsernameRow, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
+	GetWalletAccount(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
+	GetWalletOperationByIdempotencyKey(ctx context.Context, idempotencyKey string) (AppWalletOperation, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
 	InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error
 	// IsAccountEligibleForProfile projects the single bit the profiles module
@@ -63,6 +74,7 @@ type Querier interface {
 	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
+	ListWalletTransactionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListWalletTransactionsByAccountRow, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.
