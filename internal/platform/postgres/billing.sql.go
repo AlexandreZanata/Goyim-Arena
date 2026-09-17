@@ -137,6 +137,24 @@ func (q *Queries) CreateArenaPassLotIfAbsent(ctx context.Context, arg CreateAren
 	return i, err
 }
 
+const getArenaPassConsumptionByArena = `-- name: GetArenaPassConsumptionByArena :one
+SELECT id, lot_id, arena_id, consumed_at
+FROM app.arena_pass_consumptions
+WHERE arena_id = $1
+`
+
+func (q *Queries) GetArenaPassConsumptionByArena(ctx context.Context, arenaID pgtype.UUID) (AppArenaPassConsumption, error) {
+	row := q.db.QueryRow(ctx, getArenaPassConsumptionByArena, arenaID)
+	var i AppArenaPassConsumption
+	err := row.Scan(
+		&i.ID,
+		&i.LotID,
+		&i.ArenaID,
+		&i.ConsumedAt,
+	)
+	return i, err
+}
+
 const getArenaPassLot = `-- name: GetArenaPassLot :one
 SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
 FROM app.arena_pass_lots
@@ -240,6 +258,53 @@ ORDER BY expires_at NULLS LAST, created_at
 
 func (q *Queries) ListArenaPassLotsByAccount(ctx context.Context, accountID pgtype.UUID) ([]AppArenaPassLot, error) {
 	rows, err := q.db.Query(ctx, listArenaPassLotsByAccount, accountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppArenaPassLot{}
+	for rows.Next() {
+		var i AppArenaPassLot
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.Origin,
+			&i.Quantity,
+			&i.RemainingQuantity,
+			&i.ExpiresAt,
+			&i.Reference,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAvailablePassLotsForUpdate = `-- name: ListAvailablePassLotsForUpdate :many
+SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
+FROM app.arena_pass_lots
+WHERE account_id = $1
+  AND remaining_quantity > 0
+  AND (expires_at IS NULL OR expires_at > $2::timestamptz)
+ORDER BY expires_at ASC NULLS LAST, created_at ASC
+FOR UPDATE
+`
+
+type ListAvailablePassLotsForUpdateParams struct {
+	AccountID pgtype.UUID
+	At        pgtype.Timestamptz
+}
+
+// ListAvailablePassLotsForUpdate locks the consumable lots of an account in
+// consumption order: nearest expiration first, then lots that never expire.
+// Expired lots are never candidates, so they can never be consumed (P07-T03).
+func (q *Queries) ListAvailablePassLotsForUpdate(ctx context.Context, arg ListAvailablePassLotsForUpdateParams) ([]AppArenaPassLot, error) {
+	rows, err := q.db.Query(ctx, listAvailablePassLotsForUpdate, arg.AccountID, arg.At)
 	if err != nil {
 		return nil, err
 	}

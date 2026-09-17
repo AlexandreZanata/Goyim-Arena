@@ -42,6 +42,23 @@ UPDATE app.arena_pass_lots
 SET remaining_quantity = remaining_quantity - 1
 WHERE id = $1 AND remaining_quantity > 0;
 
+-- ListAvailablePassLotsForUpdate locks the consumable lots of an account in
+-- consumption order: nearest expiration first, then lots that never expire.
+-- Expired lots are never candidates, so they can never be consumed (P07-T03).
+-- name: ListAvailablePassLotsForUpdate :many
+SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
+FROM app.arena_pass_lots
+WHERE account_id = $1
+  AND remaining_quantity > 0
+  AND (expires_at IS NULL OR expires_at > sqlc.arg(at)::timestamptz)
+ORDER BY expires_at ASC NULLS LAST, created_at ASC
+FOR UPDATE;
+
+-- name: GetArenaPassConsumptionByArena :one
+SELECT id, lot_id, arena_id, consumed_at
+FROM app.arena_pass_consumptions
+WHERE arena_id = $1;
+
 -- name: CreateArenaPassConsumption :one
 INSERT INTO app.arena_pass_consumptions (lot_id, arena_id)
 VALUES ($1, $2)

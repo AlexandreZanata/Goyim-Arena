@@ -317,3 +317,419 @@ type fixedClock struct {
 }
 
 func (c fixedClock) Now() time.Time { return c.now }
+
+func mustArenaID(t *testing.T, index int) domain.ArenaID {
+	t.Helper()
+	arenaID, err := domain.ParseArenaID(fmt.Sprintf("00000000-0000-7000-8000-%012d", index))
+	if err != nil {
+		t.Fatalf("ParseArenaID(%d): %v", index, err)
+	}
+	return arenaID
+}
+
+func mustConsumeRequest(t *testing.T, accountID domain.AccountID, arena domain.ArenaID, at time.Time) application.ConsumePassRequest {
+	t.Helper()
+	return application.ConsumePassRequest{AccountID: accountID, ArenaID: arena, ConsumedAt: at}
+}
+
+func countPassConsumptions(t *testing.T, ctx context.Context, pool *pgxpool.Pool, accountID pgtype.UUID) int {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM app.arena_pass_consumptions c
+		JOIN app.arena_pass_lots l ON l.id = c.lot_id
+		WHERE l.account_id = $1`, accountID).Scan(&count); err != nil {
+		t.Fatalf("count pass consumptions: %v", err)
+	}
+	return count
+}
+
+func mustUUID(t *testing.T, raw string) pgtype.UUID {
+	t.Helper()
+	var id pgtype.UUID
+	if err := id.Scan(raw); err != nil {
+		t.Fatalf("scan uuid %q: %v", raw, err)
+	}
+	return id
+}
+
+func mustLotRemaining(t *testing.T, ctx context.Context, q *platformpg.Queries, rawLotID string) int32 {
+	t.Helper()
+	lot, err := q.GetArenaPassLot(ctx, mustUUID(t, rawLotID))
+	if err != nil {
+		t.Fatalf("reload pass lot: %v", err)
+	}
+	return lot.RemainingQuantity
+}
+
+func TestRepository_ConsumeArenaPassSelectsNearestExpiration(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustBillingAccount(t, ctx, q, "consume-order@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	purchase, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginPurchase, 3, "stripe:evt_order_purchase", nil))
+	if err != nil {
+		t.Fatalf("purchase grant: %v", err)
+	}
+	laterEnd := now.Add(2 * time.Hour)
+	later, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 1, "member:2026-09", &laterEnd))
+	if err != nil {
+		t.Fatalf("later grant: %v", err)
+	}
+	soonerEnd := now.Add(time.Hour)
+	sooner, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 1, "member:2026-08", &soonerEnd))
+	if err != nil {
+		t.Fatalf("sooner grant: %v", err)
+	}
+
+	first, err := repo.ConsumeArenaPass(ctx, mustConsumeRequest(t, accountID, mustArenaID(t, 1), now))
+	if err != nil {
+		t.Fatalf("first consumption error = %v", err)
+	}
+	if first.Replayed || first.Lot.ID() != sooner.Lot.ID() {
+		t.Fatalf("first consumption used %q (replayed=%v), want the nearest-expiring lot %q", first.Lot.ID(), first.Replayed, sooner.Lot.ID())
+	}
+
+	second, err := repo.ConsumeArenaPass(ctx, mustConsumeRequest(t, accountID, mustArenaID(t, 2), now))
+	if err != nil {
+		t.Fatalf("second consumption error = %v", err)
+	}
+	if second.Lot.ID() != later.Lot.ID() {
+		t.Fatalf("second consumption used %q, want %q", second.Lot.ID(), later.Lot.ID())
+	}
+
+	third, err := repo.ConsumeArenaPass(ctx, mustConsumeRequest(t, accountID, mustArenaID(t, 3), now))
+	if err != nil {
+		t.Fatalf("third consumption error = %v", err)
+	}
+	if third.Lot.ID() != purchase.Lot.ID() {
+		t.Fatalf("third consumption used %q, want the non-expiring lot %q", third.Lot.ID(), purchase.Lot.ID())
+	}
+	if third.Remaining != 2 {
+		t.Fatalf("remaining after third consumption = %d, want 2", third.Remaining)
+	}
+
+	if got := mustLotRemaining(t, ctx, q, sooner.Lot.ID().String()); got != 0 {
+		t.Errorf("sooner lot remaining = %d, want 0", got)
+	}
+	if got := countPassConsumptions(t, ctx, pool, acc.ID); got != 3 {
+		t.Errorf("consumptions = %d, want 3", got)
+	}
+}
+
+func TestRepository_ConsumeArenaPassExpiredLotNeverUsed(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustBillingAccount(t, ctx, q, "consume-expired@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	expiredEnd := now.Add(-time.Hour)
+	expired, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 1, "member:expired", &expiredEnd))
+	if err != nil {
+		t.Fatalf("expired grant: %v", err)
+	}
+	exactlyNow := now
+	boundary, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 1, "member:boundary", &exactlyNow))
+	if err != nil {
+		t.Fatalf("boundary grant: %v", err)
+	}
+
+	if _, err := repo.ConsumeArenaPass(ctx, mustConsumeRequest(t, accountID, mustArenaID(t, 10), now)); !errors.Is(err, domain.ErrNoPassAvailable) {
+		t.Fatalf("expired-only consumption error = %v, want ErrNoPassAvailable", err)
+	}
+	if got := mustLotRemaining(t, ctx, q, expired.Lot.ID().String()); got != 1 {
+		t.Errorf("expired lot remaining = %d, want 1 untouched", got)
+	}
+	if got := mustLotRemaining(t, ctx, q, boundary.Lot.ID().String()); got != 1 {
+		t.Errorf("boundary lot remaining = %d, want 1 untouched", got)
+	}
+	if got := countPassConsumptions(t, ctx, pool, acc.ID); got != 0 {
+		t.Fatalf("consumptions = %d, want 0", got)
+	}
+
+	// A valid lot becomes the only candidate.
+	valid, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginPurchase, 1, "stripe:evt_valid", nil))
+	if err != nil {
+		t.Fatalf("valid grant: %v", err)
+	}
+	result, err := repo.ConsumeArenaPass(ctx, mustConsumeRequest(t, accountID, mustArenaID(t, 11), now))
+	if err != nil {
+		t.Fatalf("valid consumption error = %v", err)
+	}
+	if result.Lot.ID() != valid.Lot.ID() {
+		t.Fatalf("valid consumption used %q, want %q", result.Lot.ID(), valid.Lot.ID())
+	}
+	if got := mustLotRemaining(t, ctx, q, expired.Lot.ID().String()); got != 1 {
+		t.Errorf("expired lot was consumed: remaining = %d, want 1", got)
+	}
+}
+
+func TestRepository_ConsumeArenaPassIsIdempotentPerArena(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustBillingAccount(t, ctx, q, "consume-replay@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	lot, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginPurchase, 2, "stripe:evt_replay_lot", nil))
+	if err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+
+	request := mustConsumeRequest(t, accountID, mustArenaID(t, 20), now)
+	first, err := repo.ConsumeArenaPass(ctx, request)
+	if err != nil {
+		t.Fatalf("first consumption error = %v", err)
+	}
+	if first.Replayed || first.Remaining != 1 {
+		t.Fatalf("first consumption = %+v, want fresh with 1 remaining", first)
+	}
+
+	second, err := repo.ConsumeArenaPass(ctx, request)
+	if err != nil {
+		t.Fatalf("second consumption error = %v", err)
+	}
+	if !second.Replayed || second.Lot.ID() != lot.Lot.ID() {
+		t.Fatalf("second consumption = %+v, want a replay of the original lot", second)
+	}
+
+	if got := mustLotRemaining(t, ctx, q, lot.Lot.ID().String()); got != 1 {
+		t.Fatalf("lot remaining = %d, want 1 (consumed exactly once)", got)
+	}
+	if got := countPassConsumptions(t, ctx, pool, acc.ID); got != 1 {
+		t.Fatalf("consumptions = %d, want 1", got)
+	}
+}
+
+// TestRepository_ConsumeArenaPassConcurrentDifferentArenas is the P07-T03
+// acceptance probe: twenty publications compete for a single pass and
+// exactly one wins.
+func TestRepository_ConsumeArenaPassConcurrentDifferentArenas(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t, dbtest.WithPoolLimits(20, 1))
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustBillingAccount(t, ctx, q, "consume-race@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	lot, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginPurchase, 1, "stripe:evt_race", nil))
+	if err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+
+	const attempts = 20
+	requests := make([]application.ConsumePassRequest, attempts)
+	for i := range requests {
+		requests[i] = mustConsumeRequest(t, accountID, mustArenaID(t, 100+i), now)
+	}
+
+	var (
+		successes atomic.Int32
+		noPass    atomic.Int32
+		wg        sync.WaitGroup
+	)
+	unexpected := make([]error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			_, err := repo.ConsumeArenaPass(ctx, requests[index])
+			switch {
+			case err == nil:
+				successes.Add(1)
+			case errors.Is(err, domain.ErrNoPassAvailable):
+				noPass.Add(1)
+			default:
+				unexpected[index] = err
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range unexpected {
+		if err != nil {
+			t.Fatalf("attempt %d unexpected error = %v", i, err)
+		}
+	}
+	if successes.Load() != 1 {
+		t.Fatalf("successes = %d, want exactly 1", successes.Load())
+	}
+	if noPass.Load() != attempts-1 {
+		t.Fatalf("no-pass rejections = %d, want %d", noPass.Load(), attempts-1)
+	}
+
+	if got := mustLotRemaining(t, ctx, q, lot.Lot.ID().String()); got != 0 {
+		t.Fatalf("lot remaining = %d, want 0", got)
+	}
+	if got := countPassConsumptions(t, ctx, pool, acc.ID); got != 1 {
+		t.Fatalf("consumptions = %d, want exactly 1", got)
+	}
+}
+
+// TestRepository_ConsumeArenaPassConcurrentSameArena proves the Arena
+// uniqueness keeps concurrent publications of the same Arena idempotent:
+// one fresh consumption and replays for the rest, with no pass lost.
+func TestRepository_ConsumeArenaPassConcurrentSameArena(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t, dbtest.WithPoolLimits(4, 1))
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustBillingAccount(t, ctx, q, "consume-same-arena@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	firstLot, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginPurchase, 1, "stripe:evt_same_a", nil))
+	if err != nil {
+		t.Fatalf("first grant: %v", err)
+	}
+	secondLot, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginPurchase, 1, "stripe:evt_same_b", nil))
+	if err != nil {
+		t.Fatalf("second grant: %v", err)
+	}
+
+	request := mustConsumeRequest(t, accountID, mustArenaID(t, 200), now)
+
+	const attempts = 4
+	var (
+		fresh    atomic.Int32
+		replayed atomic.Int32
+		wg       sync.WaitGroup
+	)
+	unexpected := make([]error, attempts)
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			result, err := repo.ConsumeArenaPass(ctx, request)
+			if err != nil {
+				unexpected[index] = err
+				return
+			}
+			if result.Replayed {
+				replayed.Add(1)
+			} else {
+				fresh.Add(1)
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range unexpected {
+		if err != nil {
+			t.Fatalf("attempt %d error = %v", i, err)
+		}
+	}
+	if fresh.Load() != 1 || replayed.Load() != attempts-1 {
+		t.Fatalf("fresh=%d replayed=%d, want 1/%d", fresh.Load(), replayed.Load(), attempts-1)
+	}
+	if got := countPassConsumptions(t, ctx, pool, acc.ID); got != 1 {
+		t.Fatalf("consumptions = %d, want exactly 1", got)
+	}
+
+	remainingTotal := mustLotRemaining(t, ctx, q, firstLot.Lot.ID().String()) +
+		mustLotRemaining(t, ctx, q, secondLot.Lot.ID().String())
+	if remainingTotal != 1 {
+		t.Fatalf("remaining across lots = %d, want 1 (exactly one pass consumed)", remainingTotal)
+	}
+}
+
+func TestRepository_ConsumeArenaPassCrossAccountRefused(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	owner := mustBillingAccount(t, ctx, q, "consume-owner@arena.example.com")
+	intruder := mustBillingAccount(t, ctx, q, "consume-intruder@arena.example.com")
+	ownerID := domain.AccountID(uuidString(owner.ID))
+	intruderID := domain.AccountID(uuidString(intruder.ID))
+
+	if _, err := repo.GrantPassLot(ctx, mustGrantRequest(t, ownerID, domain.OriginPurchase, 1, "stripe:evt_owner", nil)); err != nil {
+		t.Fatalf("owner grant: %v", err)
+	}
+	intruderLot, err := repo.GrantPassLot(ctx, mustGrantRequest(t, intruderID, domain.OriginPurchase, 1, "stripe:evt_intruder", nil))
+	if err != nil {
+		t.Fatalf("intruder grant: %v", err)
+	}
+
+	arena := mustArenaID(t, 300)
+	if _, err := repo.ConsumeArenaPass(ctx, mustConsumeRequest(t, ownerID, arena, now)); err != nil {
+		t.Fatalf("owner consumption error = %v", err)
+	}
+	if _, err := repo.ConsumeArenaPass(ctx, mustConsumeRequest(t, intruderID, arena, now)); !errors.Is(err, application.ErrArenaAlreadyConsumed) {
+		t.Fatalf("cross-account error = %v, want ErrArenaAlreadyConsumed", err)
+	}
+
+	if got := mustLotRemaining(t, ctx, q, intruderLot.Lot.ID().String()); got != 1 {
+		t.Fatalf("intruder lot remaining = %d, want 1 untouched", got)
+	}
+	if got := countPassConsumptions(t, ctx, pool, intruder.ID); got != 0 {
+		t.Fatalf("intruder consumptions = %d, want 0", got)
+	}
+}
+
+func TestRepository_ConsumeArenaPassUseCaseEndToEnd(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustBillingAccount(t, ctx, q, "consume-use-case@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	periodEnd := now.Add(24 * time.Hour)
+	if _, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginMember, 1, "member:2026-09", &periodEnd)); err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+
+	useCase := application.NewConsumeArenaPassUseCase(repo, fixedClock{now: now})
+	command := application.ConsumeArenaPassCommand{AccountID: accountID.String(), ArenaID: mustArenaID(t, 400).String()}
+
+	first, err := useCase.Execute(ctx, command)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if first.Replayed || first.Remaining != 0 {
+		t.Fatalf("first consumption = %+v", first)
+	}
+
+	retry, err := useCase.Execute(ctx, command)
+	if err != nil {
+		t.Fatalf("retry Execute() error = %v", err)
+	}
+	if !retry.Replayed || retry.Lot.ID() != first.Lot.ID() {
+		t.Fatalf("retry = %+v, want the original consumption", retry)
+	}
+
+	if _, err := useCase.Execute(ctx, application.ConsumeArenaPassCommand{
+		AccountID: accountID.String(),
+		ArenaID:   mustArenaID(t, 401).String(),
+	}); !errors.Is(err, domain.ErrNoPassAvailable) {
+		t.Fatalf("exhausted account error = %v, want ErrNoPassAvailable", err)
+	}
+}

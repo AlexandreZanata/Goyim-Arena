@@ -79,6 +79,7 @@ type Querier interface {
 	GetActiveEmailVerificationToken(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
 	GetActivePasswordResetToken(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetActiveSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
+	GetArenaPassConsumptionByArena(ctx context.Context, arenaID pgtype.UUID) (AppArenaPassConsumption, error)
 	GetArenaPassLot(ctx context.Context, id pgtype.UUID) (AppArenaPassLot, error)
 	GetArenaPassLotByGrant(ctx context.Context, arg GetArenaPassLotByGrantParams) (AppArenaPassLot, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
@@ -120,6 +121,10 @@ type Querier interface {
 	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
 	ListArenaPassConsumptionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListArenaPassConsumptionsByAccountRow, error)
 	ListArenaPassLotsByAccount(ctx context.Context, accountID pgtype.UUID) ([]AppArenaPassLot, error)
+	// ListAvailablePassLotsForUpdate locks the consumable lots of an account in
+	// consumption order: nearest expiration first, then lots that never expire.
+	// Expired lots are never candidates, so they can never be consumed (P07-T03).
+	ListAvailablePassLotsForUpdate(ctx context.Context, arg ListAvailablePassLotsForUpdateParams) ([]AppArenaPassLot, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	// ListWalletStatementPage returns one keyset-paginated page of the account

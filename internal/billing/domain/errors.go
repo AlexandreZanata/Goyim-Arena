@@ -16,7 +16,9 @@ const (
 	CodeReferenceTooLong    ErrorCode = "BILLING_REFERENCE_TOO_LONG"
 	CodeExpirationRequired  ErrorCode = "BILLING_EXPIRATION_REQUIRED"
 	CodeExpirationForbidden ErrorCode = "BILLING_EXPIRATION_FORBIDDEN"
-	CodeExpirationInThePast ErrorCode = "BILLING_EXPIRATION_IN_THE_PAST"
+	CodeEmptyArenaID        ErrorCode = "BILLING_EMPTY_ARENA_ID"
+	CodeInvalidArenaID      ErrorCode = "BILLING_INVALID_ARENA_ID"
+	CodeNoPassAvailable     ErrorCode = "BILLING_NO_PASS_AVAILABLE"
 )
 
 // DomainError represents an invariant or rule failure in the billing domain.
@@ -48,4 +50,7 @@ var (
 	ErrReferenceTooLong    = DomainError{Code: CodeReferenceTooLong, Message: "grant reference exceeds the maximum allowed length"}
 	ErrExpirationRequired  = DomainError{Code: CodeExpirationRequired, Message: "this pass origin requires an expiration"}
 	ErrExpirationForbidden = DomainError{Code: CodeExpirationForbidden, Message: "this pass origin does not expire"}
+	ErrEmptyArenaID        = DomainError{Code: CodeEmptyArenaID, Message: "arena identifier cannot be empty"}
+	ErrInvalidArenaID      = DomainError{Code: CodeInvalidArenaID, Message: "arena identifier contains unsupported characters"}
+	ErrNoPassAvailable     = DomainError{Code: CodeNoPassAvailable, Message: "no valid arena pass is available"}
 )
