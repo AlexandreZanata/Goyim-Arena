@@ -896,3 +896,76 @@ func TestRepository_ConsumeArenaPassUseCaseEndToEnd(t *testing.T) {
 		t.Fatalf("exhausted account error = %v, want ErrNoPassAvailable", err)
 	}
 }
+
+// TestRepository_ConsumeArenaPassJoinsCallerTransaction is the P07-T05
+// integration probe: the consumption joins the shared transaction, so a
+// failed publication rolls the consumed pass back and a committed
+// publication persists it.
+func TestRepository_ConsumeArenaPassJoinsCallerTransaction(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := postgres.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	now := time.Now().UTC()
+	acc := mustBillingAccount(t, ctx, q, "shared-tx@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+
+	lot, err := repo.GrantPassLot(ctx, mustGrantRequest(t, accountID, domain.OriginPurchase, 1, "stripe:evt_shared_tx", nil))
+	if err != nil {
+		t.Fatalf("grant: %v", err)
+	}
+	arena := mustArenaID(t, 600)
+	request := mustConsumeRequest(t, accountID, arena, now)
+
+	manager := platformpg.NewTxManager(pool)
+	publicationErr := errors.New("arena publication failed")
+
+	// Rollback: the pass is consumed inside the shared transaction and the
+	// publication fails afterwards; nothing may persist.
+	err = manager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		if _, err := repo.ConsumeArenaPass(txCtx, request); err != nil {
+			return err
+		}
+		return publicationErr
+	})
+	if !errors.Is(err, publicationErr) {
+		t.Fatalf("WithinTransaction(rollback) error = %v, want the publication failure", err)
+	}
+	if got := mustLotRemaining(t, ctx, q, lot.Lot.ID().String()); got != 1 {
+		t.Fatalf("lot remaining after rollback = %d, want 1 untouched", got)
+	}
+	if got := countPassConsumptions(t, ctx, pool, acc.ID); got != 0 {
+		t.Fatalf("consumptions after rollback = %d, want 0", got)
+	}
+
+	// Commit: the same consumption inside a successful publication persists.
+	if err := manager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		_, err := repo.ConsumeArenaPass(txCtx, request)
+		return err
+	}); err != nil {
+		t.Fatalf("WithinTransaction(commit) error = %v", err)
+	}
+	if got := mustLotRemaining(t, ctx, q, lot.Lot.ID().String()); got != 0 {
+		t.Fatalf("lot remaining after commit = %d, want 0", got)
+	}
+	if got := countPassConsumptions(t, ctx, pool, acc.ID); got != 1 {
+		t.Fatalf("consumptions after commit = %d, want 1", got)
+	}
+
+	// A replay resolves the original consumption even inside a caller
+	// transaction.
+	if err := manager.WithinTransaction(ctx, func(txCtx context.Context) error {
+		result, err := repo.ConsumeArenaPass(txCtx, request)
+		if err != nil {
+			return err
+		}
+		if !result.Replayed {
+			return errors.New("expected a replayed consumption")
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("WithinTransaction(replay) error = %v", err)
+	}
+}

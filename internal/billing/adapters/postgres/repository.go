@@ -94,13 +94,17 @@ func (r *Repository) GrantPassLot(ctx context.Context, request application.Grant
 // expiration first, then lots that never expire; expired lots are never
 // candidates and the same Arena resolves to its original consumption.
 func (r *Repository) ConsumeArenaPass(ctx context.Context, request application.ConsumePassRequest) (*application.ConsumePassResult, error) {
-	pgUUID, err := pgUUIDFromAccountID(request.AccountID)
-	if err != nil {
-		return nil, fmt.Errorf("consume arena pass: %w", err)
-	}
-	arenaUUID, err := pgUUIDFromArenaID(request.ArenaID)
-	if err != nil {
-		return nil, fmt.Errorf("consume arena pass: %w", err)
+	// Shared transaction (P07-T05): when the caller carries an active
+	// transaction, the consumption joins it so publication and consumption
+	// commit or roll back together.
+	if sharedTx, ok := platformpg.TxFromContext(ctx); ok {
+		result, err := r.consumeArenaPass(ctx, r.queries.WithTx(sharedTx), request)
+		if errors.Is(err, errConsumptionConflict) {
+			// The failed statement aborted the caller transaction; the
+			// retry resolves the replay through the idempotency check.
+			return nil, fmt.Errorf("consume arena pass: concurrent consumption of the same arena: %w", application.ErrArenaAlreadyConsumed)
+		}
+		return result, err
 	}
 
 	tx, err := r.pool.Begin(ctx)
@@ -109,7 +113,62 @@ func (r *Repository) ConsumeArenaPass(ctx context.Context, request application.C
 	}
 	defer tx.Rollback(ctx)
 
-	qtx := r.queries.WithTx(tx)
+	result, err := r.consumeArenaPass(ctx, r.queries.WithTx(tx), request)
+	if errors.Is(err, errConsumptionConflict) {
+		// A concurrent consumption of the same Arena won the unique
+		// constraint: roll the owned transaction back entirely (decrement
+		// included) and resolve the original consumption outside it.
+		tx.Rollback(ctx)
+		return r.resolveConsumptionReplay(ctx, request)
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+	return result, nil
+}
+
+// errConsumptionConflict reports that another transaction consumed the same
+// Arena first. The current transaction must be rolled back before the
+// consumption is resolved; it never leaves the adapter.
+var errConsumptionConflict = errors.New("arena pass consumption conflict")
+
+// resolveConsumptionReplay resolves a conflicted Arena to its original
+// consumption, outside the rolled-back transaction.
+func (r *Repository) resolveConsumptionReplay(ctx context.Context, request application.ConsumePassRequest) (*application.ConsumePassResult, error) {
+	arenaUUID, err := pgUUIDFromArenaID(request.ArenaID)
+	if err != nil {
+		return nil, fmt.Errorf("consume arena pass: %w", err)
+	}
+	result, found, err := findArenaPassConsumption(ctx, r.queries, request, arenaUUID)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errors.New("consumption conflict without a stored row")
+	}
+	return result, nil
+}
+
+// consumeArenaPass runs the consumption with the given queries. A
+// unique-violation race is reported as errConsumptionConflict so the caller
+// decides how to roll back and resolve the replay.
+func (r *Repository) consumeArenaPass(
+	ctx context.Context,
+	qtx *platformpg.Queries,
+	request application.ConsumePassRequest,
+) (*application.ConsumePassResult, error) {
+	pgUUID, err := pgUUIDFromAccountID(request.AccountID)
+	if err != nil {
+		return nil, fmt.Errorf("consume arena pass: %w", err)
+	}
+	arenaUUID, err := pgUUIDFromArenaID(request.ArenaID)
+	if err != nil {
+		return nil, fmt.Errorf("consume arena pass: %w", err)
+	}
 
 	// Idempotency: one consumption per Arena.
 	if result, found, err := findArenaPassConsumption(ctx, qtx, request, arenaUUID); err != nil {
@@ -152,24 +211,9 @@ func (r *Repository) ConsumeArenaPass(ctx context.Context, request application.C
 	}); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			// A concurrent consumption of the same Arena won the unique
-			// constraint: our transaction rolls back entirely, decrement
-			// included, and resolves the original consumption.
-			tx.Rollback(ctx)
-			result, found, replayErr := findArenaPassConsumption(ctx, r.queries, request, arenaUUID)
-			if replayErr != nil {
-				return nil, replayErr
-			}
-			if !found {
-				return nil, errors.New("consumption conflict without a stored row")
-			}
-			return result, nil
+			return nil, errConsumptionConflict
 		}
 		return nil, fmt.Errorf("create pass consumption: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
 
 	lot, err := mapPassLotRow(selected)
