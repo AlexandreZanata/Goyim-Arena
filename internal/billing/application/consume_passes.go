@@ -2,16 +2,10 @@ package application
 
 import (
 	"context"
-	"errors"
 	"time"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/billing/domain"
 )
-
-// ErrArenaAlreadyConsumed indicates the arena already consumed a pass that
-// belongs to another account: a pass can never be transferred between
-// accounts.
-var ErrArenaAlreadyConsumed = errors.New("application: arena pass was already consumed by another account")
 
 // ConsumePassRequest is a validated pass consumption: one published Arena
 // consumes exactly one pass of its creator.

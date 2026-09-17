@@ -120,6 +120,11 @@ type Querier interface {
 	// verified email. It never reads email, credentials or payment identifiers.
 	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
 	ListArenaPassConsumptionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListArenaPassConsumptionsByAccountRow, error)
+	// ListArenaPassConsumptionsPage returns one keyset-paginated page of the
+	// owner's consumption history, newest first. NULL after_* parameters select
+	// the first page; the (consumed_at, id) tuple comparison never duplicates or
+	// skips rows (P07-T06).
+	ListArenaPassConsumptionsPage(ctx context.Context, arg ListArenaPassConsumptionsPageParams) ([]ListArenaPassConsumptionsPageRow, error)
 	ListArenaPassLotsByAccount(ctx context.Context, accountID pgtype.UUID) ([]AppArenaPassLot, error)
 	// ListAvailablePassLotsForUpdate locks the consumable lots of an account in
 	// consumption order: nearest expiration first, then lots that never expire.

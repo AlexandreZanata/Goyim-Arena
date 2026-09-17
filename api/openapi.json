@@ -329,6 +329,63 @@
         }
       }
     },
+    "/api/v1/me/passes": {
+      "get": {
+        "operationId": "getArenaPassSummary",
+        "summary": "Arena Pass summary",
+        "description": "Returns the owner's Arena Pass summary: the derived available total and the private per-lot breakdown. Expiration is derived at the checked instant and expired lots are never counted as available.",
+        "tags": ["passes"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "Derived pass summary and private breakdown.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArenaPassSummary" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/me/passes/history": {
+      "get": {
+        "operationId": "getArenaPassHistory",
+        "summary": "Arena Pass consumption history",
+        "description": "Returns the owner's pass consumption history, newest first, as a cursor page. Entries carry the Arena identifier, the stable grant origin and reference and the RFC 3339 UTC instant; internal lot identifiers and provider payloads never serialize.",
+        "tags": ["passes"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque server-signed cursor returned as next_cursor by the previous page.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1..100); defaults to 20.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One consumption history page.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArenaPassHistory" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
     "/api/v1/profiles/{username}": {
       "get": {
         "operationId": "getPublicProfile",
@@ -475,6 +532,50 @@
         "required": ["items", "next_cursor"],
         "properties": {
           "items": { "type": "array", "items": { "$ref": "#/components/schemas/WalletStatementEntry" } },
+          "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
+        }
+      },
+      "ArenaPassLot": {
+        "type": "object",
+        "description": "Private breakdown entry of one Arena Pass lot: derived availability, grant origin and optional immutable expiration.",
+        "required": ["origin", "quantity", "remaining", "expires_at", "expired", "created_at"],
+        "properties": {
+          "origin": { "type": "string", "enum": ["PURCHASE", "MEMBER", "ADMIN"] },
+          "quantity": { "type": "integer", "minimum": 1 },
+          "remaining": { "type": "integer", "minimum": 0 },
+          "expires_at": { "type": ["string", "null"], "format": "date-time", "description": "Null when the lot never expires." },
+          "expired": { "type": "boolean", "description": "Derived at the checked instant; expired lots are not counted as available." },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ArenaPassSummary": {
+        "type": "object",
+        "description": "Owner Arena Pass projection: available total plus the private per-lot breakdown.",
+        "required": ["available_total", "checked_at", "lots"],
+        "properties": {
+          "available_total": { "type": "integer", "minimum": 0, "description": "Passes available at checked_at; expired lots are excluded." },
+          "checked_at": { "type": "string", "format": "date-time" },
+          "lots": { "type": "array", "items": { "$ref": "#/components/schemas/ArenaPassLot" } }
+        }
+      },
+      "ArenaPassHistoryEntry": {
+        "type": "object",
+        "description": "One Arena Pass consumption of the owner history.",
+        "required": ["consumption_id", "arena_id", "origin", "reference", "consumed_at"],
+        "properties": {
+          "consumption_id": { "type": "string" },
+          "arena_id": { "type": "string" },
+          "origin": { "type": "string", "enum": ["PURCHASE", "MEMBER", "ADMIN"] },
+          "reference": { "type": "string" },
+          "consumed_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ArenaPassHistory": {
+        "type": "object",
+        "description": "Cursor page of the owner pass consumption history.",
+        "required": ["items", "next_cursor"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/ArenaPassHistoryEntry" } },
           "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
         }
       },
@@ -639,6 +740,7 @@
     { "name": "health", "description": "Process probes consumed by the supervisor." },
     { "name": "auth", "description": "Authentication, registration, session management and recovery." },
     { "name": "profiles", "description": "Public and private profile projections." },
-    { "name": "wallet", "description": "Authenticated INK balance and statement reads." }
+    { "name": "wallet", "description": "Authenticated INK balance and statement reads." },
+    { "name": "passes", "description": "Authenticated Arena Pass summary and consumption history." }
   ]
 }

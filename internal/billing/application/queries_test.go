@@ -11,14 +11,17 @@ import (
 )
 
 type fakePassLotQueryRepo struct {
-	lots      []domain.PassLot
-	expired   []domain.PassLot
-	listErr   error
-	expireErr error
+	lots         []domain.PassLot
+	expired      []domain.PassLot
+	consumptions []application.PassConsumptionRecord
+	listErr      error
+	expireErr    error
+	historyErr   error
 
 	lastAccount domain.AccountID
 	lastAt      time.Time
 	lastLimit   int
+	lastAfter   *application.ConsumptionPosition
 }
 
 func (r *fakePassLotQueryRepo) ListAccountPassLots(_ context.Context, accountID domain.AccountID) ([]domain.PassLot, error) {
@@ -36,6 +39,31 @@ func (r *fakePassLotQueryRepo) ListExpiredPassLots(_ context.Context, at time.Ti
 		return nil, r.expireErr
 	}
 	return r.expired, nil
+}
+
+func (r *fakePassLotQueryRepo) ListConsumptionsPage(_ context.Context, accountID domain.AccountID, after *application.ConsumptionPosition, limit int) ([]application.PassConsumptionRecord, error) {
+	r.lastAccount = accountID
+	r.lastAfter = after
+	r.lastLimit = limit
+	if r.historyErr != nil {
+		return nil, r.historyErr
+	}
+
+	start := 0
+	if after != nil {
+		for i, entry := range r.consumptions {
+			if entry.ConsumptionID == after.ConsumptionID {
+				start = i + 1
+				break
+			}
+		}
+	}
+	end := start + limit
+	if end > len(r.consumptions) {
+		end = len(r.consumptions)
+	}
+	page := append([]application.PassConsumptionRecord(nil), r.consumptions[start:end]...)
+	return page, nil
 }
 
 func mustLot(t *testing.T, id string, origin domain.PassOrigin, quantity int32, remaining int32, expiresAt *time.Time) domain.PassLot {

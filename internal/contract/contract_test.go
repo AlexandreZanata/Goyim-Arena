@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
@@ -87,7 +88,70 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		if route.Path == "/api/v1/me/wallet" || route.Path == "/api/v1/me/wallet/transactions" {
 			continue
 		}
+		if route.Path == "/api/v1/me/passes" || route.Path == "/api/v1/me/passes/history" {
+			continue
+		}
 		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
+	}
+}
+
+// TestContractPassSchemasExposeOnlyAllowedFields is the contract-level proof
+// of P07-T06: the pass summary and history documents declare exactly the
+// allowed properties, no internal or antifraud data, and both routes require
+// the session cookie.
+func TestContractPassSchemasExposeOnlyAllowedFields(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"ArenaPassLot":          {"origin", "quantity", "remaining", "expires_at", "expired", "created_at"},
+		"ArenaPassSummary":      {"available_total", "checked_at", "lots"},
+		"ArenaPassHistoryEntry": {"consumption_id", "arena_id", "origin", "reference", "consumed_at"},
+		"ArenaPassHistory":      {"items", "next_cursor"},
+	}
+	forbiddenMarkers := []string{
+		"email", "account_id", "password", "credential", "lot_id",
+		"stripe", "customer", "billing", "payment", "fraud", "admin",
+		"reason", "actor", "notes", "ip", "user_agent",
+	}
+
+	for name, expectedProperties := range expected {
+		raw, ok := document.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", name)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if len(schema.Properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(schema.Properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := schema.Properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range schema.Properties {
+			for _, marker := range forbiddenMarkers {
+				if strings.Contains(strings.ToLower(property), marker) {
+					t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+				}
+			}
+		}
+	}
+
+	for _, path := range []string{"/api/v1/me/passes", "/api/v1/me/passes/history"} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		if !strings.Contains(string(operations["get"]), `"SessionCookie"`) {
+			t.Errorf("%s must require the SessionCookie scheme", path)
+		}
 	}
 }
 

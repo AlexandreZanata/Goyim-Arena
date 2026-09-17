@@ -82,3 +82,19 @@ FROM app.arena_pass_consumptions c
 JOIN app.arena_pass_lots l ON l.id = c.lot_id
 WHERE l.account_id = $1
 ORDER BY c.consumed_at DESC, c.id DESC;
+
+-- ListArenaPassConsumptionsPage returns one keyset-paginated page of the
+-- owner's consumption history, newest first. NULL after_* parameters select
+-- the first page; the (consumed_at, id) tuple comparison never duplicates or
+-- skips rows (P07-T06).
+-- name: ListArenaPassConsumptionsPage :many
+SELECT c.id, c.lot_id, c.arena_id, c.consumed_at, l.origin, l.reference
+FROM app.arena_pass_consumptions c
+JOIN app.arena_pass_lots l ON l.id = c.lot_id
+WHERE l.account_id = sqlc.arg(account_id)
+  AND (
+      sqlc.arg(after_consumed_at)::timestamptz IS NULL
+      OR (c.consumed_at, c.id) < (sqlc.arg(after_consumed_at)::timestamptz, sqlc.arg(after_id)::uuid)
+  )
+ORDER BY c.consumed_at DESC, c.id DESC
+LIMIT sqlc.arg(page_limit);

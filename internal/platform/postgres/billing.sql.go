@@ -249,6 +249,71 @@ func (q *Queries) ListArenaPassConsumptionsByAccount(ctx context.Context, accoun
 	return items, nil
 }
 
+const listArenaPassConsumptionsPage = `-- name: ListArenaPassConsumptionsPage :many
+SELECT c.id, c.lot_id, c.arena_id, c.consumed_at, l.origin, l.reference
+FROM app.arena_pass_consumptions c
+JOIN app.arena_pass_lots l ON l.id = c.lot_id
+WHERE l.account_id = $1
+  AND (
+      $2::timestamptz IS NULL
+      OR (c.consumed_at, c.id) < ($2::timestamptz, $3::uuid)
+  )
+ORDER BY c.consumed_at DESC, c.id DESC
+LIMIT $4
+`
+
+type ListArenaPassConsumptionsPageParams struct {
+	AccountID       pgtype.UUID
+	AfterConsumedAt pgtype.Timestamptz
+	AfterID         pgtype.UUID
+	PageLimit       int32
+}
+
+type ListArenaPassConsumptionsPageRow struct {
+	ID         pgtype.UUID
+	LotID      pgtype.UUID
+	ArenaID    pgtype.UUID
+	ConsumedAt pgtype.Timestamptz
+	Origin     string
+	Reference  string
+}
+
+// ListArenaPassConsumptionsPage returns one keyset-paginated page of the
+// owner's consumption history, newest first. NULL after_* parameters select
+// the first page; the (consumed_at, id) tuple comparison never duplicates or
+// skips rows (P07-T06).
+func (q *Queries) ListArenaPassConsumptionsPage(ctx context.Context, arg ListArenaPassConsumptionsPageParams) ([]ListArenaPassConsumptionsPageRow, error) {
+	rows, err := q.db.Query(ctx, listArenaPassConsumptionsPage,
+		arg.AccountID,
+		arg.AfterConsumedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArenaPassConsumptionsPageRow{}
+	for rows.Next() {
+		var i ListArenaPassConsumptionsPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LotID,
+			&i.ArenaID,
+			&i.ConsumedAt,
+			&i.Origin,
+			&i.Reference,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listArenaPassLotsByAccount = `-- name: ListArenaPassLotsByAccount :many
 SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
 FROM app.arena_pass_lots

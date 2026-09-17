@@ -318,6 +318,55 @@ func (r *Repository) ListExpiredPassLots(ctx context.Context, at time.Time, limi
 	return lots, nil
 }
 
+// ListConsumptionsPage returns one keyset page of the account consumption
+// history, newest first. The account filter is applied on every page; the
+// cursor only positions the window inside that account's own history.
+func (r *Repository) ListConsumptionsPage(ctx context.Context, accountID domain.AccountID, after *application.ConsumptionPosition, limit int) ([]application.PassConsumptionRecord, error) {
+	pgUUID, err := pgUUIDFromAccountID(accountID)
+	if err != nil {
+		return nil, fmt.Errorf("list pass consumptions page: %w", err)
+	}
+
+	params := platformpg.ListArenaPassConsumptionsPageParams{
+		AccountID: pgUUID,
+		PageLimit: int32(limit),
+	}
+	if after != nil {
+		var afterID pgtype.UUID
+		if err := afterID.Scan(after.ConsumptionID); err != nil {
+			return nil, application.ErrInvalidCursor
+		}
+		params.AfterConsumedAt = pgtype.Timestamptz{Time: after.ConsumedAt.UTC(), Valid: true}
+		params.AfterID = afterID
+	}
+
+	rows, err := r.queries.ListArenaPassConsumptionsPage(ctx, params)
+	if err != nil {
+		return nil, fmt.Errorf("list pass consumptions page: %w", err)
+	}
+
+	records := make([]application.PassConsumptionRecord, 0, len(rows))
+	for _, row := range rows {
+		origin, err := domain.ParsePassOrigin(row.Origin)
+		if err != nil {
+			return nil, fmt.Errorf("stored pass origin is invalid: %w", err)
+		}
+		reference, err := domain.ParseReference(row.Reference)
+		if err != nil {
+			return nil, fmt.Errorf("stored pass reference is invalid: %w", err)
+		}
+
+		records = append(records, application.PassConsumptionRecord{
+			ConsumptionID: uuidToString(row.ID),
+			ArenaID:       uuidToString(row.ArenaID),
+			Origin:        origin,
+			Reference:     reference,
+			ConsumedAt:    row.ConsumedAt.Time.UTC(),
+		})
+	}
+	return records, nil
+}
+
 func mapPassLotRow(row platformpg.AppArenaPassLot) (*domain.PassLot, error) {
 	origin, err := domain.ParsePassOrigin(row.Origin)
 	if err != nil {
