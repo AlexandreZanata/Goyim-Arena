@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +40,7 @@ type persuasionHarness struct {
 	mux           http.Handler
 	pool          *pgxpool.Pool
 	repo          *persuasionpg.Repository
+	authorizer    *stubSignalAuthorizer
 	author        pgtype.UUID
 	speaker       pgtype.UUID
 	stranger      pgtype.UUID
@@ -48,6 +50,25 @@ type persuasionHarness struct {
 	authorEmail   string
 	speakerEmail  string
 	strangerEmail string
+}
+
+// stubSignalAuthorizer is the moderation port double: the role store has its
+// own adapter, so the HTTP tests only need to decide who moderates.
+type stubSignalAuthorizer struct {
+	mu  sync.Mutex
+	err error
+}
+
+func (a *stubSignalAuthorizer) EnsureModerator(context.Context, domain.ModeratorID) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.err
+}
+
+func (a *stubSignalAuthorizer) set(err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.err = err
 }
 
 func persuasionUUID(u pgtype.UUID) string {
@@ -151,6 +172,18 @@ func attribute(t *testing.T, ctx context.Context, pool *pgxpool.Pool, arenaID, c
 	}
 }
 
+// attributeFromChange credits one more argument from an existing change, so a
+// fixture can hold several attributions per change (the chain uniqueness
+// constraint allows one change per version and Arena).
+func attributeFromChange(t *testing.T, ctx context.Context, pool *pgxpool.Pool, changeID, attributorID, argumentID pgtype.UUID) {
+	t.Helper()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO app.persuasion_attributions (position_change_id, attributor_id, argument_id, status)
+		VALUES ($1, $2, $3, 'valid')`, changeID, attributorID, argumentID); err != nil {
+		t.Fatalf("insert attribution: %v", err)
+	}
+}
+
 func mustProfile(t *testing.T, ctx context.Context, pool *pgxpool.Pool, account pgtype.UUID, username string) {
 	t.Helper()
 	if _, err := pool.Exec(ctx, `
@@ -184,6 +217,7 @@ func setupPersuasionHarness(t *testing.T) *persuasionHarness {
 
 	harness.repo = persuasionpg.NewRepository(pool)
 	clock := clockseed.NewClock()
+	harness.authorizer = &stubSignalAuthorizer{}
 	handler := persuasionhttp.NewHandler(persuasionhttp.HandlerConfig{
 		RecordUseCase: application.NewRecordAttributionsUseCase(
 			harness.repo,
@@ -192,7 +226,13 @@ func setupPersuasionHarness(t *testing.T) *persuasionHarness {
 		),
 		ArgumentMetricsUseCase: application.NewGetArgumentMetricsUseCase(harness.repo, clock),
 		ProfileReputationCase:  application.NewGetProfileReputationUseCase(harness.repo, harness.repo, clock),
-		SecurityManager:        mustSecurityManager(t),
+		SignalsUseCase: application.NewGetAttributionSignalsUseCase(
+			harness.repo,
+			harness.authorizer,
+			domain.DefaultSignalPolicy(),
+			clock,
+		),
+		SecurityManager: mustSecurityManager(t),
 	})
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
@@ -692,5 +732,164 @@ func TestPublicProfileReputation(t *testing.T) {
 	}
 	if contentType := absent.Header().Get("Content-Type"); contentType != "application/problem+json" {
 		t.Fatalf("Content-Type = %q, want application/problem+json", contentType)
+	}
+}
+
+// seedSignalPatterns builds a known abuse shape on the harness data: the
+// speaker and the stranger credit each other (a ring) and the stranger holds
+// most of the author's attributions (a concentration).
+func seedSignalPatterns(t *testing.T, harness *persuasionHarness) {
+	t.Helper()
+	ctx := context.Background()
+	second := mustPersuasionArgument(t, ctx, harness.pool, harness.arena, harness.author, "Segundo argumento do autor auditado", "published", harness.publishedAt)
+	third := mustPersuasionArgument(t, ctx, harness.pool, harness.arena, harness.author, "Terceiro argumento do autor auditado", "published", harness.publishedAt)
+	fourth := mustPersuasionArgument(t, ctx, harness.pool, harness.arena, harness.author, "Quarto argumento do autor auditado", "published", harness.publishedAt)
+	otherArena := mustPersuasionArena(t, ctx, harness.pool, harness.author, "persuasion-http-signal-arena")
+	// The peer argument is authored by the speaker, so the author can credit
+	// it: that direction is what turns mutual credit into a ring.
+	peerArgument := mustPersuasionArgument(t, ctx, harness.pool, otherArena, harness.speaker, "Argumento do par na outra Arena", "published", harness.publishedAt)
+	now := time.Now().UTC()
+
+	// The ring: the speaker credits two arguments, and the author credits the
+	// speaker's own argument twice.
+	attribute(t, ctx, harness.pool, harness.arena, harness.speaker, 2, now, harness.argument, harness.speaker, "valid")
+	attribute(t, ctx, harness.pool, harness.arena, harness.speaker, 3, now, second, harness.speaker, "valid")
+	attribute(t, ctx, harness.pool, otherArena, harness.author, 2, now, peerArgument, harness.author, "valid")
+	attribute(t, ctx, harness.pool, otherArena, harness.author, 3, now, peerArgument, harness.author, "valid")
+
+	// The concentration: the stranger holds four of the six in-window events,
+	// credited from two changes so the fixture isolates the concentration from
+	// the alternation signal (covered by the adapter integration tests).
+	strangerFirst := mustChange(t, ctx, harness.pool, harness.arena, harness.stranger, 2, now)
+	attributeFromChange(t, ctx, harness.pool, strangerFirst, harness.stranger, harness.argument)
+	attributeFromChange(t, ctx, harness.pool, strangerFirst, harness.stranger, second)
+	strangerSecond := mustChange(t, ctx, harness.pool, harness.arena, harness.stranger, 3, now)
+	attributeFromChange(t, ctx, harness.pool, strangerSecond, harness.stranger, third)
+	attributeFromChange(t, ctx, harness.pool, strangerSecond, harness.stranger, fourth)
+}
+
+func (h *persuasionHarness) signals(t *testing.T, path, token string) *httptest.ResponseRecorder {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	h.mux.ServeHTTP(recorder, persuasionRequest(http.MethodGet, path, token, ""))
+	return recorder
+}
+
+func TestAttributionSignalsAreModeratorOnly(t *testing.T) {
+	harness := setupPersuasionHarness(t)
+	seedSignalPatterns(t, harness)
+	path := "/api/v1/moderation/attribution-signals/" + persuasionUUID(harness.author)
+
+	t.Run("anonymous", func(t *testing.T) {
+		recorder := harness.signals(t, path, "")
+		if recorder.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401 (body: %s)", recorder.Code, recorder.Body.String())
+		}
+		persuasionAssertPrivateHeaders(t, recorder)
+	})
+
+	t.Run("authenticated but not a moderator", func(t *testing.T) {
+		harness.authorizer.set(application.ErrNotAuthorized)
+		recorder := harness.signals(t, path, persuasionSpeakerToken)
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403 (body: %s)", recorder.Code, recorder.Body.String())
+		}
+		if contentType := recorder.Header().Get("Content-Type"); contentType != "application/problem+json" {
+			t.Fatalf("Content-Type = %q, want application/problem+json", contentType)
+		}
+		persuasionAssertPrivateHeaders(t, recorder)
+		problem := persuasionDecode(t, recorder.Body.Bytes())
+		if code, _ := problem["code"].(string); code != "not_authorized" {
+			t.Fatalf("code = %q, want not_authorized", code)
+		}
+		// A denied caller learns nothing: the body carries no signal at all.
+		body := strings.ToLower(recorder.Body.String())
+		for _, marker := range []string{"reciprocity", "concentration", "rapid_alternation", "counterpart"} {
+			if strings.Contains(body, marker) {
+				t.Fatalf("SECURITY VIOLATION: denied response leaks %q: %s", marker, recorder.Body.String())
+			}
+		}
+	})
+
+	t.Run("moderator", func(t *testing.T) {
+		harness.authorizer.set(nil)
+		recorder := harness.signals(t, path, persuasionSpeakerToken)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body: %s)", recorder.Code, recorder.Body.String())
+		}
+		persuasionAssertPrivateHeaders(t, recorder)
+		// Signals are restricted: they are never publicly cacheable.
+		if cacheControl := recorder.Header().Get("Cache-Control"); strings.Contains(cacheControl, "public") {
+			t.Fatalf("Cache-Control = %q, must never be publicly cacheable", cacheControl)
+		}
+		body := recorder.Body.String()
+		assessment := persuasionDecode(t, recorder.Body.Bytes())
+		persuasionAssertExactKeys(t, assessment, "author_id", "policy_version", "window_seconds", "checked_at", "signals")
+		if authorID, _ := assessment["author_id"].(string); authorID != persuasionUUID(harness.author) {
+			t.Fatalf("author_id = %q, want the assessed author", authorID)
+		}
+		if policyVersion, _ := assessment["policy_version"].(string); policyVersion != domain.DefaultSignalPolicy().Version {
+			t.Fatalf("policy_version = %q, want the injected revision", policyVersion)
+		}
+
+		signals, _ := assessment["signals"].([]any)
+		if len(signals) != 2 {
+			t.Fatalf("signals = %s, want the concentration and the ring", body)
+		}
+		first, _ := signals[0].(map[string]any)
+		if kind, _ := first["kind"].(string); kind != "concentration" {
+			t.Fatalf("first kind = %q, want the concentration first", kind)
+		}
+		// Advisory only: the document carries counts, never a score.
+		for _, key := range []string{"score", "severity", "weight", "rank", "action"} {
+			if _, leaked := first[key]; leaked {
+				t.Fatalf("SECURITY VIOLATION: signal carries %q: %s", key, body)
+			}
+		}
+		second, _ := signals[1].(map[string]any)
+		if kind, _ := second["kind"].(string); kind != "reciprocity" {
+			t.Fatalf("second kind = %q, want the reciprocity ring", kind)
+		}
+		if mutual, _ := second["mutual_events"].(float64); mutual != 4 {
+			t.Fatalf("mutual_events = %v, want both directions summed", second["mutual_events"])
+		}
+	})
+}
+
+// TestPublicResponsesNeverExposeSignals is the P11-T07 privacy proof: on a
+// dataset whose abuse patterns really do produce signals (proved through the
+// restricted surface), neither public document carries a signal, a score, a
+// counterpart or any of the accounts behind the counts.
+func TestPublicResponsesNeverExposeSignals(t *testing.T) {
+	harness := setupPersuasionHarness(t)
+	seedSignalPatterns(t, harness)
+
+	// The fixture is meaningful: a moderator really does see signals here.
+	moderator := harness.signals(t, "/api/v1/moderation/attribution-signals/"+persuasionUUID(harness.author), persuasionAuthorToken)
+	if moderator.Code != http.StatusOK || !strings.Contains(moderator.Body.String(), "concentration") {
+		t.Fatalf("fixture does not produce signals: %d %s", moderator.Code, moderator.Body.String())
+	}
+
+	public := []string{
+		"/api/v1/arguments/" + persuasionUUID(harness.argument) + "/attributions",
+		"/api/v1/profiles/autora_publica/reputation",
+	}
+	for _, path := range public {
+		recorder := harness.get(t, path)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want 200 (body: %s)", path, recorder.Code, recorder.Body.String())
+		}
+		body := strings.ToLower(recorder.Body.String())
+		for _, marker := range []string{
+			"signal", "score", "abuse", "reciproc", "counterpart", "reversal",
+			"share_basis_points", "mutual_events", "dominant_events",
+			strings.ToLower(persuasionUUID(harness.speaker)),
+			strings.ToLower(persuasionUUID(harness.stranger)),
+			harness.speakerEmail, harness.strangerEmail, "account_id",
+		} {
+			if strings.Contains(body, marker) {
+				t.Fatalf("SECURITY VIOLATION: %s leaks %q: %s", path, marker, recorder.Body.String())
+			}
+		}
 	}
 }

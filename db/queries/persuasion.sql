@@ -150,6 +150,106 @@ LEFT JOIN app.persuasion_attributions pa
 WHERE a.id = sqlc.arg(argument_id)::uuid
 GROUP BY a.id;
 
+-- ListAttributionReciprocity loads, for one subject and window, the accounts
+-- that credited the subject's arguments while the subject credited theirs
+-- (P11-T07; THR-PERS-01): the raw material of the reciprocity signal. Rules
+-- encoded here:
+--   1. Only valid attributions count, exactly as the public metrics: an
+--      invalidated attribution is already a closed case.
+--   2. Both directions must exist for the pair to appear; whether the pair
+--      crosses the policy threshold is the domain's judgment, not SQL's.
+--   3. No eligibility filter on purpose: abuse review must not be blind to
+--      suspended or unverified accounts, which are precisely the population
+--      coordinated manipulation uses. Eligibility still excludes them from
+--      the official results (BR §7); these facts never reach a public
+--      projection (CONSTITUTION §Dados pessoais).
+-- name: ListAttributionReciprocity :many
+WITH attributed_to_subject AS (
+    SELECT pa.attributor_id AS account_id, count(*)::bigint AS inbound
+    FROM app.persuasion_attributions pa
+    JOIN app.arguments a ON a.id = pa.argument_id
+    WHERE a.author_id = sqlc.arg(subject_id)::uuid
+      AND pa.status = 'valid'
+      AND pa.created_at >= sqlc.arg(window_start)::timestamptz
+      AND pa.created_at < sqlc.arg(window_end)::timestamptz
+    GROUP BY pa.attributor_id
+),
+attributed_by_subject AS (
+    SELECT a.author_id AS account_id, count(*)::bigint AS outbound
+    FROM app.persuasion_attributions pa
+    JOIN app.arguments a ON a.id = pa.argument_id
+    WHERE pa.attributor_id = sqlc.arg(subject_id)::uuid
+      AND pa.status = 'valid'
+      AND pa.created_at >= sqlc.arg(window_start)::timestamptz
+      AND pa.created_at < sqlc.arg(window_end)::timestamptz
+    GROUP BY a.author_id
+)
+SELECT inbound.account_id, inbound.inbound, attributed_by_subject.outbound
+FROM attributed_to_subject inbound
+JOIN attributed_by_subject ON attributed_by_subject.account_id = inbound.account_id
+ORDER BY inbound.account_id;
+
+-- ListAttributionConcentration loads, for one subject and window, how many
+-- valid attributions each account made to the subject's arguments (P11-T07;
+-- METRICS §4). The share and the threshold are computed by the domain, so the
+-- same aggregation serves every policy revision. The eligibility filter is
+-- deliberately absent, for the reason documented above.
+-- name: ListAttributionConcentration :many
+SELECT pa.attributor_id AS account_id, count(*)::bigint AS events
+FROM app.persuasion_attributions pa
+JOIN app.arguments a ON a.id = pa.argument_id
+WHERE a.author_id = sqlc.arg(subject_id)::uuid
+  AND pa.status = 'valid'
+  AND pa.created_at >= sqlc.arg(window_start)::timestamptz
+  AND pa.created_at < sqlc.arg(window_end)::timestamptz
+GROUP BY pa.attributor_id
+ORDER BY events DESC, account_id;
+
+-- ListAttributionAlternation loads, for one subject and window, the position
+-- changes of every account that credited the subject, with how many of those
+-- changes were reversals (P11-T07; METRICS §4 "reversões repetidas pela mesma
+-- conta"): a change back to the position held before the previous change.
+--
+-- The chain window function deliberately reads every change of the account,
+-- not only the ones inside the window, so the predecessor of an in-window
+-- change is its real predecessor; the counters then keep only the in-window
+-- events.
+-- name: ListAttributionAlternation :many
+WITH credited AS (
+    SELECT DISTINCT pa.attributor_id AS account_id
+    FROM app.persuasion_attributions pa
+    JOIN app.arguments a ON a.id = pa.argument_id
+    WHERE a.author_id = sqlc.arg(subject_id)::uuid
+      AND pa.status = 'valid'
+      AND pa.created_at >= sqlc.arg(window_start)::timestamptz
+      AND pa.created_at < sqlc.arg(window_end)::timestamptz
+),
+chain AS (
+    SELECT
+        pc.account_id,
+        pc.changed_at,
+        pc.to_position,
+        lag(pc.to_position, 1) OVER (PARTITION BY pc.account_id ORDER BY pc.changed_at, pc.id) AS previous_position,
+        lag(pc.to_position, 2) OVER (PARTITION BY pc.account_id ORDER BY pc.changed_at, pc.id) AS position_before_previous
+    FROM app.position_changes pc
+    JOIN credited ON credited.account_id = pc.account_id
+)
+SELECT
+    account_id,
+    count(*) FILTER (
+        WHERE changed_at >= sqlc.arg(window_start)::timestamptz
+          AND changed_at < sqlc.arg(window_end)::timestamptz
+    )::bigint AS changes,
+    count(*) FILTER (
+        WHERE changed_at >= sqlc.arg(window_start)::timestamptz
+          AND changed_at < sqlc.arg(window_end)::timestamptz
+          AND position_before_previous IS NOT NULL
+          AND to_position = position_before_previous
+    )::bigint AS reversals
+FROM chain
+GROUP BY account_id
+ORDER BY account_id;
+
 -- RestoreAttribution reverses one invalidation on the same retained row,
 -- recording the restore decision: the row moves back to valid and the
 -- decision record is replaced by the newest one, never erased.

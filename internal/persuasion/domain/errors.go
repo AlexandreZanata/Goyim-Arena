@@ -31,6 +31,11 @@ const (
 	CodeInvalidReason             ErrorCode = "PERSUASION_INVALID_REASON"
 	CodeReasonTooLong             ErrorCode = "PERSUASION_REASON_TOO_LONG"
 	CodeAttributionNotModeratable ErrorCode = "PERSUASION_ATTRIBUTION_NOT_MODERATABLE"
+
+	CodeInvalidSignalPolicy     ErrorCode = "PERSUASION_INVALID_SIGNAL_POLICY"
+	CodeInvalidSignalFacts      ErrorCode = "PERSUASION_INVALID_SIGNAL_FACTS"
+	CodeInvalidSignal           ErrorCode = "PERSUASION_INVALID_SIGNAL"
+	CodeInvalidSignalAssessment ErrorCode = "PERSUASION_INVALID_SIGNAL_ASSESSMENT"
 )
 
 // DomainError represents an invariant or rule failure in the persuasion
@@ -131,4 +136,23 @@ var (
 	// validity already satisfies (invalidating an invalid attribution or
 	// restoring a valid one).
 	ErrAttributionNotModeratable = DomainError{Code: CodeAttributionNotModeratable, Message: "the attribution is already in the requested validity state"}
+
+	// ErrInvalidSignalPolicy indicates a malformed abuse signal policy: a
+	// missing revision or window, a non-positive threshold or thresholds that
+	// could never match.
+	ErrInvalidSignalPolicy = DomainError{Code: CodeInvalidSignalPolicy, Message: "abuse signal policy is invalid"}
+
+	// ErrInvalidSignalFacts indicates malformed observations: a missing
+	// account, a negative count or more reversals than changes. Judging them
+	// would produce a signal nobody could explain.
+	ErrInvalidSignalFacts = DomainError{Code: CodeInvalidSignalFacts, Message: "abuse signal facts are invalid"}
+
+	// ErrInvalidSignal indicates a signal that does not carry the counts its
+	// kind requires.
+	ErrInvalidSignal = DomainError{Code: CodeInvalidSignal, Message: "abuse signal is invalid"}
+
+	// ErrInvalidSignalAssessment indicates an incoherent assessment: missing
+	// subject, instant or policy revision, a signal outside the assessed
+	// window or the same observation reported twice.
+	ErrInvalidSignalAssessment = DomainError{Code: CodeInvalidSignalAssessment, Message: "abuse signal assessment is invalid"}
 )

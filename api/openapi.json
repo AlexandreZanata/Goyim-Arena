@@ -1082,6 +1082,41 @@
         }
       }
     },
+    "/api/v1/moderation/attribution-signals/{authorID}": {
+      "get": {
+        "operationId": "getAttributionSignals",
+        "summary": "Restricted attribution abuse signals",
+        "description": "Returns the advisory attribution signals of one author for the configured window: reciprocity (mutual credit between the author and another account), concentration (one account holding a dominant share of the author's valid attributions) and rapid alternation (repeated position reversals by one account). The surface is restricted to authorized moderators: the caller is authorized before any fact is read, and every response carries the mandatory private cache policy. A signal carries the kind, the counterpart account and the counts that crossed a versioned threshold — never a score, a severity, an algorithmic weight or an automatic action; a human reviews the case and decides (MODERATION §5, §10). Signals are prevention data and never appear in a public page, metric or export (CONSTITUTION §Dados pessoais). Invalidated attributions, which are closed cases, never feed the counts.",
+        "tags": ["persuasion"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "authorID",
+            "in": "path",
+            "required": true,
+            "description": "Opaque account identifier of the author under review.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Advisory signals of the author in the window, ordered by kind and counterpart.",
+            "headers": {
+              "Cache-Control": { "description": "Mandatory private cache policy of authenticated routes (private, no-store, no-cache, must-revalidate).", "schema": { "type": "string" } },
+              "Pragma": { "description": "no-cache, as required for authenticated responses.", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AttributionSignals" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
     "/api/v1/arenas/{id}/arguments": {
       "get": {
         "operationId": "listArenaArguments",
@@ -1865,6 +1900,32 @@
           "by_category": { "type": "array", "items": { "$ref": "#/components/schemas/ReputationDimension" } },
           "by_language": { "type": "array", "items": { "$ref": "#/components/schemas/ReputationDimension" } },
           "checked_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AttributionSignal": {
+        "type": "object",
+        "description": "One advisory signal on the restricted moderation surface. The kind-specific counts are omitted when they do not apply. Restricted prevention data: no score, no severity and no weight is ever attached, and nothing acts on a signal automatically.",
+        "required": ["kind", "counterpart_id"],
+        "properties": {
+          "kind": { "type": "string", "enum": ["reciprocity", "concentration", "rapid_alternation"] },
+          "counterpart_id": { "type": "string", "description": "Opaque account identifier of the counterpart whose behaviour crossed the threshold. Internal and restricted: never published or exported." },
+          "mutual_events": { "type": "integer", "minimum": 1, "description": "Reciprocity only: mutual credit events in the window, both directions summed." },
+          "dominant_events": { "type": "integer", "minimum": 1, "description": "Concentration only: valid attributions held by the counterpart in the window." },
+          "share_basis_points": { "type": "integer", "minimum": 1, "maximum": 10000, "description": "Concentration only: the counterpart's share of the author's valid attributions, in basis points (integer; no floating point)." },
+          "changes": { "type": "integer", "minimum": 1, "description": "Rapid alternation only: position changes of the counterpart inside the window." },
+          "reversals": { "type": "integer", "minimum": 1, "description": "Rapid alternation only: changes back to the position held before the previous change." }
+        }
+      },
+      "AttributionSignals": {
+        "type": "object",
+        "description": "Restricted assessment document of one author: the signals that crossed the thresholds, the policy revision and window that produced them and the reading instant. Served only to authorized moderators with the private cache policy.",
+        "required": ["author_id", "policy_version", "window_seconds", "checked_at", "signals"],
+        "properties": {
+          "author_id": { "type": "string", "description": "Opaque account identifier of the author under review." },
+          "policy_version": { "type": "string", "description": "Revision of the threshold policy that produced the assessment, so a reviewed case stays explainable when the thresholds change." },
+          "window_seconds": { "type": "integer", "minimum": 1, "description": "Length of the assessed window in seconds." },
+          "checked_at": { "type": "string", "format": "date-time" },
+          "signals": { "type": "array", "items": { "$ref": "#/components/schemas/AttributionSignal" }, "description": "Ordered by kind and counterpart; an author without any pattern above the thresholds answers an empty array." }
         }
       },
       "HealthStatus": {

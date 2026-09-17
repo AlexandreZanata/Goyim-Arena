@@ -92,12 +92,42 @@ type profileReputationResponse struct {
 	CheckedAt         string                        `json:"checked_at"`
 }
 
+// attributionSignalResponse is one advisory signal on the restricted
+// moderation surface. It carries the kind, the counterpart account involved
+// and the counts that crossed the threshold — never a score, a severity, a
+// weight or a recommended action: a signal is a reason to look, and a human
+// decides (MODERATION §5, §10). Kind-specific counts are omitted when they do
+// not apply.
+type attributionSignalResponse struct {
+	Kind             string `json:"kind"`
+	CounterpartID    string `json:"counterpart_id"`
+	MutualEvents     int64  `json:"mutual_events,omitempty"`
+	DominantEvents   int64  `json:"dominant_events,omitempty"`
+	ShareBasisPoints int64  `json:"share_basis_points,omitempty"`
+	Changes          int64  `json:"changes,omitempty"`
+	Reversals        int64  `json:"reversals,omitempty"`
+}
+
+// attributionSignalsResponse is the restricted assessment document: the
+// subject, the policy revision and window that produced the signals, and the
+// signals themselves. It is served only to authorized moderators with the
+// private cache policy (THR-CACHE-01) and is never part of a public page,
+// metric or export (CONSTITUTION §Dados pessoais).
+type attributionSignalsResponse struct {
+	AuthorID      string                      `json:"author_id"`
+	PolicyVersion string                      `json:"policy_version"`
+	WindowSeconds int64                       `json:"window_seconds"`
+	CheckedAt     string                      `json:"checked_at"`
+	Signals       []attributionSignalResponse `json:"signals"`
+}
+
 // HandlerConfig aggregates the persuasion use cases and the security manager
 // required to serve the persuasion API.
 type HandlerConfig struct {
 	RecordUseCase          *application.RecordAttributionsUseCase
 	ArgumentMetricsUseCase *application.GetArgumentMetricsUseCase
 	ProfileReputationCase  *application.GetProfileReputationUseCase
+	SignalsUseCase         *application.GetAttributionSignalsUseCase
 	SecurityManager        *security.Manager
 }
 
@@ -106,6 +136,7 @@ type Handler struct {
 	record            *application.RecordAttributionsUseCase
 	argumentMetrics   *application.GetArgumentMetricsUseCase
 	profileReputation *application.GetProfileReputationUseCase
+	signals           *application.GetAttributionSignalsUseCase
 	security          *security.Manager
 }
 
@@ -115,6 +146,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		record:            cfg.RecordUseCase,
 		argumentMetrics:   cfg.ArgumentMetricsUseCase,
 		profileReputation: cfg.ProfileReputationCase,
+		signals:           cfg.SignalsUseCase,
 		security:          cfg.SecurityManager,
 	}
 }
@@ -201,6 +233,10 @@ func writePersuasionProblem(w http.ResponseWriter, r *http.Request, err error) {
 		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindNotFound, "argument_not_found", "argument not found"))
 	case errors.Is(err, application.ErrProfileNotFound):
 		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindNotFound, "profile_not_found", "profile not found"))
+	case errors.Is(err, application.ErrNotAuthorized):
+		// The restricted surface answers the same way for every unauthorized
+		// caller: whether a signal exists is itself restricted information.
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindForbidden, "not_authorized", "the account may not read attribution signals"))
 	case errors.Is(err, application.ErrInvalidAuthorID):
 		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindValidation, "invalid_author_id", "author identifier is invalid"))
 	case hasDomainError:
@@ -320,6 +356,49 @@ func (h *Handler) GetProfileReputation(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetAttributionSignals handles GET
+// /api/v1/moderation/attribution-signals/{authorID}. The route is
+// authenticated, and the use case authorizes the moderator before reading
+// anything: a signal never blocks, reweights or hides content on its own.
+func (h *Handler) GetAttributionSignals(w http.ResponseWriter, r *http.Request) {
+	setPrivateNoStoreHeaders(w)
+	accountID, ok := h.identity(r)
+	if !ok {
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindUnauthorized, "unauthorized", "authentication required"))
+		return
+	}
+
+	assessment, err := h.signals.Execute(r.Context(), application.AssessAttributionSignalsQuery{
+		ActorAccountID: accountID,
+		SubjectID:      r.PathValue("authorID"),
+	})
+	if err != nil {
+		writePersuasionProblem(w, r, err)
+		return
+	}
+
+	signals := make([]attributionSignalResponse, 0, len(assessment.Signals))
+	for _, signal := range assessment.Signals {
+		signals = append(signals, attributionSignalResponse{
+			Kind:             string(signal.Kind),
+			CounterpartID:    signal.Counterpart.String(),
+			MutualEvents:     signal.MutualEvents,
+			DominantEvents:   signal.DominantEvents,
+			ShareBasisPoints: signal.ShareBasisPoints,
+			Changes:          signal.Changes,
+			Reversals:        signal.Reversals,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, attributionSignalsResponse{
+		AuthorID:      assessment.Subject.String(),
+		PolicyVersion: assessment.PolicyVersion,
+		WindowSeconds: int64(assessment.Window / time.Second),
+		CheckedAt:     assessment.AssessedAt.UTC().Format(time.RFC3339),
+		Signals:       signals,
+	})
+}
+
 // dimensionResponses converts a distribution into its response documents.
 func dimensionResponses(distribution []application.DimensionReputation) []dimensionReputationResponse {
 	responses := make([]dimensionReputationResponse, 0, len(distribution))
@@ -345,6 +424,10 @@ func (h *Handler) privateRoute(next http.Handler) http.Handler {
 // RegisterRoutes wires the persuasion endpoints into the provided ServeMux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/me/position-changes/{id}/attributions", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.RecordAttributions))))
+
+	// The restricted moderation surface: authenticated, private (no-store)
+	// and moderator-only inside the use case.
+	mux.Handle("GET /api/v1/moderation/attribution-signals/{authorID}", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.GetAttributionSignals))))
 
 	mux.HandleFunc("GET /api/v1/arguments/{id}/attributions", h.GetArgumentMetrics)
 	mux.HandleFunc("GET /api/v1/profiles/{username}/reputation", h.GetProfileReputation)

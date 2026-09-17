@@ -224,6 +224,84 @@ func (q *Queries) InvalidateAttribution(ctx context.Context, arg InvalidateAttri
 	return i, err
 }
 
+const listAttributionAlternation = `-- name: ListAttributionAlternation :many
+WITH credited AS (
+    SELECT DISTINCT pa.attributor_id AS account_id
+    FROM app.persuasion_attributions pa
+    JOIN app.arguments a ON a.id = pa.argument_id
+    WHERE a.author_id = $3::uuid
+      AND pa.status = 'valid'
+      AND pa.created_at >= $1::timestamptz
+      AND pa.created_at < $2::timestamptz
+),
+chain AS (
+    SELECT
+        pc.account_id,
+        pc.changed_at,
+        pc.to_position,
+        lag(pc.to_position, 1) OVER (PARTITION BY pc.account_id ORDER BY pc.changed_at, pc.id) AS previous_position,
+        lag(pc.to_position, 2) OVER (PARTITION BY pc.account_id ORDER BY pc.changed_at, pc.id) AS position_before_previous
+    FROM app.position_changes pc
+    JOIN credited ON credited.account_id = pc.account_id
+)
+SELECT
+    account_id,
+    count(*) FILTER (
+        WHERE changed_at >= $1::timestamptz
+          AND changed_at < $2::timestamptz
+    )::bigint AS changes,
+    count(*) FILTER (
+        WHERE changed_at >= $1::timestamptz
+          AND changed_at < $2::timestamptz
+          AND position_before_previous IS NOT NULL
+          AND to_position = position_before_previous
+    )::bigint AS reversals
+FROM chain
+GROUP BY account_id
+ORDER BY account_id
+`
+
+type ListAttributionAlternationParams struct {
+	WindowStart pgtype.Timestamptz
+	WindowEnd   pgtype.Timestamptz
+	SubjectID   pgtype.UUID
+}
+
+type ListAttributionAlternationRow struct {
+	AccountID pgtype.UUID
+	Changes   int64
+	Reversals int64
+}
+
+// ListAttributionAlternation loads, for one subject and window, the position
+// changes of every account that credited the subject, with how many of those
+// changes were reversals (P11-T07; METRICS §4 "reversões repetidas pela mesma
+// conta"): a change back to the position held before the previous change.
+//
+// The chain window function deliberately reads every change of the account,
+// not only the ones inside the window, so the predecessor of an in-window
+// change is its real predecessor; the counters then keep only the in-window
+// events.
+func (q *Queries) ListAttributionAlternation(ctx context.Context, arg ListAttributionAlternationParams) ([]ListAttributionAlternationRow, error) {
+	rows, err := q.db.Query(ctx, listAttributionAlternation, arg.WindowStart, arg.WindowEnd, arg.SubjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAttributionAlternationRow{}
+	for rows.Next() {
+		var i ListAttributionAlternationRow
+		if err := rows.Scan(&i.AccountID, &i.Changes, &i.Reversals); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAttributionArgumentIDs = `-- name: ListAttributionArgumentIDs :many
 SELECT argument_id
 FROM app.persuasion_attributions
@@ -286,6 +364,126 @@ func (q *Queries) ListAttributionCandidates(ctx context.Context, argumentIds []p
 			&i.CreatedAt,
 			&i.Status,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttributionConcentration = `-- name: ListAttributionConcentration :many
+SELECT pa.attributor_id AS account_id, count(*)::bigint AS events
+FROM app.persuasion_attributions pa
+JOIN app.arguments a ON a.id = pa.argument_id
+WHERE a.author_id = $1::uuid
+  AND pa.status = 'valid'
+  AND pa.created_at >= $2::timestamptz
+  AND pa.created_at < $3::timestamptz
+GROUP BY pa.attributor_id
+ORDER BY events DESC, account_id
+`
+
+type ListAttributionConcentrationParams struct {
+	SubjectID   pgtype.UUID
+	WindowStart pgtype.Timestamptz
+	WindowEnd   pgtype.Timestamptz
+}
+
+type ListAttributionConcentrationRow struct {
+	AccountID pgtype.UUID
+	Events    int64
+}
+
+// ListAttributionConcentration loads, for one subject and window, how many
+// valid attributions each account made to the subject's arguments (P11-T07;
+// METRICS §4). The share and the threshold are computed by the domain, so the
+// same aggregation serves every policy revision. The eligibility filter is
+// deliberately absent, for the reason documented above.
+func (q *Queries) ListAttributionConcentration(ctx context.Context, arg ListAttributionConcentrationParams) ([]ListAttributionConcentrationRow, error) {
+	rows, err := q.db.Query(ctx, listAttributionConcentration, arg.SubjectID, arg.WindowStart, arg.WindowEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAttributionConcentrationRow{}
+	for rows.Next() {
+		var i ListAttributionConcentrationRow
+		if err := rows.Scan(&i.AccountID, &i.Events); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttributionReciprocity = `-- name: ListAttributionReciprocity :many
+WITH attributed_to_subject AS (
+    SELECT pa.attributor_id AS account_id, count(*)::bigint AS inbound
+    FROM app.persuasion_attributions pa
+    JOIN app.arguments a ON a.id = pa.argument_id
+    WHERE a.author_id = $1::uuid
+      AND pa.status = 'valid'
+      AND pa.created_at >= $2::timestamptz
+      AND pa.created_at < $3::timestamptz
+    GROUP BY pa.attributor_id
+),
+attributed_by_subject AS (
+    SELECT a.author_id AS account_id, count(*)::bigint AS outbound
+    FROM app.persuasion_attributions pa
+    JOIN app.arguments a ON a.id = pa.argument_id
+    WHERE pa.attributor_id = $1::uuid
+      AND pa.status = 'valid'
+      AND pa.created_at >= $2::timestamptz
+      AND pa.created_at < $3::timestamptz
+    GROUP BY a.author_id
+)
+SELECT inbound.account_id, inbound.inbound, attributed_by_subject.outbound
+FROM attributed_to_subject inbound
+JOIN attributed_by_subject ON attributed_by_subject.account_id = inbound.account_id
+ORDER BY inbound.account_id
+`
+
+type ListAttributionReciprocityParams struct {
+	SubjectID   pgtype.UUID
+	WindowStart pgtype.Timestamptz
+	WindowEnd   pgtype.Timestamptz
+}
+
+type ListAttributionReciprocityRow struct {
+	AccountID pgtype.UUID
+	Inbound   int64
+	Outbound  int64
+}
+
+// ListAttributionReciprocity loads, for one subject and window, the accounts
+// that credited the subject's arguments while the subject credited theirs
+// (P11-T07; THR-PERS-01): the raw material of the reciprocity signal. Rules
+// encoded here:
+//  1. Only valid attributions count, exactly as the public metrics: an
+//     invalidated attribution is already a closed case.
+//  2. Both directions must exist for the pair to appear; whether the pair
+//     crosses the policy threshold is the domain's judgment, not SQL's.
+//  3. No eligibility filter on purpose: abuse review must not be blind to
+//     suspended or unverified accounts, which are precisely the population
+//     coordinated manipulation uses. Eligibility still excludes them from
+//     the official results (BR §7); these facts never reach a public
+//     projection (CONSTITUTION §Dados pessoais).
+func (q *Queries) ListAttributionReciprocity(ctx context.Context, arg ListAttributionReciprocityParams) ([]ListAttributionReciprocityRow, error) {
+	rows, err := q.db.Query(ctx, listAttributionReciprocity, arg.SubjectID, arg.WindowStart, arg.WindowEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAttributionReciprocityRow{}
+	for rows.Next() {
+		var i ListAttributionReciprocityRow
+		if err := rows.Scan(&i.AccountID, &i.Inbound, &i.Outbound); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

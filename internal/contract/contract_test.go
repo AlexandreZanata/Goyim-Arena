@@ -108,6 +108,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		if strings.HasPrefix(route.Path, "/api/v1/me/position-changes") || strings.HasPrefix(route.Path, "/api/v1/profiles/{username}/reputation") {
 			continue
 		}
+		if strings.HasPrefix(route.Path, "/api/v1/moderation/attribution-signals") {
+			continue
+		}
 		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
 	}
 }
@@ -758,6 +761,124 @@ func TestContractPersuasionSchemasExposeOnlyAllowedFields(t *testing.T) {
 			}
 		}
 	}
+}
+
+// TestContractAbuseSignalSurfaceStaysRestricted is the contract-level proof of
+// P11-T07: the signal documents declare exactly the allowed properties, no
+// property carries a score, severity, weight or rank, the restricted route
+// requires the session cookie and the mandatory private cache policy, and no
+// public persuasion document declares a signal or a score.
+func TestContractAbuseSignalSurfaceStaysRestricted(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"AttributionSignal": {
+			"kind", "counterpart_id", "mutual_events", "dominant_events",
+			"share_basis_points", "changes", "reversals",
+		},
+		"AttributionSignals": {
+			"author_id", "policy_version", "window_seconds", "checked_at", "signals",
+		},
+	}
+	// Signals are advisory: nothing may carry a ranking or an automatic
+	// consequence (MODERATION §5, §10).
+	forbiddenMarkers := []string{
+		"score", "severity", "weight", "rank", "penalty", "action",
+		"block", "ban", "suspension", "probability", "confidence",
+	}
+
+	for name, expectedProperties := range expected {
+		raw, ok := document.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", name)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s schema: %v", name, err)
+		}
+		if len(schema.Properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(schema.Properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := schema.Properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range schema.Properties {
+			for _, token := range strings.Split(strings.ToLower(property), "_") {
+				for _, marker := range forbiddenMarkers {
+					if token == marker {
+						t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+					}
+				}
+			}
+		}
+	}
+
+	// The signal vocabulary is closed and carries the three documented kinds.
+	kindRaw := string(document.Components.Schemas["AttributionSignal"])
+	for _, kind := range []string{"reciprocity", "concentration", "rapid_alternation"} {
+		if !strings.Contains(kindRaw, `"`+kind+`"`) {
+			t.Errorf("AttributionSignal must declare the %q kind", kind)
+		}
+	}
+
+	// The restricted route is authenticated and carries the private policy.
+	operations, ok := document.Paths["/api/v1/moderation/attribution-signals/{authorID}"]
+	if !ok {
+		t.Fatal("contract is missing /api/v1/moderation/attribution-signals/{authorID}")
+	}
+	operation := string(operations["get"])
+	if !strings.Contains(operation, `"SessionCookie"`) {
+		t.Error("the signal route must require the SessionCookie scheme")
+	}
+	if !strings.Contains(operation, "private, no-store") {
+		t.Error("the signal route must document the private cache policy")
+	}
+	if !strings.Contains(operation, `"403"`) {
+		t.Error("the signal route must document the forbidden answer for unauthorized callers")
+	}
+	if strings.Contains(operation, "public, max-age") {
+		t.Error("the signal route must never be publicly cacheable")
+	}
+
+	// No public persuasion document exposes a signal or a score.
+	for name := range map[string]bool{
+		"AttributionRecordRequest":   true,
+		"AttributionRecordResult":    true,
+		"ArgumentAttributionMetrics": true,
+		"ReputationArenaSlice":       true,
+		"ReputationDimension":        true,
+		"ProfileReputation":          true,
+	} {
+		for property := range propertiesOf(t, document, name) {
+			for _, marker := range []string{"signal", "score", "abuse", "weight", "rank", "severity"} {
+				if strings.Contains(strings.ToLower(property), marker) {
+					t.Errorf("SECURITY VIOLATION: public schema %s declares %q", name, property)
+				}
+			}
+		}
+	}
+}
+
+// propertiesOf decodes the declared properties of one schema.
+func propertiesOf(t *testing.T, document *contract.Document, name string) map[string]json.RawMessage {
+	t.Helper()
+	raw, ok := document.Components.Schemas[name]
+	if !ok {
+		t.Fatalf("components.schemas.%s is missing", name)
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+	}
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		t.Fatalf("decode %s schema: %v", name, err)
+	}
+	return schema.Properties
 }
 
 func TestCompareRoutesDetectsDriftBothWays(t *testing.T) {

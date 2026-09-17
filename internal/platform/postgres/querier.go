@@ -235,6 +235,16 @@ type Querier interface {
 	// skips rows (P07-T06).
 	ListArenaPassConsumptionsPage(ctx context.Context, arg ListArenaPassConsumptionsPageParams) ([]ListArenaPassConsumptionsPageRow, error)
 	ListArenaPassLotsByAccount(ctx context.Context, accountID pgtype.UUID) ([]AppArenaPassLot, error)
+	// ListAttributionAlternation loads, for one subject and window, the position
+	// changes of every account that credited the subject, with how many of those
+	// changes were reversals (P11-T07; METRICS §4 "reversões repetidas pela mesma
+	// conta"): a change back to the position held before the previous change.
+	//
+	// The chain window function deliberately reads every change of the account,
+	// not only the ones inside the window, so the predecessor of an in-window
+	// change is its real predecessor; the counters then keep only the in-window
+	// events.
+	ListAttributionAlternation(ctx context.Context, arg ListAttributionAlternationParams) ([]ListAttributionAlternationRow, error)
 	// ListAttributionArgumentIDs returns the argument identifiers already
 	// credited by one change (P11-T03).
 	ListAttributionArgumentIDs(ctx context.Context, changeID pgtype.UUID) ([]pgtype.UUID, error)
@@ -242,6 +252,26 @@ type Querier interface {
 	// arguments: arena, author, creation instant and status. Relation is
 	// deliberately not read: it never restricts eligibility (P11-T02).
 	ListAttributionCandidates(ctx context.Context, argumentIds []pgtype.UUID) ([]ListAttributionCandidatesRow, error)
+	// ListAttributionConcentration loads, for one subject and window, how many
+	// valid attributions each account made to the subject's arguments (P11-T07;
+	// METRICS §4). The share and the threshold are computed by the domain, so the
+	// same aggregation serves every policy revision. The eligibility filter is
+	// deliberately absent, for the reason documented above.
+	ListAttributionConcentration(ctx context.Context, arg ListAttributionConcentrationParams) ([]ListAttributionConcentrationRow, error)
+	// ListAttributionReciprocity loads, for one subject and window, the accounts
+	// that credited the subject's arguments while the subject credited theirs
+	// (P11-T07; THR-PERS-01): the raw material of the reciprocity signal. Rules
+	// encoded here:
+	//   1. Only valid attributions count, exactly as the public metrics: an
+	//      invalidated attribution is already a closed case.
+	//   2. Both directions must exist for the pair to appear; whether the pair
+	//      crosses the policy threshold is the domain's judgment, not SQL's.
+	//   3. No eligibility filter on purpose: abuse review must not be blind to
+	//      suspended or unverified accounts, which are precisely the population
+	//      coordinated manipulation uses. Eligibility still excludes them from
+	//      the official results (BR §7); these facts never reach a public
+	//      projection (CONSTITUTION §Dados pessoais).
+	ListAttributionReciprocity(ctx context.Context, arg ListAttributionReciprocityParams) ([]ListAttributionReciprocityRow, error)
 	// ListAuthorArenaReputation derives the reputation projection of one
 	// author (P11-T05; BR §5.1, §6, §7): one row per Arena where the author
 	// received at least one valid attribution, with the eligible people the

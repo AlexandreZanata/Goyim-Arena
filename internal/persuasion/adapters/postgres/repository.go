@@ -30,6 +30,7 @@ var (
 	_ application.AuthorReputationRepository      = (*Repository)(nil)
 	_ application.ArgumentMetricsRepository       = (*Repository)(nil)
 	_ application.AuthorDirectory                 = (*Repository)(nil)
+	_ application.AbuseSignalFactRepository       = (*Repository)(nil)
 )
 
 // NewRepository creates a PostgreSQL repository adapter for persuasion.
