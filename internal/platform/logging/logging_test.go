@@ -155,6 +155,7 @@ func TestRedactValueHandlesEdgeCases(t *testing.T) {
 		{"Authorization: Basic dXNlcjpwYXNz", "[REDACTED]"},
 		{"postgres://user:pass@db/arena", "[REDACTED]"},
 		{"password=hunter2 extra", "[REDACTED]"},
+		{"$argon2id$v=19$m=65536,t=3,p=2$c2FsdHNhbHQ$aGFzaGhhc2g", "[REDACTED]"},
 		{"just a normal note", "just a normal note"},
 	}
 	for _, test := range cases {

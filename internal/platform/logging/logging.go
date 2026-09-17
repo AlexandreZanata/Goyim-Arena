@@ -31,6 +31,7 @@ var sensitiveMarkers = []string{
 	"postgres://",
 	"postgresql://",
 	"password=",
+	"$argon2id$",
 }
 
 // RedactValue returns the value safe for logging: recognized sensitive
