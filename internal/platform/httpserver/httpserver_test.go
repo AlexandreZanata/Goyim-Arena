@@ -7,10 +7,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,6 +136,71 @@ func TestHealthEndpoints(t *testing.T) {
 		if body.Status != test.wantStatus {
 			t.Errorf("%s status field = %q, want %q", test.path, body.Status, test.wantStatus)
 		}
+	}
+}
+
+func TestReadyHandlerWithCheckers(t *testing.T) {
+	t.Parallel()
+
+	// 1. Healthy checker
+	healthyChecker := httpserver.ReadyCheckerFunc(func(ctx context.Context) error {
+		return nil
+	})
+	handler := httpserver.ReadyHandler(healthyChecker)
+	recorder := do(t, handler, "/health/ready")
+	if recorder.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", recorder.Code)
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Status != "ready" {
+		t.Errorf("status = %q, want ready", body.Status)
+	}
+
+	// 2. Failing checker with sensitive error
+	sensitiveErr := errors.New("dial tcp 127.0.0.1:5432: connection refused (dsn: postgres://user:secret@host/db)")
+	failingChecker := httpserver.ReadyCheckerFunc(func(ctx context.Context) error {
+		return sensitiveErr
+	})
+	failingHandler := httpserver.ReadyHandler(failingChecker)
+	failingRecorder := do(t, failingHandler, "/health/ready")
+	if failingRecorder.Code != http.StatusServiceUnavailable {
+		t.Errorf("failing status = %d, want 503", failingRecorder.Code)
+	}
+	if err := json.Unmarshal(failingRecorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body.Status != "unavailable" {
+		t.Errorf("failing status = %q, want unavailable", body.Status)
+	}
+
+	// Proves no error text or credentials leaked to the client
+	responseBody := failingRecorder.Body.String()
+	if strings.Contains(responseBody, "connection refused") ||
+		strings.Contains(responseBody, "secret") ||
+		strings.Contains(responseBody, "postgres://") {
+		t.Fatalf("response leaked sensitive driver error: %s", responseBody)
+	}
+
+	// 3. Multiple checkers where one fails
+	multiHandler := httpserver.ReadyHandler(healthyChecker, failingChecker)
+	multiRecorder := do(t, multiHandler, "/health/ready")
+	if multiRecorder.Code != http.StatusServiceUnavailable {
+		t.Errorf("multi status = %d, want 503", multiRecorder.Code)
+	}
+
+	// 4. NewMux wires checkers
+	mux, err := httpserver.NewMux(stubIDs{value: "test-id"}, nil, failingChecker)
+	if err != nil {
+		t.Fatalf("NewMux error: %v", err)
+	}
+	muxRecorder := do(t, mux, "/health/ready")
+	if muxRecorder.Code != http.StatusServiceUnavailable {
+		t.Errorf("NewMux with failing checker status = %d, want 503", muxRecorder.Code)
 	}
 }
 

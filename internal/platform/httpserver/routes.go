@@ -72,23 +72,23 @@ func ValidateRegistry(routes []Route) error {
 
 // RegisterAll wires the registered routes into a mux with explicit method
 // patterns, so wrong methods answer 405 automatically.
-func RegisterAll(mux *http.ServeMux, routes []Route) error {
+func RegisterAll(mux *http.ServeMux, routes []Route, readyCheckers ...ReadyChecker) error {
 	if err := ValidateRegistry(routes); err != nil {
 		return err
 	}
 	for _, route := range routes {
-		mux.Handle(route.Method+" "+route.Path, handlerFor(route))
+		mux.Handle(route.Method+" "+route.Path, handlerFor(route, readyCheckers...))
 	}
 	return nil
 }
 
 // handlerFor returns the handler of a registered route.
-func handlerFor(route Route) http.Handler {
+func handlerFor(route Route, readyCheckers ...ReadyChecker) http.Handler {
 	switch route.String() {
 	case "GET /health/live":
 		return LiveHandler()
 	case "GET /health/ready":
-		return ReadyHandler()
+		return ReadyHandler(readyCheckers...)
 	default:
 		return http.NotFoundHandler()
 	}

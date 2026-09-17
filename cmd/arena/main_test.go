@@ -368,6 +368,155 @@ func containsRecord(records []map[string]any, key, want string) bool {
 	return false
 }
 
+// TestServerReadinessWithDatabaseURL verifies that the server initializes the database
+// pool and reports ready when the database is up, and unavailable (503) when down.
+func TestServerReadinessWithDatabaseURL(t *testing.T) {
+	if testing.Short() {
+		t.Skip("subprocess readiness test skipped in -short mode")
+	}
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+
+	binary := filepath.Join(t.TempDir(), "arena")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/arena")
+	build.Dir = repoRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, output)
+	}
+
+	dsn := "postgres://arena:arena-local-dev@127.0.0.1:54329/arena?sslmode=disable"
+	if envDSN := os.Getenv("ARENA_DATABASE_URL"); envDSN != "" {
+		dsn = envDSN
+	}
+
+	// 1. Subprocess with healthy database connection
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+
+	cmdHealthy := exec.Command(binary, "server")
+	cmdHealthy.Env = []string{
+		"ARENA_ADDR=" + address,
+		"ARENA_ENV=development",
+		"ARENA_DATABASE_URL=" + dsn,
+		"PATH=" + os.Getenv("PATH"),
+	}
+	if err := cmdHealthy.Start(); err != nil {
+		t.Fatalf("start healthy server: %v", err)
+	}
+	defer func() {
+		_ = cmdHealthy.Process.Kill()
+		_ = cmdHealthy.Wait()
+	}()
+
+	baseURL := "http://" + address
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	deadline := time.Now().Add(10 * time.Second)
+	var readyResp *http.Response
+	for readyResp == nil {
+		if time.Now().After(deadline) {
+			t.Fatal("server with database did not answer /health/ready in time")
+		}
+		resp, err := client.Get(baseURL + "/health/ready")
+		if err == nil {
+			readyResp = resp
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	body, err := io.ReadAll(readyResp.Body)
+	_ = readyResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read ready body: %v", err)
+	}
+	if readyResp.StatusCode != http.StatusOK {
+		t.Fatalf("/health/ready status with active DB = %d, want 200 (body: %s)", readyResp.StatusCode, body)
+	}
+
+	var readyPayload struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(body, &readyPayload); err != nil || readyPayload.Status != "ready" {
+		t.Fatalf("unexpected payload: %s", body)
+	}
+
+	// Terminate healthy server
+	_ = cmdHealthy.Process.Signal(syscall.SIGTERM)
+	_ = cmdHealthy.Wait()
+
+	// 2. Subprocess with unreachable database
+	downListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve down port: %v", err)
+	}
+	downAddress := downListener.Addr().String()
+	_ = downListener.Close()
+
+	const unreachableDSN = "postgres://arena:arena-local-dev@127.0.0.1:54399/arena?sslmode=disable&connect_timeout=1"
+	cmdDown := exec.Command(binary, "server")
+	cmdDown.Env = []string{
+		"ARENA_ADDR=" + downAddress,
+		"ARENA_ENV=development",
+		"ARENA_DATABASE_URL=" + unreachableDSN,
+		"PATH=" + os.Getenv("PATH"),
+	}
+	if err := cmdDown.Start(); err != nil {
+		t.Fatalf("start down server: %v", err)
+	}
+	defer func() {
+		_ = cmdDown.Process.Kill()
+		_ = cmdDown.Wait()
+	}()
+
+	downBaseURL := "http://" + downAddress
+	downDeadline := time.Now().Add(10 * time.Second)
+	var downResp *http.Response
+	for downResp == nil {
+		if time.Now().After(downDeadline) {
+			t.Fatal("down server did not answer /health/ready in time")
+		}
+		resp, err := client.Get(downBaseURL + "/health/ready")
+		if err == nil {
+			downResp = resp
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	downBodyBytes, err := io.ReadAll(downResp.Body)
+	_ = downResp.Body.Close()
+	if err != nil {
+		t.Fatalf("read down body: %v", err)
+	}
+	if downResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("/health/ready status with down DB = %d, want 503 (body: %s)", downResp.StatusCode, downBodyBytes)
+	}
+
+	var downPayload struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(downBodyBytes, &downPayload); err != nil || downPayload.Status != "unavailable" {
+		t.Fatalf("unexpected down payload: %s", downBodyBytes)
+	}
+
+	// Verify no sensitive info leaked
+	downBodyStr := string(downBodyBytes)
+	if strings.Contains(downBodyStr, "arena-local-dev") || strings.Contains(downBodyStr, "54399") {
+		t.Fatalf("down body leaked credentials or DSN: %s", downBodyStr)
+	}
+
+	_ = cmdDown.Process.Signal(syscall.SIGTERM)
+	_ = cmdDown.Wait()
+}
+
 // TestMigrateUsageAndArgumentValidation covers the argument surface of the
 // migrate subcommand without touching a database: help variants print the
 // usage, unknown subcommands and stray arguments fail with the usage text.

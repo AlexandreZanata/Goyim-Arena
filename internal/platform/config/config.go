@@ -17,16 +17,22 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Config is the immutable runtime configuration of the application. All
 // fields are unexported so callers cannot construct a partially validated
 // instance; access happens through documented getters.
 type Config struct {
-	env         Env
-	addr        string
-	databaseURL Secret
-	logLevel    LogLevel
+	env               Env
+	addr              string
+	databaseURL       Secret
+	logLevel          LogLevel
+	dbMaxConns        int32
+	dbMinConns        int32
+	dbMaxConnLifetime time.Duration
+	dbMaxConnIdleTime time.Duration
+	dbAcquireTimeout  time.Duration
 }
 
 // Env is the deployment environment of the process.
@@ -139,10 +145,15 @@ func Load(environ []string) (Config, error) {
 	}
 
 	known := map[string]bool{
-		"ARENA_ENV":          true,
-		"ARENA_ADDR":         true,
-		"ARENA_DATABASE_URL": true,
-		"ARENA_LOG_LEVEL":    true,
+		"ARENA_ENV":                   true,
+		"ARENA_ADDR":                  true,
+		"ARENA_DATABASE_URL":          true,
+		"ARENA_LOG_LEVEL":             true,
+		"ARENA_DB_MAX_CONNS":          true,
+		"ARENA_DB_MIN_CONNS":          true,
+		"ARENA_DB_MAX_CONN_LIFETIME":  true,
+		"ARENA_DB_MAX_CONN_IDLE_TIME": true,
+		"ARENA_DB_ACQUIRE_TIMEOUT":    true,
 	}
 	var validationErrors ValidationErrors
 	for name := range values {
@@ -155,9 +166,14 @@ func Load(environ []string) (Config, error) {
 	}
 
 	config := Config{
-		env:      EnvDevelopment,
-		addr:     "127.0.0.1:8080",
-		logLevel: LogLevelInfo,
+		env:               EnvDevelopment,
+		addr:              "127.0.0.1:8080",
+		logLevel:          LogLevelInfo,
+		dbMaxConns:        10,
+		dbMinConns:        2,
+		dbMaxConnLifetime: 1 * time.Hour,
+		dbMaxConnIdleTime: 30 * time.Minute,
+		dbAcquireTimeout:  5 * time.Second,
 	}
 
 	if raw, present := values["ARENA_ENV"]; present {
@@ -206,6 +222,73 @@ func Load(environ []string) (Config, error) {
 		}
 	}
 
+	if raw, present := values["ARENA_DB_MAX_CONNS"]; present {
+		n, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || n <= 0 {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: "ARENA_DB_MAX_CONNS",
+				Problem:  fmt.Sprintf("invalid value %q (must be a positive integer)", raw),
+			})
+		} else {
+			config.dbMaxConns = int32(n)
+		}
+	}
+
+	if raw, present := values["ARENA_DB_MIN_CONNS"]; present {
+		n, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || n < 0 {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: "ARENA_DB_MIN_CONNS",
+				Problem:  fmt.Sprintf("invalid value %q (must be a non-negative integer)", raw),
+			})
+		} else {
+			config.dbMinConns = int32(n)
+		}
+	}
+
+	if config.dbMinConns > config.dbMaxConns {
+		validationErrors = append(validationErrors, ValidationError{
+			Variable: "ARENA_DB_MIN_CONNS",
+			Problem:  fmt.Sprintf("cannot be greater than ARENA_DB_MAX_CONNS (%d > %d)", config.dbMinConns, config.dbMaxConns),
+		})
+	}
+
+	if raw, present := values["ARENA_DB_MAX_CONN_LIFETIME"]; present {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: "ARENA_DB_MAX_CONN_LIFETIME",
+				Problem:  fmt.Sprintf("invalid duration %q (must be positive, for example 1h, 30m)", raw),
+			})
+		} else {
+			config.dbMaxConnLifetime = d
+		}
+	}
+
+	if raw, present := values["ARENA_DB_MAX_CONN_IDLE_TIME"]; present {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: "ARENA_DB_MAX_CONN_IDLE_TIME",
+				Problem:  fmt.Sprintf("invalid duration %q (must be positive, for example 30m, 10m)", raw),
+			})
+		} else {
+			config.dbMaxConnIdleTime = d
+		}
+	}
+
+	if raw, present := values["ARENA_DB_ACQUIRE_TIMEOUT"]; present {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: "ARENA_DB_ACQUIRE_TIMEOUT",
+				Problem:  fmt.Sprintf("invalid duration %q (must be positive, for example 5s, 10s)", raw),
+			})
+		} else {
+			config.dbAcquireTimeout = d
+		}
+	}
+
 	// Production-specific safety rules: the plan forbids insecure production
 	// defaults, so required secrets must be present in that environment.
 	if config.env == EnvProduction && !config.databaseURL.IsSet() {
@@ -246,12 +329,27 @@ func (config Config) DatabaseURL() Secret { return config.databaseURL }
 // LogLevel returns the minimum log severity.
 func (config Config) LogLevel() LogLevel { return config.logLevel }
 
+// DBMaxConns returns the maximum connection limit of the database pool.
+func (config Config) DBMaxConns() int32 { return config.dbMaxConns }
+
+// DBMinConns returns the minimum number of idle connections in the pool.
+func (config Config) DBMinConns() int32 { return config.dbMinConns }
+
+// DBMaxConnLifetime returns the maximum connection lifetime in the pool.
+func (config Config) DBMaxConnLifetime() time.Duration { return config.dbMaxConnLifetime }
+
+// DBMaxConnIdleTime returns the maximum connection idle duration.
+func (config Config) DBMaxConnIdleTime() time.Duration { return config.dbMaxConnIdleTime }
+
+// DBAcquireTimeout returns the timeout for acquiring a connection from the pool.
+func (config Config) DBAcquireTimeout() time.Duration { return config.dbAcquireTimeout }
+
 // String implements fmt.Stringer with a fully redacted representation, so a
 // Config can be safely logged without leaking any value.
 func (config Config) String() string {
 	return fmt.Sprintf(
-		"config{env:%s addr:%s database_url:%s log_level:%s}",
-		config.env, config.addr, config.databaseURL, config.logLevel,
+		"config{env:%s addr:%s database_url:%s log_level:%s db_max_conns:%d db_min_conns:%d}",
+		config.env, config.addr, config.databaseURL, config.logLevel, config.dbMaxConns, config.dbMinConns,
 	)
 }
 

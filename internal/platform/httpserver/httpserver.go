@@ -191,6 +191,22 @@ type statusBody struct {
 	Status string `json:"status"`
 }
 
+// ReadyChecker checks whether a dependency (e.g. database pool) is ready to serve traffic.
+type ReadyChecker interface {
+	CheckReadiness(ctx context.Context) error
+}
+
+// ReadyCheckerFunc adapts a regular function to the ReadyChecker interface.
+type ReadyCheckerFunc func(ctx context.Context) error
+
+// CheckReadiness executes the underlying readiness check function.
+func (f ReadyCheckerFunc) CheckReadiness(ctx context.Context) error {
+	return f(ctx)
+}
+
+// defaultReadyTimeout bounds individual readiness checks to avoid hanging probes.
+const defaultReadyTimeout = 2 * time.Second
+
 // LiveHandler reports liveness: the process is running. It never inspects
 // dependencies, so a wedged database cannot make the supervisor restart a
 // healthy-but-busy process (readiness is the deployment gate instead).
@@ -198,12 +214,31 @@ func LiveHandler() http.Handler {
 	return writeStatus("live")
 }
 
-// ReadyHandler reports readiness. At this stage it validates process and
-// configuration only — both are proven before the serve loop starts — and
-// always answers ready. Dependency checks arrive with the database phase
-// and must extend this handler, not the liveness one.
-func ReadyHandler() http.Handler {
-	return writeStatus("ready")
+// ReadyHandler reports readiness. It executes every registered ReadyChecker;
+// if all succeed (or none are configured), it responds with 200 OK and {"status":"ready"}.
+// If any checker fails, it responds with 503 Service Unavailable and {"status":"unavailable"}.
+// It never leaks internal errors, connection strings or credentials to the client.
+func ReadyHandler(checkers ...ReadyChecker) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+
+		for _, checker := range checkers {
+			if checker == nil {
+				continue
+			}
+			ctx, cancel := context.WithTimeout(request.Context(), defaultReadyTimeout)
+			err := checker.CheckReadiness(ctx)
+			cancel()
+			if err != nil {
+				writer.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(writer).Encode(statusBody{Status: "unavailable"})
+				return
+			}
+		}
+
+		writer.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(writer).Encode(statusBody{Status: "ready"})
+	})
 }
 
 // writeStatus renders the fixed JSON health document.
@@ -220,9 +255,9 @@ func writeStatus(status string) http.Handler {
 // method patterns, so wrong methods answer 405 automatically. Registration
 // failures (duplicate or malformed registry entries) return an error
 // instead of panicking at boot.
-func NewMux(ids ports.IDGenerator, locales *locale.Resolver) (http.Handler, error) {
+func NewMux(ids ports.IDGenerator, locales *locale.Resolver, readyCheckers ...ReadyChecker) (http.Handler, error) {
 	mux := http.NewServeMux()
-	if err := RegisterAll(mux, RegisteredRoutes()); err != nil {
+	if err := RegisterAll(mux, RegisteredRoutes(), readyCheckers...); err != nil {
 		return nil, err
 	}
 	handler := requestid.Middleware(ids, mux)

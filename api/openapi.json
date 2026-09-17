@@ -34,10 +34,18 @@
       "get": {
         "operationId": "getHealthReady",
         "summary": "Readiness probe",
-        "description": "Reports deployment readiness. At the current stage it validates process and configuration only; dependency checks arrive with the database phase.",
+        "description": "Reports deployment readiness. Validates process, configuration and database connectivity when configured.",
         "responses": {
           "200": {
-            "description": "Process and configuration are ready.",
+            "description": "Process, configuration and dependencies are ready.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthStatus" }
+              }
+            }
+          },
+          "503": {
+            "description": "One or more dependencies are unavailable.",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/HealthStatus" }
@@ -56,7 +64,7 @@
         "properties": {
           "status": {
             "type": "string",
-            "enum": ["live", "ready"],
+            "enum": ["live", "ready", "unavailable"],
             "description": "Probe verdict."
           }
         }

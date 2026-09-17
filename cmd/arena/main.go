@@ -15,6 +15,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/buildinfo"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbpool"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
@@ -81,7 +82,21 @@ func runServer(args []string, stdout *os.File) error {
 
 	ids := clockseed.NewIDGenerator("req", clockseed.NewRandom(), clockseed.NewClock())
 	locResolver := locale.NewResolver()
-	handler, err := httpserver.NewMux(ids, locResolver)
+
+	var readyCheckers []httpserver.ReadyChecker
+	if cfg.DatabaseURL().IsSet() {
+		dsn := string(cfg.DatabaseURL().Unredacted())
+		poolCfg := dbpool.FromConfig(cfg)
+		dbClock := clockseed.NewClock()
+		pool, err := dbpool.New(context.Background(), dsn, poolCfg, logger, dbClock)
+		if err != nil {
+			return fmt.Errorf("initialize database pool: %w", err)
+		}
+		defer pool.Close()
+		readyCheckers = append(readyCheckers, pool)
+	}
+
+	handler, err := httpserver.NewMux(ids, locResolver, readyCheckers...)
 	if err != nil {
 		return err
 	}

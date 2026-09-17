@@ -232,3 +232,73 @@ func TestMustLoadPanicsOnInvalidEnvironment(t *testing.T) {
 
 	MustLoad()
 }
+
+func TestLoadPoolConfiguration(t *testing.T) {
+	t.Parallel()
+
+	config, err := Load(environ(
+		"ARENA_DB_MAX_CONNS=25",
+		"ARENA_DB_MIN_CONNS=5",
+		"ARENA_DB_MAX_CONN_LIFETIME=2h",
+		"ARENA_DB_MAX_CONN_IDLE_TIME=45m",
+		"ARENA_DB_ACQUIRE_TIMEOUT=10s",
+	))
+	if err != nil {
+		t.Fatalf("load valid pool configuration: %v", err)
+	}
+
+	if config.DBMaxConns() != 25 {
+		t.Errorf("DBMaxConns = %d, want 25", config.DBMaxConns())
+	}
+	if config.DBMinConns() != 5 {
+		t.Errorf("DBMinConns = %d, want 5", config.DBMinConns())
+	}
+	if config.DBMaxConnLifetime().Hours() != 2 {
+		t.Errorf("DBMaxConnLifetime = %v, want 2h", config.DBMaxConnLifetime())
+	}
+	if config.DBMaxConnIdleTime().Minutes() != 45 {
+		t.Errorf("DBMaxConnIdleTime = %v, want 45m", config.DBMaxConnIdleTime())
+	}
+	if config.DBAcquireTimeout().Seconds() != 10 {
+		t.Errorf("DBAcquireTimeout = %v, want 10s", config.DBAcquireTimeout())
+	}
+}
+
+func TestLoadRejectsInvalidPoolConfiguration(t *testing.T) {
+	t.Parallel()
+
+	// min_conns > max_conns
+	_, err := Load(environ(
+		"ARENA_DB_MAX_CONNS=5",
+		"ARENA_DB_MIN_CONNS=10",
+	))
+	if err == nil {
+		t.Fatal("expected error when min_conns > max_conns")
+	}
+	if !strings.Contains(err.Error(), "ARENA_DB_MIN_CONNS") {
+		t.Errorf("error should mention ARENA_DB_MIN_CONNS: %v", err)
+	}
+
+	// invalid durations and non-positive numbers
+	_, err = Load(environ(
+		"ARENA_DB_MAX_CONNS=0",
+		"ARENA_DB_MIN_CONNS=-1",
+		"ARENA_DB_MAX_CONN_LIFETIME=not-a-duration",
+		"ARENA_DB_MAX_CONN_IDLE_TIME=-5m",
+		"ARENA_DB_ACQUIRE_TIMEOUT=0s",
+	))
+	if err == nil {
+		t.Fatal("expected error for invalid pool values")
+	}
+	for _, expectedVar := range []string{
+		"ARENA_DB_MAX_CONNS",
+		"ARENA_DB_MIN_CONNS",
+		"ARENA_DB_MAX_CONN_LIFETIME",
+		"ARENA_DB_MAX_CONN_IDLE_TIME",
+		"ARENA_DB_ACQUIRE_TIMEOUT",
+	} {
+		if !strings.Contains(err.Error(), expectedVar) {
+			t.Errorf("error should mention %s: %v", expectedVar, err)
+		}
+	}
+}
