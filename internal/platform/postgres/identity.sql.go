@@ -286,6 +286,26 @@ func (q *Queries) GetActiveSessionByTokenHash(ctx context.Context, tokenHash []b
 	return i, err
 }
 
+const getEmailVerificationTokenByHash = `-- name: GetEmailVerificationTokenByHash :one
+SELECT id, account_id, token_hash, expires_at, used_at, created_at
+FROM app.email_verification_tokens
+WHERE token_hash = $1
+`
+
+func (q *Queries) GetEmailVerificationTokenByHash(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error) {
+	row := q.db.QueryRow(ctx, getEmailVerificationTokenByHash, tokenHash)
+	var i AppEmailVerificationToken
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.TokenHash,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getPasswordCredentialByAccountID = `-- name: GetPasswordCredentialByAccountID :one
 SELECT account_id, password_hash, algorithm, version, created_at, updated_at
 FROM app.password_credentials
@@ -304,6 +324,17 @@ func (q *Queries) GetPasswordCredentialByAccountID(ctx context.Context, accountI
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const invalidateActiveEmailVerificationTokens = `-- name: InvalidateActiveEmailVerificationTokens :exec
+UPDATE app.email_verification_tokens
+SET used_at = now()
+WHERE account_id = $1 AND used_at IS NULL
+`
+
+func (q *Queries) InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, invalidateActiveEmailVerificationTokens, accountID)
+	return err
 }
 
 const markEmailVerificationTokenUsed = `-- name: MarkEmailVerificationTokenUsed :exec

@@ -2,6 +2,23 @@
 // ports for the identity and authentication module.
 package application
 
+import (
+	"context"
+	"time"
+
+	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
+)
+
+// Clock exposes wall-clock time to identity application use cases.
+type Clock interface {
+	Now() time.Time
+}
+
+// Random exposes cryptographically secure random bytes to identity application use cases.
+type Random interface {
+	Read(buffer []byte) (int, error)
+}
+
 // PasswordHasher abstracts secure password hashing, constant-time verification,
 // rehash detection for evolving security parameters, and dummy hashes for
 // uniform login timing (mitigating user enumeration timing attacks per THR-AUTH-02).
@@ -23,4 +40,50 @@ type PasswordHasher interface {
 	// current parameters to be used when an account does not exist, ensuring
 	// identical CPU and memory consumption to prevent user enumeration (THR-AUTH-02).
 	DummyHash() string
+}
+
+// AccountRepository defines persistent storage operations for accounts and credentials.
+type AccountRepository interface {
+	// CreateAccountWithPassword atomically creates an account in Pending status alongside its password credential.
+	CreateAccountWithPassword(ctx context.Context, email domain.Email, passwordHash string) (*domain.Account, error)
+
+	// GetAccountByEmail looks up an account by its case-insensitive email address.
+	GetAccountByEmail(ctx context.Context, email domain.Email) (*domain.Account, error)
+
+	// GetAccountByID looks up an account by its unique identifier.
+	GetAccountByID(ctx context.Context, id domain.AccountID) (*domain.Account, error)
+
+	// SetEmailVerified marks an account as Active and records the email verification timestamp.
+	SetEmailVerified(ctx context.Context, id domain.AccountID, verifiedAt time.Time) error
+}
+
+// VerificationTokenRecord represents a stored single-use email verification token.
+type VerificationTokenRecord struct {
+	ID        string
+	AccountID domain.AccountID
+	TokenHash []byte
+	ExpiresAt time.Time
+	UsedAt    *time.Time
+	CreatedAt time.Time
+}
+
+// VerificationTokenRepository manages single-use email verification tokens.
+type VerificationTokenRepository interface {
+	// CreateVerificationToken stores a new cryptographic token hash for an account.
+	CreateVerificationToken(ctx context.Context, accountID domain.AccountID, tokenHash []byte, expiresAt time.Time) error
+
+	// GetVerificationToken retrieves a verification token record by its binary hash.
+	GetVerificationToken(ctx context.Context, tokenHash []byte) (*VerificationTokenRecord, error)
+
+	// MarkTokenUsed records that the token has been consumed, preventing replay.
+	MarkTokenUsed(ctx context.Context, tokenID string, usedAt time.Time) error
+
+	// InvalidateActiveTokens marks all existing unconsumed verification tokens for the account as used.
+	InvalidateActiveTokens(ctx context.Context, accountID domain.AccountID) error
+}
+
+// EmailSender delivers or enqueues transactional verification emails.
+type EmailSender interface {
+	// SendVerificationEmail delivers or enqueues an email containing the unhashed verification token.
+	SendVerificationEmail(ctx context.Context, email domain.Email, token string) error
 }

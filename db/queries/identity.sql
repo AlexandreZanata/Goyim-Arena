@@ -57,6 +57,16 @@ SELECT id, account_id, token_hash, expires_at, used_at, created_at
 FROM app.email_verification_tokens
 WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now();
 
+-- name: GetEmailVerificationTokenByHash :one
+SELECT id, account_id, token_hash, expires_at, used_at, created_at
+FROM app.email_verification_tokens
+WHERE token_hash = $1;
+
+-- name: InvalidateActiveEmailVerificationTokens :exec
+UPDATE app.email_verification_tokens
+SET used_at = now()
+WHERE account_id = $1 AND used_at IS NULL;
+
 -- name: MarkEmailVerificationTokenUsed :exec
 UPDATE app.email_verification_tokens
 SET used_at = now()
