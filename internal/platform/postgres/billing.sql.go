@@ -95,6 +95,48 @@ func (q *Queries) CreateArenaPassLot(ctx context.Context, arg CreateArenaPassLot
 	return i, err
 }
 
+const createArenaPassLotIfAbsent = `-- name: CreateArenaPassLotIfAbsent :one
+INSERT INTO app.arena_pass_lots (account_id, origin, quantity, remaining_quantity, expires_at, reference)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (account_id, origin, reference) DO NOTHING
+RETURNING id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
+`
+
+type CreateArenaPassLotIfAbsentParams struct {
+	AccountID         pgtype.UUID
+	Origin            string
+	Quantity          int32
+	RemainingQuantity int32
+	ExpiresAt         pgtype.Timestamptz
+	Reference         string
+}
+
+// CreateArenaPassLotIfAbsent inserts the grant exactly once per
+// (account, origin, reference). On a conflict it returns no row, which tells
+// the adapter to resolve the original lot (P07-T02).
+func (q *Queries) CreateArenaPassLotIfAbsent(ctx context.Context, arg CreateArenaPassLotIfAbsentParams) (AppArenaPassLot, error) {
+	row := q.db.QueryRow(ctx, createArenaPassLotIfAbsent,
+		arg.AccountID,
+		arg.Origin,
+		arg.Quantity,
+		arg.RemainingQuantity,
+		arg.ExpiresAt,
+		arg.Reference,
+	)
+	var i AppArenaPassLot
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Origin,
+		&i.Quantity,
+		&i.RemainingQuantity,
+		&i.ExpiresAt,
+		&i.Reference,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getArenaPassLot = `-- name: GetArenaPassLot :one
 SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
 FROM app.arena_pass_lots
@@ -103,6 +145,34 @@ WHERE id = $1
 
 func (q *Queries) GetArenaPassLot(ctx context.Context, id pgtype.UUID) (AppArenaPassLot, error) {
 	row := q.db.QueryRow(ctx, getArenaPassLot, id)
+	var i AppArenaPassLot
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Origin,
+		&i.Quantity,
+		&i.RemainingQuantity,
+		&i.ExpiresAt,
+		&i.Reference,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getArenaPassLotByGrant = `-- name: GetArenaPassLotByGrant :one
+SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
+FROM app.arena_pass_lots
+WHERE account_id = $1 AND origin = $2 AND reference = $3
+`
+
+type GetArenaPassLotByGrantParams struct {
+	AccountID pgtype.UUID
+	Origin    string
+	Reference string
+}
+
+func (q *Queries) GetArenaPassLotByGrant(ctx context.Context, arg GetArenaPassLotByGrantParams) (AppArenaPassLot, error) {
+	row := q.db.QueryRow(ctx, getArenaPassLotByGrant, arg.AccountID, arg.Origin, arg.Reference)
 	var i AppArenaPassLot
 	err := row.Scan(
 		&i.ID,

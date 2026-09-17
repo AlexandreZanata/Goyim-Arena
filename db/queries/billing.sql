@@ -9,6 +9,20 @@ INSERT INTO app.arena_pass_lots (account_id, origin, quantity, remaining_quantit
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at;
 
+-- CreateArenaPassLotIfAbsent inserts the grant exactly once per
+-- (account, origin, reference). On a conflict it returns no row, which tells
+-- the adapter to resolve the original lot (P07-T02).
+-- name: CreateArenaPassLotIfAbsent :one
+INSERT INTO app.arena_pass_lots (account_id, origin, quantity, remaining_quantity, expires_at, reference)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (account_id, origin, reference) DO NOTHING
+RETURNING id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at;
+
+-- name: GetArenaPassLotByGrant :one
+SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
+FROM app.arena_pass_lots
+WHERE account_id = $1 AND origin = $2 AND reference = $3;
+
 -- name: GetArenaPassLot :one
 SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
 FROM app.arena_pass_lots

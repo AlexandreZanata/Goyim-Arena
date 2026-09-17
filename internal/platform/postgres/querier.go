@@ -33,6 +33,10 @@ type Querier interface {
 	// no query mutates a lot's quantity or expiration. The runtime grants
 	// enforce the same boundary in the database (P07-T01).
 	CreateArenaPassLot(ctx context.Context, arg CreateArenaPassLotParams) (AppArenaPassLot, error)
+	// CreateArenaPassLotIfAbsent inserts the grant exactly once per
+	// (account, origin, reference). On a conflict it returns no row, which tells
+	// the adapter to resolve the original lot (P07-T02).
+	CreateArenaPassLotIfAbsent(ctx context.Context, arg CreateArenaPassLotIfAbsentParams) (AppArenaPassLot, error)
 	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
 	CreatePasswordCredential(ctx context.Context, arg CreatePasswordCredentialParams) error
@@ -76,6 +80,7 @@ type Querier interface {
 	GetActivePasswordResetToken(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetActiveSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	GetArenaPassLot(ctx context.Context, id pgtype.UUID) (AppArenaPassLot, error)
+	GetArenaPassLotByGrant(ctx context.Context, arg GetArenaPassLotByGrantParams) (AppArenaPassLot, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
 	// app.profiles with the explicit opt-ins. A missing preferences row resolves
 	// to the conservative default (marketing opt-in false), never to an implicit
