@@ -36,6 +36,10 @@ type ProfileRepository interface {
 
 	// UpdateProfileLocale replaces the interface locale preference.
 	UpdateProfileLocale(ctx context.Context, accountID domain.AccountID, locale domain.Locale, updatedAt time.Time) (*domain.Profile, error)
+
+	// UpdateProfileTimezone replaces the optional IANA timezone preference;
+	// the zero timezone clears it.
+	UpdateProfileTimezone(ctx context.Context, accountID domain.AccountID, timezone domain.Timezone, updatedAt time.Time) (*domain.Profile, error)
 }
 
 // AccountEligibility is the consumer-oriented port that answers whether an

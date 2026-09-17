@@ -74,6 +74,7 @@ type Querier interface {
 	UpdateAccountStatus(ctx context.Context, arg UpdateAccountStatusParams) (AppAccount, error)
 	UpdatePasswordCredential(ctx context.Context, arg UpdatePasswordCredentialParams) error
 	UpdateProfileLocale(ctx context.Context, arg UpdateProfileLocaleParams) (AppProfile, error)
+	UpdateProfileTimezone(ctx context.Context, arg UpdateProfileTimezoneParams) (AppProfile, error)
 	UpdateProfileUsername(ctx context.Context, arg UpdateProfileUsernameParams) (AppProfile, error)
 	UpdateSessionLastSeen(ctx context.Context, id pgtype.UUID) error
 	UpsertCommunicationPreferences(ctx context.Context, arg UpsertCommunicationPreferencesParams) (AppCommunicationPreference, error)

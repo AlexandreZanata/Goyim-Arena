@@ -31,7 +31,7 @@ const createProfile = `-- name: CreateProfile :one
 
 INSERT INTO app.profiles (account_id, username, username_normalized, interface_locale)
 VALUES ($1, $2, $3, $4)
-RETURNING account_id, username, username_normalized, interface_locale, created_at, updated_at
+RETURNING account_id, username, username_normalized, interface_locale, created_at, updated_at, timezone
 `
 
 type CreateProfileParams struct {
@@ -63,6 +63,7 @@ func (q *Queries) CreateProfile(ctx context.Context, arg CreateProfileParams) (A
 		&i.InterfaceLocale,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -131,7 +132,7 @@ func (q *Queries) GetLastUsernameChangeAt(ctx context.Context, accountID pgtype.
 }
 
 const getProfileByAccountID = `-- name: GetProfileByAccountID :one
-SELECT account_id, username, username_normalized, interface_locale, created_at, updated_at
+SELECT account_id, username, username_normalized, interface_locale, created_at, updated_at, timezone
 FROM app.profiles
 WHERE account_id = $1
 `
@@ -146,6 +147,7 @@ func (q *Queries) GetProfileByAccountID(ctx context.Context, accountID pgtype.UU
 		&i.InterfaceLocale,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -257,7 +259,7 @@ const updateProfileLocale = `-- name: UpdateProfileLocale :one
 UPDATE app.profiles
 SET interface_locale = $2, updated_at = now()
 WHERE account_id = $1
-RETURNING account_id, username, username_normalized, interface_locale, created_at, updated_at
+RETURNING account_id, username, username_normalized, interface_locale, created_at, updated_at, timezone
 `
 
 type UpdateProfileLocaleParams struct {
@@ -275,6 +277,34 @@ func (q *Queries) UpdateProfileLocale(ctx context.Context, arg UpdateProfileLoca
 		&i.InterfaceLocale,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Timezone,
+	)
+	return i, err
+}
+
+const updateProfileTimezone = `-- name: UpdateProfileTimezone :one
+UPDATE app.profiles
+SET timezone = $2, updated_at = now()
+WHERE account_id = $1
+RETURNING account_id, username, username_normalized, interface_locale, created_at, updated_at, timezone
+`
+
+type UpdateProfileTimezoneParams struct {
+	AccountID pgtype.UUID
+	Timezone  pgtype.Text
+}
+
+func (q *Queries) UpdateProfileTimezone(ctx context.Context, arg UpdateProfileTimezoneParams) (AppProfile, error) {
+	row := q.db.QueryRow(ctx, updateProfileTimezone, arg.AccountID, arg.Timezone)
+	var i AppProfile
+	err := row.Scan(
+		&i.AccountID,
+		&i.Username,
+		&i.UsernameNormalized,
+		&i.InterfaceLocale,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Timezone,
 	)
 	return i, err
 }
@@ -283,7 +313,7 @@ const updateProfileUsername = `-- name: UpdateProfileUsername :one
 UPDATE app.profiles
 SET username = $2, username_normalized = $3, updated_at = now()
 WHERE account_id = $1
-RETURNING account_id, username, username_normalized, interface_locale, created_at, updated_at
+RETURNING account_id, username, username_normalized, interface_locale, created_at, updated_at, timezone
 `
 
 type UpdateProfileUsernameParams struct {
@@ -302,6 +332,7 @@ func (q *Queries) UpdateProfileUsername(ctx context.Context, arg UpdateProfileUs
 		&i.InterfaceLocale,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Timezone,
 	)
 	return i, err
 }

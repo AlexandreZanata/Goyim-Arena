@@ -46,11 +46,12 @@ func (s *stubEligibility) EnsureEligible(_ context.Context, accountID domain.Acc
 }
 
 type inMemoryProfileRepo struct {
-	mu            sync.Mutex
-	profiles      map[domain.AccountID]*domain.Profile
-	history       map[domain.AccountID][]domain.UsernameChange
-	localeUpdates int
-	createCalls   int
+	mu              sync.Mutex
+	profiles        map[domain.AccountID]*domain.Profile
+	history         map[domain.AccountID][]domain.UsernameChange
+	localeUpdates   int
+	timezoneUpdates int
+	createCalls     int
 }
 
 func newInMemoryProfileRepo() *inMemoryProfileRepo {
@@ -152,6 +153,19 @@ func (r *inMemoryProfileRepo) UpdateProfileLocale(_ context.Context, accountID d
 	if err := profile.ChangeLocale(locale, updatedAt); err != nil {
 		return nil, err
 	}
+	return profile, nil
+}
+
+func (r *inMemoryProfileRepo) UpdateProfileTimezone(_ context.Context, accountID domain.AccountID, timezone domain.Timezone, updatedAt time.Time) (*domain.Profile, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	profile, exists := r.profiles[accountID]
+	if !exists {
+		return nil, application.ErrProfileNotFound
+	}
+	r.timezoneUpdates++
+	profile.ChangeTimezone(timezone, updatedAt)
 	return profile, nil
 }
 

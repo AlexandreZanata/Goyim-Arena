@@ -195,6 +195,32 @@ func (r *Repository) UpdateProfileLocale(ctx context.Context, accountID domain.A
 	return mapProfileRow(row)
 }
 
+// UpdateProfileTimezone replaces the optional IANA timezone preference; the
+// zero timezone clears it.
+func (r *Repository) UpdateProfileTimezone(ctx context.Context, accountID domain.AccountID, timezone domain.Timezone, updatedAt time.Time) (*domain.Profile, error) {
+	pgUUID, err := pgUUIDFromAccountID(accountID)
+	if err != nil {
+		return nil, application.ErrProfileNotFound
+	}
+
+	stored := pgtype.Text{}
+	if !timezone.IsZero() {
+		stored = pgtype.Text{String: timezone.String(), Valid: true}
+	}
+
+	row, err := r.queries.UpdateProfileTimezone(ctx, platformpg.UpdateProfileTimezoneParams{
+		AccountID: pgUUID,
+		Timezone:  stored,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, application.ErrProfileNotFound
+		}
+		return nil, fmt.Errorf("update profile timezone: %w", err)
+	}
+	return mapProfileRow(row)
+}
+
 // GetPublicProfileByUsername returns the explicit public projection of the
 // profile that owns the normalized username. It deliberately selects only
 // username, interface locale and creation instant: no email, no account
@@ -348,10 +374,19 @@ func mapProfileRow(row platformpg.AppProfile) (*domain.Profile, error) {
 		return nil, fmt.Errorf("stored interface locale is invalid: %w", err)
 	}
 
+	timezone := domain.Timezone{}
+	if row.Timezone.Valid {
+		timezone, err = domain.ParseTimezone(row.Timezone.String)
+		if err != nil {
+			return nil, fmt.Errorf("stored timezone is invalid: %w", err)
+		}
+	}
+
 	return domain.ReconstituteProfile(
 		domain.AccountID(uuidToString(row.AccountID)),
 		username,
 		locale,
+		timezone,
 		row.CreatedAt.Time,
 		row.UpdatedAt.Time,
 	)

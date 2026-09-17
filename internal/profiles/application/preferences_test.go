@@ -3,6 +3,8 @@ package application_test
 import (
 	"context"
 	"errors"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -80,6 +82,26 @@ func newPreferencesFixture(t *testing.T, accountID domain.AccountID) (*inMemoryP
 	eligibility := &stubEligibility{eligible: map[domain.AccountID]bool{accountID: true}}
 	clock := &fakeClock{now: time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)}
 	return repo, eligibility, clock
+}
+
+// TestCommunicationPreferencesDTOExposesOnlyAllowedFields snapshots the
+// projection consumed by notifications: exactly the account, the interface
+// locale and the explicit opt-in. There is no content_language field: the
+// Arena content language is independent from interface preferences.
+func TestCommunicationPreferencesDTOExposesOnlyAllowedFields(t *testing.T) {
+	typ := reflect.TypeOf(application.CommunicationPreferences{})
+	want := []string{"AccountID", "InterfaceLocale", "MarketingOptIn"}
+	if typ.NumField() != len(want) {
+		t.Fatalf("CommunicationPreferences has %d fields, want exactly %d", typ.NumField(), len(want))
+	}
+	for i, expected := range want {
+		if got := typ.Field(i).Name; got != expected {
+			t.Errorf("field %d = %q, want %q", i, got, expected)
+		}
+		if lowered := strings.ToLower(typ.Field(i).Name); strings.Contains(lowered, "contentlanguage") || strings.Contains(lowered, "content") {
+			t.Fatalf("preferences must not carry content language: field %q", typ.Field(i).Name)
+		}
+	}
 }
 
 func TestGetCommunicationPreferencesUseCase(t *testing.T) {

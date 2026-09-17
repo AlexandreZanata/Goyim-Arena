@@ -75,6 +75,8 @@ type AppProfile struct {
 	InterfaceLocale    string
 	CreatedAt          pgtype.Timestamptz
 	UpdatedAt          pgtype.Timestamptz
+	// Optional IANA timezone preference of the account; NULL means not informed (UTC fallback)
+	Timezone pgtype.Text
 }
 
 // goose forward-only migration history for the app schema (schema_metadata version table required by the master plan)

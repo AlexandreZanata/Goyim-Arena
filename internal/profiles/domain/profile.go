@@ -20,26 +20,29 @@ func (id AccountID) IsZero() bool {
 	return strings.TrimSpace(string(id)) == ""
 }
 
-// Profile is the aggregate root of the profiles module: the public username
-// and the interface locale preference of one account. It deliberately holds
-// no email, credential or payment-provider data (docs/PRIVACY.md).
+// Profile is the aggregate root of the profiles module: the public username,
+// the interface locale preference and the optional IANA timezone of one
+// account. It deliberately holds no email, credential or payment-provider
+// data (docs/PRIVACY.md).
 type Profile struct {
 	accountID AccountID
 	username  Username
 	locale    Locale
+	timezone  Timezone
 	createdAt time.Time
 	updatedAt time.Time
 }
 
-// NewProfile creates a validated profile for an account.
+// NewProfile creates a validated profile for an account. The timezone starts
+// unset: timezone is an optional preference informed separately.
 func NewProfile(accountID AccountID, username Username, locale Locale, now time.Time) (*Profile, error) {
-	return ReconstituteProfile(accountID, username, locale, now, now)
+	return ReconstituteProfile(accountID, username, locale, Timezone{}, now, now)
 }
 
 // ReconstituteProfile rebuilds a Profile from persistent state, validating
 // the same invariants without re-running creation rules. Adapters use it to
 // map stored rows.
-func ReconstituteProfile(accountID AccountID, username Username, locale Locale, createdAt, updatedAt time.Time) (*Profile, error) {
+func ReconstituteProfile(accountID AccountID, username Username, locale Locale, timezone Timezone, createdAt, updatedAt time.Time) (*Profile, error) {
 	if accountID.IsZero() {
 		return nil, ErrEmptyAccountID
 	}
@@ -57,6 +60,7 @@ func ReconstituteProfile(accountID AccountID, username Username, locale Locale, 
 		accountID: accountID,
 		username:  username,
 		locale:    locale,
+		timezone:  timezone,
 		createdAt: createdAt,
 		updatedAt: updatedAt,
 	}, nil
@@ -75,6 +79,12 @@ func (p *Profile) Username() Username {
 // Locale returns the interface locale preference.
 func (p *Profile) Locale() Locale {
 	return p.locale
+}
+
+// Timezone returns the optional IANA timezone preference; the zero value
+// means "not informed".
+func (p *Profile) Timezone() Timezone {
+	return p.timezone
 }
 
 // CreatedAt returns the profile creation timestamp.
@@ -98,7 +108,8 @@ func (p *Profile) ChangeUsername(change UsernameChange) error {
 }
 
 // ChangeLocale replaces the interface locale preference. It never touches
-// content_language, which belongs to Arena content and is immutable.
+// content_language, which belongs to Arena content and is immutable, nor the
+// timezone, which is an independent preference.
 func (p *Profile) ChangeLocale(locale Locale, now time.Time) error {
 	if locale.IsZero() {
 		return ErrEmptyLocale
@@ -109,4 +120,13 @@ func (p *Profile) ChangeLocale(locale Locale, now time.Time) error {
 	p.locale = locale
 	p.updatedAt = now
 	return nil
+}
+
+// ChangeTimezone replaces the optional timezone preference; the zero
+// timezone clears it. The value object is already validated at parse time,
+// so this transition is infallible. It never touches the interface locale or
+// content_language.
+func (p *Profile) ChangeTimezone(timezone Timezone, now time.Time) {
+	p.timezone = timezone
+	p.updatedAt = now
 }

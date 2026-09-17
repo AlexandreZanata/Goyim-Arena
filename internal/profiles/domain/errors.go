@@ -20,6 +20,7 @@ const (
 	CodeEmptyLocale             ErrorCode = "PROFILE_EMPTY_LOCALE"
 	CodeInvalidLocale           ErrorCode = "PROFILE_INVALID_LOCALE"
 	CodeUnsupportedLocale       ErrorCode = "PROFILE_UNSUPPORTED_LOCALE"
+	CodeInvalidTimezone         ErrorCode = "PROFILE_INVALID_TIMEZONE"
 )
 
 // DomainError represents an invariant or rule failure in the profiles domain.
@@ -55,4 +56,5 @@ var (
 	ErrEmptyLocale             = DomainError{Code: CodeEmptyLocale, Message: "interface locale cannot be empty"}
 	ErrInvalidLocale           = DomainError{Code: CodeInvalidLocale, Message: "interface locale is not a well-formed BCP 47 tag"}
 	ErrUnsupportedLocale       = DomainError{Code: CodeUnsupportedLocale, Message: "interface locale is not supported by the product"}
+	ErrInvalidTimezone         = DomainError{Code: CodeInvalidTimezone, Message: "timezone is not a valid IANA time zone name"}
 )

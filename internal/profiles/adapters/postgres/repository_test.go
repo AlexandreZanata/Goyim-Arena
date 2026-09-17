@@ -491,6 +491,60 @@ func TestRepository_CommunicationPreferencesDefaultsAndAudit(t *testing.T) {
 	}
 }
 
+func TestRepository_UpdateProfileTimezone(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	pool := testDB.Pool.Pool()
+	repo := profilespg.NewRepository(pool)
+	q := platformpg.New(pool)
+
+	acc := createEligibleAccount(t, ctx, q, "timezone@arena.example.com")
+	accountID := domain.AccountID(uuidString(acc.ID))
+	created, err := repo.CreateProfileWithUsernameHistory(ctx, accountID, mustUsername(t, "TimezoneHero"), mustLocale(t, "pt-BR"), time.Now().UTC())
+	if err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+	if !created.Timezone().IsZero() {
+		t.Fatal("new profiles must start with an unset timezone")
+	}
+
+	saoPaulo, err := domain.ParseTimezone("America/Sao_Paulo")
+	if err != nil {
+		t.Fatalf("parse timezone: %v", err)
+	}
+	updated, err := repo.UpdateProfileTimezone(ctx, accountID, saoPaulo, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("UpdateProfileTimezone() error = %v", err)
+	}
+	if updated.Timezone().String() != "America/Sao_Paulo" {
+		t.Errorf("Timezone = %q, want America/Sao_Paulo", updated.Timezone())
+	}
+	if updated.Locale().String() != domain.LocaleBrazilianPortuguese {
+		t.Errorf("locale changed with timezone: %q", updated.Locale())
+	}
+
+	reloaded, err := repo.GetProfileByAccountID(ctx, accountID)
+	if err != nil {
+		t.Fatalf("reload profile: %v", err)
+	}
+	if !reloaded.Timezone().Equals(saoPaulo) {
+		t.Errorf("reloaded timezone = %q, want America/Sao_Paulo", reloaded.Timezone())
+	}
+
+	cleared, err := repo.UpdateProfileTimezone(ctx, accountID, domain.Timezone{}, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("clear timezone: %v", err)
+	}
+	if !cleared.Timezone().IsZero() {
+		t.Errorf("Timezone = %q, want unset after clear", cleared.Timezone())
+	}
+
+	missing := createEligibleAccount(t, ctx, q, "timezone-missing@arena.example.com")
+	if _, err := repo.UpdateProfileTimezone(ctx, domain.AccountID(uuidString(missing.ID)), saoPaulo, time.Now().UTC()); !errors.Is(err, application.ErrProfileNotFound) {
+		t.Fatalf("missing profile error = %v, want ErrProfileNotFound", err)
+	}
+}
+
 func TestRepository_UpdateProfileLocale(t *testing.T) {
 	ctx := context.Background()
 	testDB := dbtest.New(t)

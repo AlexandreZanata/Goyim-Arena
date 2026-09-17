@@ -12,6 +12,11 @@ import (
 	"os/signal"
 	"syscall"
 
+	// The embedded IANA timezone database keeps the optional profile
+	// timezone validation (P05-T06) working in minimal containers that
+	// ship no system tzdata.
+	_ "time/tzdata"
+
 	"github.com/AlexandreZanata/Goyim-Arena/internal/buildinfo"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
