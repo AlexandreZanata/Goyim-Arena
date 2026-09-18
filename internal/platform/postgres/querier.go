@@ -124,6 +124,12 @@ type Querier interface {
 	GetActivePasswordResetToken(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetActiveSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	GetActiveSubscriptionByAccount(ctx context.Context, accountID pgtype.UUID) (AppSubscription, error)
+	// Administrative assignment queries for the PostgreSQL platform adapter.
+	//
+	// Assignments key on account identifiers only: email, frontend flags,
+	// payment state and popularity never enter this surface, so authorization
+	// can never be influenced by who pays or who is popular (P13-T02).
+	GetAdminRoleByAccount(ctx context.Context, accountID pgtype.UUID) (AppAdminRole, error)
 	GetArenaByID(ctx context.Context, id pgtype.UUID) (AppArena, error)
 	GetArenaForCreator(ctx context.Context, arg GetArenaForCreatorParams) (AppArena, error)
 	GetArenaPassConsumptionByArena(ctx context.Context, arenaID pgtype.UUID) (AppArenaPassConsumption, error)

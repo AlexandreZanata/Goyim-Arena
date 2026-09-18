@@ -22,7 +22,7 @@ type AppAccount struct {
 // Minimal administrative assignments: one row per account, granted by an existing account, revocable with a dated revocation
 type AppAdminRole struct {
 	AccountID pgtype.UUID
-	// Administrative capability: moderator or admin; policy enforcement arrives with P13-T02
+	// Administrative capability: moderator, admin or security; policy enforcement lives in the moderation application layer (P13-T02)
 	Role string
 	// Acting account that granted the role; immutable provenance of the assignment
 	GrantedBy pgtype.UUID
