@@ -150,6 +150,15 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (stripe_checkout_session_id) DO NOTHING
 RETURNING id, account_id, market, product_id, catalog_version, currency, amount_minor, livemode, status, stripe_checkout_session_id, created_at;
 
+-- MarkCheckoutIntentPaid transitions the intent to the paid terminal state
+-- and records the settlement instant. The CHECK constraint ensures that
+-- paid_at is non-null exactly when status is paid. The trigger allows
+-- open → paid only once.
+-- name: MarkCheckoutIntentPaid :exec
+UPDATE app.checkout_intents
+SET status = 'paid', paid_at = now(), updated_at = now()
+WHERE stripe_checkout_session_id = $1 AND status = 'open';
+
 -- Webhook event queries (P12-T05). The provider's unique event ID is the
 -- idempotency anchor: a replay resolves the existing row and never creates a
 -- second one. The processing lifecycle is enforced by CHECK constraints and

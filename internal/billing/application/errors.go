@@ -120,4 +120,16 @@ var (
 	// built from the given configuration (missing or incoherent return URLs).
 	// It is a composition error, raised before the process serves anything.
 	ErrInvalidCheckoutConfig = errors.New("application: checkout configuration is invalid")
+
+	// Settle checkout error vocabulary (P12-T06).
+
+	// ErrCheckoutIntentNotFound indicates no intent carries the provider
+	// session identifier. The webhook event may reference a session that
+	// was never recorded locally.
+	ErrCheckoutIntentNotFound = errors.New("application: checkout intent was not found")
+
+	// ErrSettleCheckoutWrongGrantKind indicates the product grants
+	// something other than INK. This settle use case handles only INK
+	// purchases; Arena Pass and Member grants are handled by T07 and T08.
+	ErrSettleCheckoutWrongGrantKind = errors.New("application: product does not grant INK")
 )

@@ -273,3 +273,40 @@ func mapStripeCustomer(accountID pgtype.UUID, customerID string, livemode bool, 
 func pgText(value string) pgtype.Text {
 	return pgtype.Text{String: value, Valid: value != ""}
 }
+
+// GetCheckoutIntentBySession resolves the intent a provider session stands
+// for. It returns ErrCheckoutIntentNotFound when no intent carries the
+// session identifier.
+func (r *Repository) GetCheckoutIntentBySession(ctx context.Context, sessionID domain.StripeCheckoutSessionID) (*application.CheckoutIntentRecord, error) {
+	row, err := r.queries.GetCheckoutIntentBySession(ctx, pgText(sessionID.String()))
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("%w: session %s", application.ErrCheckoutIntentNotFound, sessionID)
+		}
+		return nil, fmt.Errorf("get checkout intent by session: %w", err)
+	}
+	return mapCheckoutIntent(intentFields{
+		id:             row.ID,
+		accountID:      row.AccountID,
+		market:         row.Market,
+		productID:      row.ProductID,
+		catalogVersion: row.CatalogVersion,
+		currency:       row.Currency,
+		amountMinor:    row.AmountMinor,
+		livemode:       row.Livemode,
+		status:         row.Status,
+		sessionID:      row.StripeCheckoutSessionID,
+		createdAt:      row.CreatedAt,
+	})
+}
+
+// MarkCheckoutIntentPaid transitions the intent to the paid terminal state
+// and records the settlement instant. It is a no-op when the intent is
+// already paid (a replay of the same webhook event).
+func (r *Repository) MarkCheckoutIntentPaid(ctx context.Context, sessionID domain.StripeCheckoutSessionID) error {
+	err := r.queries.MarkCheckoutIntentPaid(ctx, pgText(sessionID.String()))
+	if err != nil {
+		return fmt.Errorf("mark checkout intent paid: %w", err)
+	}
+	return nil
+}

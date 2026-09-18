@@ -620,6 +620,21 @@ func (q *Queries) ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredA
 	return items, nil
 }
 
+const markCheckoutIntentPaid = `-- name: MarkCheckoutIntentPaid :exec
+UPDATE app.checkout_intents
+SET status = 'paid', paid_at = now(), updated_at = now()
+WHERE stripe_checkout_session_id = $1 AND status = 'open'
+`
+
+// MarkCheckoutIntentPaid transitions the intent to the paid terminal state
+// and records the settlement instant. The CHECK constraint ensures that
+// paid_at is non-null exactly when status is paid. The trigger allows
+// open → paid only once.
+func (q *Queries) MarkCheckoutIntentPaid(ctx context.Context, stripeCheckoutSessionID pgtype.Text) error {
+	_, err := q.db.Exec(ctx, markCheckoutIntentPaid, stripeCheckoutSessionID)
+	return err
+}
+
 const recordCheckoutIntentIfAbsent = `-- name: RecordCheckoutIntentIfAbsent :one
 INSERT INTO app.checkout_intents (
     account_id, market, product_id, catalog_version, currency, amount_minor,

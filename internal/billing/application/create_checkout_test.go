@@ -98,6 +98,30 @@ func (r *fakeCheckoutIntents) RecordCheckoutIntent(_ context.Context, request ap
 	return &application.RecordCheckoutIntentResult{Intent: record}, nil
 }
 
+func (r *fakeCheckoutIntents) GetCheckoutIntentBySession(_ context.Context, sessionID domain.StripeCheckoutSessionID) (*application.CheckoutIntentRecord, error) {
+	if r.bySession == nil {
+		return nil, application.ErrCheckoutIntentNotFound
+	}
+	record, found := r.bySession[sessionID.String()]
+	if !found {
+		return nil, application.ErrCheckoutIntentNotFound
+	}
+	return &record, nil
+}
+
+func (r *fakeCheckoutIntents) MarkCheckoutIntentPaid(_ context.Context, sessionID domain.StripeCheckoutSessionID) error {
+	if r.bySession == nil {
+		return nil
+	}
+	record, found := r.bySession[sessionID.String()]
+	if !found {
+		return nil
+	}
+	record.Status = domain.CheckoutIntentPaid
+	r.bySession[sessionID.String()] = record
+	return nil
+}
+
 // fakePurchaserDirectory answers the eligibility question, defaulting to an
 // eligible account so a test only states what it is about.
 type fakePurchaserDirectory struct {

@@ -121,6 +121,7 @@ func testCheckoutSessionBody(paymentStatus string) []byte {
 		"created": 1234567890,
 		"data": {
 			"object": {
+				"id": "cs_test_session1",
 				"status": "complete",
 				"payment_status": "%s"
 			}
@@ -137,6 +138,7 @@ func testCheckoutSessionExpiredBody() []byte {
 		"created": 1234567891,
 		"data": {
 			"object": {
+				"id": "cs_test_expired1",
 				"status": "expired",
 				"payment_status": "unpaid"
 			}

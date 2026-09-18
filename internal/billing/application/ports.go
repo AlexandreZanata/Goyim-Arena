@@ -146,4 +146,14 @@ type CheckoutIntentRepository interface {
 	// writes nothing; a session already recorded for another account is
 	// refused instead of being disclosed.
 	RecordCheckoutIntent(ctx context.Context, request RecordCheckoutIntentRequest) (*RecordCheckoutIntentResult, error)
+
+	// GetCheckoutIntentBySession resolves the intent a provider session
+	// stands for. It returns ErrCheckoutIntentNotFound when no intent
+	// carries the session identifier.
+	GetCheckoutIntentBySession(ctx context.Context, sessionID domain.StripeCheckoutSessionID) (*CheckoutIntentRecord, error)
+
+	// MarkCheckoutIntentPaid transitions the intent to the paid terminal
+	// state and records the settlement instant. It is a no-op when the
+	// intent is already paid (a replay of the same webhook event).
+	MarkCheckoutIntentPaid(ctx context.Context, sessionID domain.StripeCheckoutSessionID) error
 }

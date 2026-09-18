@@ -349,6 +349,11 @@ type Querier interface {
 	ListWalletStatementPage(ctx context.Context, arg ListWalletStatementPageParams) ([]ListWalletStatementPageRow, error)
 	ListWalletTransactionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListWalletTransactionsByAccountRow, error)
 	ListWalletTransactionsByOperationID(ctx context.Context, operationID pgtype.UUID) ([]AppWalletTransaction, error)
+	// MarkCheckoutIntentPaid transitions the intent to the paid terminal state
+	// and records the settlement instant. The CHECK constraint ensures that
+	// paid_at is non-null exactly when status is paid. The trigger allows
+	// open → paid only once.
+	MarkCheckoutIntentPaid(ctx context.Context, stripeCheckoutSessionID pgtype.Text) error
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.

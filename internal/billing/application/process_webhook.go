@@ -22,6 +22,11 @@ type ProcessWebhookDependencies struct {
 	Verifier WebhookPayloadVerifier
 	// Events persists event ID idempotency and processing lifecycle.
 	Events WebhookEventRepository
+	// Settler handles the settlement of checkout intents after verified
+	// payment. It is optional: when nil, checkout.session.completed events
+	// are acknowledged but not settled (the composition root injects it
+	// when the settle use case is available).
+	Settler *SettleCheckoutUseCase
 	// Clock supplies the instants of the local record.
 	Clock Clock
 }
@@ -55,6 +60,7 @@ type ProcessWebhookCommand struct {
 type ProcessWebhookUseCase struct {
 	verifier WebhookPayloadVerifier
 	events   WebhookEventRepository
+	settler  *SettleCheckoutUseCase
 	clock    Clock
 }
 
@@ -73,6 +79,7 @@ func NewProcessWebhookUseCase(deps ProcessWebhookDependencies) (*ProcessWebhookU
 	return &ProcessWebhookUseCase{
 		verifier: deps.Verifier,
 		events:   deps.Events,
+		settler:  deps.Settler,
 		clock:    deps.Clock,
 	}, nil
 }
@@ -163,9 +170,9 @@ func (uc *ProcessWebhookUseCase) processEvent(ctx context.Context, rawBody []byt
 // This is the only event type that may settle a checkout intent: the
 // provider confirmed the payment, and only this verification path can grant
 // benefit (THR-STRIPE-02).
-func (uc *ProcessWebhookUseCase) handleCheckoutSessionCompleted(_ context.Context, rawBody []byte) error {
+func (uc *ProcessWebhookUseCase) handleCheckoutSessionCompleted(ctx context.Context, rawBody []byte) error {
 	// Parse the checkout session from the event data.
-	session, err := parseCheckoutSessionFromEvent(rawBody)
+	sessionID, session, err := parseCheckoutSessionFromEvent(rawBody)
 	if err != nil {
 		return fmt.Errorf("parse checkout session: %w", err)
 	}
@@ -176,9 +183,15 @@ func (uc *ProcessWebhookUseCase) handleCheckoutSessionCompleted(_ context.Contex
 			ErrWebhookPayloadMalformed, session.PaymentStatus)
 	}
 
-	// TODO(P12-T06): settle the checkout intent, grant INK, append ledger.
-	// The implementation depends on the checkout intent repository and the
-	// wallet ledger, which are composed in the root.
+	// Settle the checkout intent if the settler is available.
+	if uc.settler != nil {
+		_, err := uc.settler.Execute(ctx, SettleCheckoutCommand{
+			SessionID: sessionID,
+		})
+		if err != nil {
+			return fmt.Errorf("settle checkout: %w", err)
+		}
+	}
 
 	return nil
 }
@@ -361,42 +374,55 @@ func extractJSONInt64(body string, key string) (int64, error) {
 
 // parseCheckoutSessionFromEvent extracts the checkout session data from the
 // event body. The session data lives in the "data.object" nested object.
-func parseCheckoutSessionFromEvent(rawBody []byte) (CheckoutSession, error) {
+func parseCheckoutSessionFromEvent(rawBody []byte) (domain.StripeCheckoutSessionID, CheckoutSession, error) {
 	body := string(rawBody)
 
 	// Extract the nested object from "data": {"object": {...}}.
 	// We look for "data" and then "object" within it.
 	dataIdx := strings.Index(body, "\"data\"")
 	if dataIdx < 0 {
-		return CheckoutSession{}, fmt.Errorf("data field not found")
+		return "", CheckoutSession{}, fmt.Errorf("data field not found")
 	}
 	objectIdx := strings.Index(body[dataIdx:], "\"object\"")
 	if objectIdx < 0 {
-		return CheckoutSession{}, fmt.Errorf("object field not found in data")
+		return "", CheckoutSession{}, fmt.Errorf("object field not found in data")
 	}
 	nestedBody := body[dataIdx+objectIdx:]
+
+	// Extract the session ID from the nested object.
+	sessionIDStr, err := extractJSONString(nestedBody, "id")
+	if err != nil {
+		return "", CheckoutSession{}, fmt.Errorf("extract session id: %w", err)
+	}
+	// The session ID must be a valid Stripe checkout session ID.
+	// We don't know the livemode here, so we pass false; the settle use
+	// case will validate against the stored intent.
+	sessionID, err := domain.ParseStripeCheckoutSessionID(sessionIDStr, false)
+	if err != nil {
+		return "", CheckoutSession{}, fmt.Errorf("parse session id: %w", err)
+	}
 
 	// Extract payment_status from the nested object.
 	paymentStatusStr, err := extractJSONString(nestedBody, "payment_status")
 	if err != nil {
-		return CheckoutSession{}, fmt.Errorf("extract payment_status: %w", err)
+		return "", CheckoutSession{}, fmt.Errorf("extract payment_status: %w", err)
 	}
 	paymentStatus, err := domain.ParseCheckoutPaymentStatus(paymentStatusStr)
 	if err != nil {
-		return CheckoutSession{}, fmt.Errorf("parse payment_status: %w", err)
+		return "", CheckoutSession{}, fmt.Errorf("parse payment_status: %w", err)
 	}
 
 	// Extract the checkout session status.
 	statusStr, err := extractJSONString(nestedBody, "status")
 	if err != nil {
-		return CheckoutSession{}, fmt.Errorf("extract status: %w", err)
+		return "", CheckoutSession{}, fmt.Errorf("extract status: %w", err)
 	}
 	status, err := domain.ParseCheckoutSessionStatus(statusStr)
 	if err != nil {
-		return CheckoutSession{}, fmt.Errorf("parse status: %w", err)
+		return "", CheckoutSession{}, fmt.Errorf("parse status: %w", err)
 	}
 
-	return CheckoutSession{
+	return sessionID, CheckoutSession{
 		Status:        status,
 		PaymentStatus: paymentStatus,
 	}, nil
