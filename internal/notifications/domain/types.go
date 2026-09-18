@@ -202,6 +202,15 @@ func NewMessage(recipient string, locale Locale, templateID TemplateID, body Bod
 	}, nil
 }
 
+// ValidateRecipient reports whether an address is one this domain accepts for
+// delivery, without composing a message. It is the check a producer runs
+// before it resolves anything about the account: an address the message would
+// refuse must never occupy a queue row.
+func ValidateRecipient(address string) error {
+	_, err := normalizeRecipient(address)
+	return err
+}
+
 // Validate re-checks a message that may have been built by another path,
 // such as a deserialized job payload. The zero Message is invalid, and an
 // adapter can therefore refuse an unwired delivery instead of sending an
