@@ -29,6 +29,22 @@ import (
 // ETag keeps revalidation cheap.
 const metricsCacheSeconds = 3600
 
+// defaultWindowEnd anchors the default window to the end of the current UTC
+// day, which is the reporting day these metrics belong to.
+//
+// A window that ended at the instant of the request made the published numbers
+// unreproducible: a caller that asked for the same period a second later
+// received a different document, so the report could not be verified against a
+// later read, and its validator moved with the clock — which is what made the
+// ETag of these documents unable to confirm that anything was unchanged. The
+// day is the natural boundary of these metrics, and the window still covers
+// everything that happened today, so the default report keeps counting the day
+// in progress while staying stable for as long as it lasts.
+func defaultWindowEnd(now time.Time) time.Time {
+	utc := now.UTC()
+	return time.Date(utc.Year(), utc.Month(), utc.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, 1)
+}
+
 // defaultMetricsWindow is the lookback served when the caller names no
 // explicit period.
 const defaultMetricsWindow = 30 * 24 * time.Hour
@@ -85,7 +101,8 @@ func resolveWindow(query map[string][]string, now time.Time) (domain.Period, str
 	ends, hasEnd := query["period_end"]
 	if !hasStart || !hasEnd || len(starts) == 0 || len(ends) == 0 ||
 		strings.TrimSpace(starts[0]) == "" || strings.TrimSpace(ends[0]) == "" {
-		return mustPeriod(now.Add(-defaultMetricsWindow), now)
+		end := defaultWindowEnd(now)
+		return mustPeriod(end.Add(-defaultMetricsWindow), end)
 	}
 
 	start, err := time.Parse(time.RFC3339, strings.TrimSpace(starts[0]))
@@ -163,20 +180,28 @@ func (h *Handler) ServeMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	document, err := json.Marshal(transparencyResponse{
+	response := transparencyResponse{
 		MethodologyVersion: snapshot.MethodologyVersion,
 		PeriodStart:        snapshot.PeriodStart.UTC().Format(time.RFC3339),
 		PeriodEnd:          snapshot.PeriodEnd.UTC().Format(time.RFC3339),
 		Timezone:           timezone,
-		UpdatedAt:          now.Format(time.RFC3339),
 		Metrics:            snapshotMetrics(snapshot),
-	})
+	}
+	// The facts are marshaled without the instant of this derivation, which
+	// is what the validator covers; the document that is served carries it.
+	facts, err := json.Marshal(response)
+	if err != nil {
+		_ = httperror.WriteProblem(w, r, err)
+		return
+	}
+	response.UpdatedAt = now.Format(time.RFC3339)
+	document, err := json.Marshal(response)
 	if err != nil {
 		_ = httperror.WriteProblem(w, r, err)
 		return
 	}
 
-	writeCacheableJSON(w, r, document)
+	writeCacheableJSON(w, r, facts, document)
 }
 
 // ServeDocument handles GET /transparency. The interface locale
@@ -209,13 +234,27 @@ func (h *Handler) ServeDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The page states the instant of this rendering, so the validator covers
+	// the same page with that instant left out: two renderings of the same
+	// facts have to compare equal (writeCacheableHTML).
+	factsDocument, err := h.buildDocument(locale, timezone, time.Time{}, snapshot)
+	if err != nil {
+		_ = httperror.WriteProblem(w, r, err)
+		return
+	}
+	var facts bytes.Buffer
+	if err := h.templates.RenderDocument(&facts, factsDocument); err != nil {
+		_ = httperror.WriteProblem(w, r, err)
+		return
+	}
+
 	var body bytes.Buffer
 	if err := h.templates.RenderDocument(&body, document); err != nil {
 		_ = httperror.WriteProblem(w, r, err)
 		return
 	}
 	w.Header().Set("Vary", "Accept-Language")
-	writeCacheableHTML(w, r, body.Bytes())
+	writeCacheableHTML(w, r, facts.Bytes(), body.Bytes())
 }
 
 // buildDocument localizes the document shell around stable metric codes.
@@ -322,11 +361,22 @@ func negotiateLocale(r *http.Request) string {
 	return i18n.DefaultLocale
 }
 
-// writeCacheableJSON writes a public JSON document with a strong ETag and
-// honors If-None-Match with 304.
-func writeCacheableJSON(w http.ResponseWriter, r *http.Request, body []byte) {
-	sum := sha256.Sum256(body)
-	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+// writeCacheableJSON serves a public JSON document whose body states the
+// instant it was derived at.
+//
+// The validator covers the document without that instant, and it is weak.
+// A strong validator over the whole body was wrong: the instant moves on every
+// request, so two reads of the same metrics never compared equal and a client
+// revalidating after the cache window was sent the whole document again — the
+// ETag saved nothing. RFC 9110 section 8.8.1 requires a strong validator to be
+// unique across every representation, which no validator can be while the
+// annotation is part of the body; section 8.8.2 is for exactly this case, and
+// If-None-Match performs the weak comparison for GET.
+//
+// facts is the document with the annotation left out; body is what is served.
+func writeCacheableJSON(w http.ResponseWriter, r *http.Request, facts, body []byte) {
+	sum := sha256.Sum256(facts)
+	etag := `W/"` + hex.EncodeToString(sum[:]) + `"`
 
 	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(metricsCacheSeconds))
 	w.Header().Set("Vary", "Accept-Encoding")
@@ -342,11 +392,18 @@ func writeCacheableJSON(w http.ResponseWriter, r *http.Request, body []byte) {
 	_, _ = w.Write(body)
 }
 
-// writeCacheableHTML writes a public HTML document with a strong ETag and
-// honors If-None-Match with 304.
-func writeCacheableHTML(w http.ResponseWriter, r *http.Request, body []byte) {
-	sum := sha256.Sum256(body)
-	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+// writeCacheableHTML serves a public HTML document whose body states the
+// instant it was rendered at.
+//
+// The validator covers the page without that instant, and it is weak, for the
+// same reason as the JSON document above: an annotation that moves on every
+// request cannot be part of a validator that is supposed to confirm that the
+// content did not move.
+//
+// facts is the page rendered without its annotation; body is what is served.
+func writeCacheableHTML(w http.ResponseWriter, r *http.Request, facts, body []byte) {
+	sum := sha256.Sum256(facts)
+	etag := `W/"` + hex.EncodeToString(sum[:]) + `"`
 
 	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(metricsCacheSeconds))
 	w.Header().Set("ETag", etag)
@@ -361,8 +418,11 @@ func writeCacheableHTML(w http.ResponseWriter, r *http.Request, body []byte) {
 	_, _ = w.Write(body)
 }
 
-// etagMatches implements the weak comparison of RFC 9110 for If-None-Match.
+// etagMatches implements the weak comparison of RFC 9110 for If-None-Match:
+// the opaque tags are compared, and the weakness prefix of either side is not
+// part of the identity of the representation.
 func etagMatches(header, etag string) bool {
+	etag = strings.TrimPrefix(etag, "W/")
 	header = strings.TrimSpace(header)
 	if header == "" {
 		return false

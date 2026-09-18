@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -103,6 +104,17 @@ func mustPositionsArena(t *testing.T, ctx context.Context, pool *pgxpool.Pool, c
 
 func setupPositionsHarness(t *testing.T) *positionsHarness {
 	t.Helper()
+	return setupPositionsHarnessWithClock(t, clockseed.NewClock())
+}
+
+// harnessClock is what the harness needs from a clock: the use cases accept any
+// implementation of it.
+type harnessClock interface{ Now() time.Time }
+
+// setupPositionsHarnessWithClock wires the harness over a given clock, which
+// lets a test move time between two reads of the same counts.
+func setupPositionsHarnessWithClock(t *testing.T, clock harnessClock) *positionsHarness {
+	t.Helper()
 	ctx := context.Background()
 	db := dbtest.New(t)
 	pool := db.Pool.Pool()
@@ -117,7 +129,6 @@ func setupPositionsHarness(t *testing.T) *positionsHarness {
 	repo := positionspg.NewRepository(pool)
 	gate := &arenaGate{}
 	accounts := eligibleAccounts{}
-	clock := clockseed.NewClock()
 
 	secMgr, err := security.New(security.Options{
 		Env:            config.EnvTest,
@@ -429,6 +440,72 @@ func TestPositionsAPIIsOwnerScoped(t *testing.T) {
 	}
 }
 
+// steppingClock moves the instant on every read, which is exactly the boundary
+// the cache defect could not survive: the derivation instant of two consecutive
+// reads never lands on the same second.
+type steppingClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newSteppingClock(at time.Time) *steppingClock { return &steppingClock{now: at} }
+
+func (c *steppingClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(2 * time.Second)
+	return c.now
+}
+
+// TestAggregateValidatorSurvivesAMovingInstant is the regression test of the
+// cache defect: the aggregate states the instant of its own derivation, the
+// clock moves between the reads here, and the counts did not move — so a
+// revalidation must still answer 304 without a body. A validator computed over
+// the annotation instead of the counts answers 200, which is what used to
+// happen under load and what made the response uncacheable in production.
+func TestAggregateValidatorSurvivesAMovingInstant(t *testing.T) {
+	harness := setupPositionsHarnessWithClock(t, newSteppingClock(time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)))
+	if recorder := harness.confirm(t, positionsOwnerToken, domain.PositionAgree); recorder.Code != http.StatusOK {
+		t.Fatalf("owner confirm status = %d", recorder.Code)
+	}
+	if recorder := harness.confirm(t, positionsOtherToken, domain.PositionDisagree); recorder.Code != http.StatusOK {
+		t.Fatalf("other confirm status = %d", recorder.Code)
+	}
+
+	aggregatePath := "/api/v1/arenas/" + harness.arenaID + "/positions"
+	first := httptest.NewRecorder()
+	harness.mux.ServeHTTP(first, positionsRequest(http.MethodGet, aggregatePath, "", ""))
+	if first.Code != http.StatusOK {
+		t.Fatalf("aggregate status = %d, want 200 (body: %s)", first.Code, first.Body.String())
+	}
+	etag := first.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("ETag is missing on the public aggregate read")
+	}
+
+	second := httptest.NewRecorder()
+	harness.mux.ServeHTTP(second, positionsRequest(http.MethodGet, aggregatePath, "", ""))
+	firstInstant, _ := positionsDecode(t, first.Body.Bytes())["checked_at"].(string)
+	secondInstant, _ := positionsDecode(t, second.Body.Bytes())["checked_at"].(string)
+	if firstInstant == "" || firstInstant == secondInstant {
+		t.Fatalf("checked_at = %q and %q, want an instant that moved between the reads", firstInstant, secondInstant)
+	}
+	if second.Header().Get("ETag") != etag {
+		t.Fatalf("ETag moved with the annotation: %q then %q", etag, second.Header().Get("ETag"))
+	}
+
+	revalidation := positionsRequest(http.MethodGet, aggregatePath, "", "")
+	revalidation.Header.Set("If-None-Match", etag)
+	notModified := httptest.NewRecorder()
+	harness.mux.ServeHTTP(notModified, revalidation)
+	if notModified.Code != http.StatusNotModified {
+		t.Fatalf("revalidation status = %d, want 304 with the counts unchanged (body: %s)", notModified.Code, notModified.Body.String())
+	}
+	if notModified.Body.Len() != 0 {
+		t.Fatalf("304 body has %d bytes, want empty", notModified.Body.Len())
+	}
+}
+
 func TestPositionAggregateHTTPIsPublicAndCacheable(t *testing.T) {
 	harness := setupPositionsHarness(t)
 
@@ -452,9 +529,13 @@ func TestPositionAggregateHTTPIsPublicAndCacheable(t *testing.T) {
 	if vary := recorder.Header().Get("Vary"); !strings.Contains(vary, "Accept-Encoding") {
 		t.Fatalf("Vary = %q, want Accept-Encoding", vary)
 	}
+	// The validator is weak on purpose: the aggregate states the instant of its
+	// own derivation, and an annotation that moves on every request cannot be
+	// part of a validator whose job is to confirm that the counts did not move
+	// (RFC 9110 section 8.8.2).
 	etag := recorder.Header().Get("ETag")
-	if !strings.HasPrefix(etag, `"`) || !strings.HasSuffix(etag, `"`) {
-		t.Fatalf("ETag = %q, want a strong quoted validator", etag)
+	if !strings.HasPrefix(etag, `W/"`) || !strings.HasSuffix(etag, `"`) {
+		t.Fatalf("ETag = %q, want a weak quoted validator", etag)
 	}
 
 	body := recorder.Body.String()

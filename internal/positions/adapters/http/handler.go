@@ -151,19 +151,36 @@ func writeJSON(w http.ResponseWriter, status int, document any) {
 	_ = json.NewEncoder(w).Encode(document)
 }
 
-// writeCacheableJSON renders the public aggregate with a strong ETag
-// computed over its canonical JSON body and honors If-None-Match with 304.
-// The helper mirrors the other public reads; the copy keeps the adapters
-// independent.
-func writeCacheableJSON(w http.ResponseWriter, r *http.Request, document any) {
+// writeCacheableJSON serves the public aggregate, whose body carries the
+// instant of its own derivation.
+//
+// The validator covers the aggregate without that instant, and it is weak. A
+// strong validator over the whole body was wrong, and the cost was measurable:
+// the instant moves on every request, so two reads of the same counts never
+// compared equal and a client revalidating after the cache window was sent the
+// whole document again — the ETag saved nothing. RFC 9110 section 8.8.1
+// requires a strong validator to be unique across every representation, which
+// no validator can be while the annotation is part of the body; section 8.8.2
+// is for exactly this case, a representation that stays equivalent while its
+// metadata moves, and If-None-Match performs the weak comparison for GET.
+//
+// facts is the aggregate with the annotation left empty; document is the same
+// document as it is served. The helper mirrors the other public reads, and the
+// copy keeps the adapters independent.
+func writeCacheableJSON(w http.ResponseWriter, r *http.Request, facts, document any) {
+	factsBody, err := json.Marshal(facts)
+	if err != nil {
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindInternal, "server_error", "failed to encode response"))
+		return
+	}
 	body, err := json.Marshal(document)
 	if err != nil {
 		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindInternal, "server_error", "failed to encode response"))
 		return
 	}
 
-	sum := sha256.Sum256(body)
-	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	sum := sha256.Sum256(factsBody)
+	etag := `W/"` + hex.EncodeToString(sum[:]) + `"`
 
 	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(aggregateCacheSeconds))
 	w.Header().Set("Vary", "Accept-Encoding")
@@ -179,8 +196,11 @@ func writeCacheableJSON(w http.ResponseWriter, r *http.Request, document any) {
 	_, _ = w.Write(body)
 }
 
-// etagMatches implements the weak comparison of RFC 9110 for If-None-Match.
+// etagMatches implements the weak comparison of RFC 9110 for If-None-Match:
+// the opaque tags are compared, and the weakness prefix of either side is not
+// part of the identity of the representation.
 func etagMatches(header, etag string) bool {
+	etag = strings.TrimPrefix(etag, "W/")
 	header = strings.TrimSpace(header)
 	if header == "" {
 		return false
@@ -382,7 +402,7 @@ func (h *Handler) GetAggregate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := aggregateResponse{
+	facts := aggregateResponse{
 		ParticipantsTotal: aggregate.Total,
 		Suppressed:        aggregate.Suppressed,
 		Initial: distributionResponse{
@@ -395,10 +415,10 @@ func (h *Handler) GetAggregate(w http.ResponseWriter, r *http.Request) {
 			Disagree:  aggregate.Current.Disagree,
 			Undecided: aggregate.Current.Undecided,
 		},
-		CheckedAt: aggregate.CheckedAt.UTC().Format(time.RFC3339),
 	}
-
-	writeCacheableJSON(w, r, response)
+	served := facts
+	served.CheckedAt = aggregate.CheckedAt.UTC().Format(time.RFC3339)
+	writeCacheableJSON(w, r, facts, served)
 }
 
 // privateRoute applies the authentication requirement when a security
