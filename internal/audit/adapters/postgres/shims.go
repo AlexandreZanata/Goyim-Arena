@@ -8,6 +8,7 @@ import (
 	arenasapp "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/application"
 	auditdomain "github.com/AlexandreZanata/Goyim-Arena/internal/audit/domain"
 	persuasionapp "github.com/AlexandreZanata/Goyim-Arena/internal/persuasion/application"
+	profilesapp "github.com/AlexandreZanata/Goyim-Arena/internal/profiles/application"
 	walletapp "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/application"
 )
 
@@ -15,7 +16,29 @@ var (
 	_ walletapp.AdminAuditRecorder           = (*Repository)(nil)
 	_ arenasapp.ModerationAuditRecorder      = (*Repository)(nil)
 	_ persuasionapp.AttributionAuditRecorder = (*Repository)(nil)
+	_ profilesapp.DeletionAuditRecorder      = (*Repository)(nil)
 )
+
+// RecordAccountDeletion implements the profiles deletion audit port: one
+// workflow transition becomes one trail fact, idempotent by account and
+// action. The cancel reason stays in the restricted deletion record; the
+// trail carries the stable transition only.
+func (r *Repository) RecordAccountDeletion(ctx context.Context, event profilesapp.DeletionAuditEvent) error {
+	_, err := r.Record(ctx, auditdomain.AuditEvent{
+		Actor:      event.AccountID,
+		Action:     event.Action,
+		TargetType: "account",
+		TargetID:   event.AccountID,
+		ReasonCode: event.ReasonCode,
+		Metadata: map[string]string{
+			"target_account_id": event.AccountID,
+			"new_status":        strings.TrimPrefix(event.Action, "account.deletion_"),
+		},
+		IdempotencyKey: fmt.Sprintf("account-deletion:%s:%s", event.AccountID, event.Action),
+		OccurredAt:     event.OccurredAt,
+	})
+	return err
+}
 
 // RecordAdminAdjustment implements the wallet audit port: one adjustment
 // becomes one trail fact, idempotent by the ledger idempotency key. The

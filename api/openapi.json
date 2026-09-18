@@ -335,6 +335,76 @@
         }
       }
     },
+    "/api/v1/me/deletion": {
+      "post": {
+        "operationId": "requestAccountDeletion",
+        "summary": "Request account deletion",
+        "description": "Starts the account deletion cooling-off period (7 days). The holder can cancel it during the window; after the cooldown the workflow anonymizes the account: private rows (profile, username history, credentials, tokens, sessions) are removed, the account keeps its stable identifier with an opaque placeholder email and can never authenticate again, while billing, ledger, pass, moderation and audit records are preserved under their retention obligations. Public content stays intact with an unresolvable author. Requesting is idempotent: a replay resolves the existing record and answers Idempotency-Replayed: true. Responses are private, no-store (THR-CACHE-01).",
+        "tags": ["profiles"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "202": {
+            "description": "Deletion request accepted (fresh or replayed).",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountDeletionRequest" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      },
+      "get": {
+        "operationId": "getAccountDeletionStatus",
+        "summary": "Read my deletion request",
+        "description": "Returns the authenticated holder's deletion request state: requested (cooling off), executed or canceled. The cancel reason is restricted evidence and never serializes. Responses are private, no-store (THR-CACHE-01).",
+        "tags": ["profiles"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "Owner deletion request.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountDeletionRequest" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
+    "/api/v1/me/deletion/cancel": {
+      "post": {
+        "operationId": "cancelAccountDeletion",
+        "summary": "Cancel account deletion",
+        "description": "Cancels a deletion request inside its cooling-off window. A terminal request (executed or already canceled) answers 409 deletion_not_cancellable. The optional reason is stored as restricted evidence and never appears in public projections. Responses are private, no-store (THR-CACHE-01).",
+        "tags": ["profiles"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AccountDeletionCancelRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Canceled deletion request.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AccountDeletionRequest" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
     "/api/v1/me/wallet": {
       "get": {
         "operationId": "getWalletBalance",
@@ -2012,6 +2082,24 @@
           "interface_locale": { "type": "string", "enum": ["pt-BR", "en-US"] },
           "created_at": { "type": "string", "format": "date-time" },
           "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AccountDeletionRequest": {
+        "type": "object",
+        "description": "Owner projection of one account deletion request. The cancel reason is restricted evidence and never serializes.",
+        "required": ["status", "requested_at", "executed_at", "canceled_at"],
+        "properties": {
+          "status": { "type": "string", "enum": ["requested", "executed", "canceled"] },
+          "requested_at": { "type": "string", "format": "date-time" },
+          "executed_at": { "type": ["string", "null"], "format": "date-time" },
+          "canceled_at": { "type": ["string", "null"], "format": "date-time" }
+        }
+      },
+      "AccountDeletionCancelRequest": {
+        "type": "object",
+        "description": "Optional cancellation reason; restricted evidence, bounded and never reflected in public projections.",
+        "properties": {
+          "reason": { "type": "string", "maxLength": 500 }
         }
       },
       "PersonalExportJob": {

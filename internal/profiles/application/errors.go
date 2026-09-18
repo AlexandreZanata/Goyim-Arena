@@ -40,4 +40,24 @@ var (
 	// resolvable; it denies like a stale session instead of being treated
 	// as fresh.
 	ErrUnknownSession = errors.New("application: session is unknown")
+
+	// ErrInvalidDeletionConfig indicates the deletion use cases could not be
+	// built from the given dependencies.
+	ErrInvalidDeletionConfig = errors.New("application: account deletion configuration is invalid")
+
+	// ErrDeletionRequestNotFound indicates the account has no deletion
+	// request.
+	ErrDeletionRequestNotFound = errors.New("application: account deletion request not found")
+
+	// ErrDeletionNotCancellable indicates the request is terminal or its
+	// cooldown elapsed: the holder can no longer cancel it.
+	ErrDeletionNotCancellable = errors.New("application: account deletion request is not cancellable")
+
+	// ErrDeletionNotExecutable indicates the request is missing, terminal or
+	// still inside its cooldown window.
+	ErrDeletionNotExecutable = errors.New("application: account deletion request is not executable")
+
+	// ErrInvalidCancelReason indicates the cancellation reason exceeds the
+	// accepted bound.
+	ErrInvalidCancelReason = errors.New("application: account deletion cancel reason is invalid")
 )

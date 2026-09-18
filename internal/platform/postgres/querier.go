@@ -11,6 +11,11 @@ import (
 )
 
 type Querier interface {
+	// AnonymizeDeletedAccount replaces the account's private identity with the
+	// opaque placeholder: the stable identifier survives for referential
+	// integrity, the email stops being personal data, and the account moves to
+	// the terminal deleted state.
+	AnonymizeDeletedAccount(ctx context.Context, arg AnonymizeDeletedAccountParams) (int64, error)
 	// ApplyFreeBalanceDelta applies a signed net delta to the FREE_INK balance:
 	// the monthly renewal expires the remaining franchise and grants the next
 	// one in a single statement. The CHECK (balance_free >= 0) still guards the
@@ -20,6 +25,10 @@ type Querier interface {
 	// statement; the CHECK (balance >= 0) guards the invariant even if a caller
 	// gets the plan wrong.
 	ApplyWalletDebit(ctx context.Context, arg ApplyWalletDebitParams) (AppWalletAccount, error)
+	// CancelDeletionRequest cancels the active request inside its window; the
+	// status guard makes the transition once-only and terminal records
+	// immutable.
+	CancelDeletionRequest(ctx context.Context, arg CancelDeletionRequestParams) (CancelDeletionRequestRow, error)
 	ClaimModerationAppeal(ctx context.Context, id pgtype.UUID) (ClaimModerationAppealRow, error)
 	ClaimModerationCase(ctx context.Context, arg ClaimModerationCaseParams) (ClaimModerationCaseRow, error)
 	// CloseArena performs the published→closed transition requested by the
@@ -83,6 +92,16 @@ type Querier interface {
 	// (P11-T03).
 	CreateAttribution(ctx context.Context, arg CreateAttributionParams) (pgtype.UUID, error)
 	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
+	// Account deletion state machine (P14-T06, docs/PRIVACY.md §4/§5, BR §10).
+	// The record statements only ever touch the deletion table and the account
+	// row; the execution statements purge private rows and anonymize public
+	// authorship while the billing, ledger, pass, moderation and audit schemas
+	// stay untouched.
+	// CreateDeletionRequest creates a new active request. The partial unique
+	// index resolves concurrent requests: the loser inserts nothing and re-reads
+	// the winner, so the cooldown never restarts. A canceled record may be
+	// followed by a fresh one; the terminal history is retained.
+	CreateDeletionRequest(ctx context.Context, arg CreateDeletionRequestParams) (CreateDeletionRequestRow, error)
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
 	CreateModerationAction(ctx context.Context, arg CreateModerationActionParams) (AppModerationAction, error)
 	// Structured report queries for the PostgreSQL platform adapter (P13-T03).
@@ -131,6 +150,36 @@ type Querier interface {
 	DecideModerationAppeal(ctx context.Context, arg DecideModerationAppealParams) (DecideModerationAppealRow, error)
 	DecideModerationCase(ctx context.Context, arg DecideModerationCaseParams) (DecideModerationCaseRow, error)
 	DeleteArenaDraft(ctx context.Context, arg DeleteArenaDraftParams) (int64, error)
+	// DeleteDeletedAccountCommunicationPreferenceHistory removes the preference
+	// audit trail.
+	DeleteDeletedAccountCommunicationPreferenceHistory(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountCommunicationPreferences removes the explicit opt-ins.
+	DeleteDeletedAccountCommunicationPreferences(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountCredentials removes the password credential, so no
+	// stored secret survives the deletion.
+	DeleteDeletedAccountCredentials(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountDraftRelations removes linkage rows that reference the
+	// account's unpublished drafts: a relation is only meaningful while both
+	// Arenas exist, and drafts do not survive the deletion.
+	DeleteDeletedAccountDraftRelations(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountDrafts removes the account's unpublished drafts:
+	// private content with no retention obligation. Published Arenas are
+	// untouched and keep their stable author id.
+	DeleteDeletedAccountDrafts(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountProfile removes the profile so public authorship
+	// becomes unresolvable while published content keeps its stable author id.
+	DeleteDeletedAccountProfile(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountResetTokens removes every password reset token of the
+	// account.
+	DeleteDeletedAccountResetTokens(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountSessions removes every session, so no credential of
+	// the deleted account can ever authenticate again.
+	DeleteDeletedAccountSessions(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountUsernameHistory removes the username audit trail.
+	DeleteDeletedAccountUsernameHistory(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountVerificationTokens removes every email verification
+	// token of the account.
+	DeleteDeletedAccountVerificationTokens(ctx context.Context, accountID pgtype.UUID) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	// EnsureWalletAccount materializes the balance projection row for an
 	// account; a pre-existing row is left untouched, including its balances.
@@ -241,6 +290,9 @@ type Querier interface {
 	// GetDebatePosition returns the private projection of one account in one
 	// Arena.
 	GetDebatePosition(ctx context.Context, arg GetDebatePositionParams) (AppDebatePosition, error)
+	// GetDeletionRequestForAccount loads the owner-scoped deletion state: the
+	// active request when one exists, otherwise the most recent terminal record.
+	GetDeletionRequestForAccount(ctx context.Context, accountID pgtype.UUID) (GetDeletionRequestForAccountRow, error)
 	// GetDerivedWalletBalance recomputes both bucket balances exclusively from
 	// the append-only ledger: the source of truth for the cached projection
 	// (P06-T05, REQ-WAL-01).
@@ -467,6 +519,9 @@ type Querier interface {
 	// deterministically so runs are reproducible.
 	ListCheckoutIntentsForReconciliation(ctx context.Context, arg ListCheckoutIntentsForReconciliationParams) ([]ListCheckoutIntentsForReconciliationRow, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
+	// ListDueDeletionRequests returns active requests whose cooldown elapsed,
+	// oldest first, so the workflow can execute them.
+	ListDueDeletionRequests(ctx context.Context, dueBefore pgtype.Timestamptz) ([]ListDueDeletionRequestsRow, error)
 	// ListExpiredArenaPassLots derives the expired lots that still hold passes.
 	// Expiration is never written back: the predicate is evaluated at read time,
 	// so the sweep is a pure derivation and repeated runs are identical (P07-T04).
@@ -553,6 +608,10 @@ type Querier interface {
 	// paid_at is non-null exactly when status is paid. The trigger allows
 	// open → paid only once.
 	MarkCheckoutIntentPaid(ctx context.Context, stripeCheckoutSessionID pgtype.Text) error
+	// MarkDeletionExecuted records the terminal executed state on the active
+	// request. The cooldown is enforced in the statement itself (defense in
+	// depth): a request whose window has not elapsed can never execute early.
+	MarkDeletionExecuted(ctx context.Context, arg MarkDeletionExecutedParams) (int64, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	// MarkPersonalExportReady attaches the generated document once. The status
@@ -565,6 +624,10 @@ type Querier interface {
 	// optimistic version check inside the publication transaction, so the Arena
 	// row and the consumed Arena Pass commit together (P08-T04).
 	PublishArenaDraft(ctx context.Context, arg PublishArenaDraftParams) (AppArena, error)
+	// PurgeDeletedAccountExports expires the account's personal exports and
+	// drops their documents: the private data copy never outlives the account.
+	// The records survive as retention evidence, matching the export invariant.
+	PurgeDeletedAccountExports(ctx context.Context, arg PurgeDeletedAccountExportsParams) (int64, error)
 	ReactivateAccountForAppeal(ctx context.Context, id pgtype.UUID) (ReactivateAccountForAppealRow, error)
 	// RecordCheckoutIntentIfAbsent inserts the commercial decision exactly once per
 	// provider session, so a replay of the same operation resolves the stored
@@ -607,6 +670,10 @@ type Querier interface {
 	// Arena under the optimistic version check (P08-T05).
 	RestrictArena(ctx context.Context, arg RestrictArenaParams) (AppArena, error)
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
+	// RevokeDeletedAccountAdminRoles revokes any active administrative role of
+	// the deleted account. The assignment row is retained as restricted audit
+	// evidence; marking it revoked removes the latent privilege.
+	RevokeDeletedAccountAdminRoles(ctx context.Context, arg RevokeDeletedAccountAdminRolesParams) (int64, error)
 	RevokeSession(ctx context.Context, tokenHash []byte) error
 	SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAccount, error)
 	SuspendAccountForModeration(ctx context.Context, id pgtype.UUID) (SuspendAccountForModerationRow, error)

@@ -23,6 +23,16 @@ type Random interface {
 	Read(buffer []byte) (int, error)
 }
 
+// UnitOfWork runs a function inside one database transaction. The deletion
+// workflow uses it so the state transition and its audit record commit or
+// roll back together. The concrete manager is composed at bootstrap; the
+// module never imports another module's adapters.
+type UnitOfWork interface {
+	// WithinTransaction begins a transaction, makes it available to
+	// participants through the context and commits only when fn returns nil.
+	WithinTransaction(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
 // ProfileRepository persists profiles and their auditable username history.
 // Writes that combine a profile mutation with an audit entry must be atomic.
 type ProfileRepository interface {

@@ -95,6 +95,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		if strings.HasPrefix(route.Path, "/api/v1/me/exports") {
 			continue
 		}
+		if strings.HasPrefix(route.Path, "/api/v1/me/deletion") {
+			continue
+		}
 		if route.Path == "/api/v1/me/wallet" || route.Path == "/api/v1/me/wallet/transactions" {
 			continue
 		}
@@ -315,6 +318,7 @@ func TestContractProfileSchemasExposeOnlyAllowedFields(t *testing.T) {
 // payment identifiers, antifraud flags or administrative notes), the public
 // statuses never include draft or removed, authenticated routes require the
 // session cookie and the public reads document the ETag revalidation.
+//
 // TestContractPersonalExportIsPrivateStepUpAndBounded is the contract-level
 // proof of P14-T05: the personal export schemas declare exactly the allowed
 // properties (no provider identifiers, credentials, device signals or
@@ -423,6 +427,64 @@ func TestContractPersonalExportIsPrivateStepUpAndBounded(t *testing.T) {
 // TestContractArenaSchemasExposeOnlyAllowedFields is the contract-level proof
 // of P08-T02: the Arena documents declare exactly the allowed properties
 // and no draft or moderation data.
+func TestContractAccountDeletionIsPrivateAndBounded(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	request := propertiesOf(t, document, "AccountDeletionRequest")
+	want := []string{"status", "requested_at", "executed_at", "canceled_at"}
+	if len(request) != len(want) {
+		t.Fatalf("AccountDeletionRequest declares %d properties, want exactly %d", len(request), len(want))
+	}
+	for _, property := range want {
+		if _, ok := request[property]; !ok {
+			t.Errorf("AccountDeletionRequest is missing %q", property)
+		}
+	}
+	for property := range request {
+		for _, marker := range []string{"email", "reason", "token", "session", "stripe", "customer", "password"} {
+			if strings.Contains(strings.ToLower(property), marker) {
+				t.Errorf("SECURITY VIOLATION: AccountDeletionRequest declares forbidden property %q", property)
+			}
+		}
+	}
+	cancel := propertiesOf(t, document, "AccountDeletionCancelRequest")
+	if len(cancel) != 1 {
+		t.Fatalf("AccountDeletionCancelRequest declares %d properties, want exactly 1", len(cancel))
+	}
+	if _, ok := cancel["reason"]; !ok {
+		t.Error("AccountDeletionCancelRequest must declare reason")
+	}
+
+	for _, route := range []struct {
+		path   string
+		method string
+	}{
+		{path: "/api/v1/me/deletion", method: "post"},
+		{path: "/api/v1/me/deletion", method: "get"},
+		{path: "/api/v1/me/deletion/cancel", method: "post"},
+	} {
+		path, method := route.path, route.method
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		operation := string(operations[method])
+		for _, marker := range []string{`"SessionCookie"`, "no-store", `"#/components/schemas/AccountDeletionRequest"`} {
+			if !strings.Contains(operation, marker) {
+				t.Errorf("%s %s must document %q", strings.ToUpper(method), path, marker)
+			}
+		}
+		if strings.Contains(operation, "public, max-age") {
+			t.Errorf("%s %s must never be publicly cacheable", strings.ToUpper(method), path)
+		}
+	}
+	if operation := string(document.Paths["/api/v1/me/deletion/cancel"]["post"]); !strings.Contains(operation, "deletion_not_cancellable") {
+		t.Error("the cancellation must document the terminal conflict code")
+	}
+}
+
 func TestContractArenaSchemasExposeOnlyAllowedFields(t *testing.T) {
 	t.Parallel()
 

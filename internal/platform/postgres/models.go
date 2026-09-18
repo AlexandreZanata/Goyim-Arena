@@ -19,6 +19,20 @@ type AppAccount struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+// Account deletion state machine: requested (cooling-off, cancellable), executed or canceled; the record is retained as evidence after execution
+type AppAccountDeletionRequest struct {
+	ID          pgtype.UUID
+	AccountID   pgtype.UUID
+	Status      string
+	RequestedAt pgtype.Timestamptz
+	// Instant the anonymization executed; after it the account can never authenticate again
+	ExecutedAt pgtype.Timestamptz
+	CanceledAt pgtype.Timestamptz
+	// Holder-provided cancellation reason; restricted evidence, never part of a public projection
+	CancelReason pgtype.Text
+	UpdatedAt    pgtype.Timestamptz
+}
+
 // Minimal administrative assignments: one row per account, granted by an existing account, revocable with a dated revocation
 type AppAdminRole struct {
 	AccountID pgtype.UUID
