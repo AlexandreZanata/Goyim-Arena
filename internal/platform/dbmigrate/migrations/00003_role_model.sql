@@ -24,23 +24,66 @@
 -- restored from a snapshot that already has the roles re-runs safely.
 -- goose needs StatementBegin/StatementEnd around the multi-line DO blocks
 -- so the dollar-quoted bodies parse as single statements.
+--
+-- Concurrency: roles are CLUSTER-global (they live in the shared catalog,
+-- not in the database being migrated) while a migration runs per database, so
+-- the IF NOT EXISTS check above is a check-then-act on state another session
+-- can change in between. Two sessions migrating the same cluster at once —
+-- two instances running migrations at boot, or the test harness provisioning
+-- scratch databases in parallel — both pass the check and one of them aborts
+-- with:
+--
+--   duplicate key value violates unique constraint "pg_authid_rolname_index"
+--
+-- (reproduced against a fresh cluster; the failing statement is the CREATE
+-- ROLE inside this block).
+--
+-- A PostgreSQL advisory lock cannot serialize that, and it is worth recording
+-- why so nobody tries it again: advisory locks are scoped to the database
+-- that takes them. Verified directly — a lock taken on a key in one database
+-- is granted immediately to another database of the same cluster. So the
+-- guard is made atomic instead of mutually exclusive: the presence check
+-- stays as the fast path, and each CREATE ROLE catches the duplicate that a
+-- concurrent session may have committed in the meantime. The effect is
+-- CREATE ROLE IF NOT EXISTS, which PostgreSQL does not provide.
+--
+-- A future migration that touches a cluster-global object must be written the
+-- same way: idempotent under concurrent execution, not merely guarded.
 
 -- +goose StatementBegin
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_owner') THEN
-        CREATE ROLE arena_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-    END IF;
+    -- arena_owner owns every object; the bootstrap superuser relinquishes
+    -- ownership below and never serves application traffic.
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_owner') THEN
+            CREATE ROLE arena_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+        END IF;
+    EXCEPTION WHEN duplicate_object OR unique_violation THEN
+        -- Another session in this cluster created it between the check and
+        -- the create. The role exists, which is all this migration needs.
+        NULL;
+    END;
+
     -- arena_app is the ONLY login role the migration creates: the runtime
     -- authenticates with credentials the operator manages (scripts/
     -- dev-role-cycle.sh in development, the secret store in production).
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_app') THEN
-        CREATE ROLE arena_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_migrator') THEN
-        CREATE ROLE arena_migrator NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
-            IN ROLE arena_owner;
-    END IF;
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_app') THEN
+            CREATE ROLE arena_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+        END IF;
+    EXCEPTION WHEN duplicate_object OR unique_violation THEN
+        NULL;
+    END;
+
+    BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_migrator') THEN
+            CREATE ROLE arena_migrator NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION
+                IN ROLE arena_owner;
+        END IF;
+    EXCEPTION WHEN duplicate_object OR unique_violation THEN
+        NULL;
+    END;
 END
 $$;
 -- +goose StatementEnd
@@ -58,18 +101,38 @@ GRANT SELECT ON app.schema_metadata TO arena_app;
 -- bootstrap role and the role model removed. It is not part of the
 -- production path (migrations are forward-only); it exists so a migration
 -- can be tested cleanly on a scratch database.
+--
+-- Dropping is cluster-global for the same reason creating is, so each drop
+-- catches the case where a concurrent session removed the role between the
+-- check and the drop. Only that case is swallowed: a role that still owns
+-- objects must keep failing loudly, because that is a real problem and not a
+-- race (dependent_objects_still_exist is deliberately not caught).
 -- +goose StatementBegin
 DO $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_migrator') THEN
-        DROP ROLE arena_migrator;
-    END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_app') THEN
-        DROP ROLE arena_app;
-    END IF;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_owner') THEN
-        DROP ROLE arena_owner;
-    END IF;
+    BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_migrator') THEN
+            DROP ROLE arena_migrator;
+        END IF;
+    EXCEPTION WHEN undefined_object THEN
+        NULL;
+    END;
+
+    BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_app') THEN
+            DROP ROLE arena_app;
+        END IF;
+    EXCEPTION WHEN undefined_object THEN
+        NULL;
+    END;
+
+    BEGIN
+        IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'arena_owner') THEN
+            DROP ROLE arena_owner;
+        END IF;
+    EXCEPTION WHEN undefined_object THEN
+        NULL;
+    END;
 END
 $$;
 -- +goose StatementEnd
