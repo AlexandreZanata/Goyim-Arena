@@ -24,6 +24,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbtest"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
 )
 
 type testHarness struct {
@@ -42,6 +43,15 @@ func mustEmail(s string) domain.Email {
 }
 
 func setupTestHarness(t *testing.T, rateLimit ratelimit.Protector) *testHarness {
+	t.Helper()
+	return setupHarness(t, rateLimit, nil)
+}
+
+// setupHarness builds the identity surface with the security layers the caller
+// asks for. The throttle and the challenge are parameters because the tests
+// that are *about* one of them must install it while the tests that are about
+// something else must not be forced through it.
+func setupHarness(t *testing.T, rateLimit ratelimit.Protector, challenge turnstile.Challenger) *testHarness {
 	t.Helper()
 	db := dbtest.New(t)
 	repo := postgres.NewRepository(db.Pool.Pool())
@@ -86,6 +96,7 @@ func setupTestHarness(t *testing.T, rateLimit ratelimit.Protector) *testHarness 
 		AuthenticateSessionUseCase:   authSessUC,
 		SecurityManager:              secMgr,
 		RateLimit:                    rateLimit,
+		Challenge:                    challenge,
 	})
 
 	mux := http.NewServeMux()

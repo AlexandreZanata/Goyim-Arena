@@ -78,6 +78,36 @@ Limites conhecidos destes limites, que precisam de decisão antes de escalar hor
 - **endereços em memória são dado pessoal potencial.** Não são persistidos, não entram em log, não entram em métrica, e uma decisão de recusa carrega apenas o tipo de dimensão que recusou, nunca o valor;
 - **as políticas são pontos de partida conservadores**, derivados do custo de servir uma requisição aceita (hash Argon2id, email enviado, chamada ao Stripe, atenção humana na fila). Ajuste real depende de tráfego real (fase 28); afrouxar uma linha é decisão registrada, não conveniência local.
 
+### Desafio anti-bot (P16-T04)
+
+Implementado em `internal/platform/turnstile`. O desafio é resolvido no browser pelo widget do provedor e **verificado apenas no servidor**: o browser recebe um token, nunca o segredo. O segredo (`ARENA_TURNSTILE_SECRET_KEY`) existe só no processo, é enviado apenas ao endpoint de verificação do provedor, e `Config.String`/`GoString` o redigem para que nenhuma linha de log o carregue; um teste percorre as respostas das rotas guardadas e reprova se o valor aparecer em corpo ou header de qualquer resposta.
+
+Política, em uma tabela única (`internal/platform/turnstile`, `requirements`):
+
+- `signup` (cadastro), `password_reset` (recuperação) e `arena_publish` (publicação de Arena) exigem desafio **em toda chamada** — são as ações que criam conta, disparam email e criam conteúdo público;
+- `login_elevated` exige desafio **sob risco elevado**, que é o sinal de falhas consecutivas de autenticação por endereço de rede (THR-AUTH-02): quem digita a senha errada algumas vezes não vê desafio, um laço de adivinhação vê. O sinal é contado por endereço, nunca por email, para não virar oráculo de existência de conta, e é zerado no primeiro sucesso;
+- uma ação não declarada na tabela resolve para **exigir desafio**, não para liberar: o silêncio de uma linha esquecida tem que falhar fechado.
+
+O que é verificado na resposta do provedor, e por quê:
+
+- `success`;
+- **hostname**: o token tem que ter sido resolvido para o hostname configurado (`ARENA_TURNSTILE_HOSTNAME`); um token cunhado para outro site não é gastável aqui;
+- **action**: o token tem que ter sido cunhado para a ação que o está gastando, então um token do widget de cadastro não vale numa publicação;
+- **uso único**: o token é reivindicado atomicamente antes da verificação, então um replay concorrente não é atendido; quando o provedor também recusa (`timeout-or-duplicate`, que ele não separa de expirado), a recusa é o mesmo `challenge_replayed`. A memória de tokens gastos guarda **fingerprint SHA-256**, nunca o token, e é limitada em tamanho e em tempo (a vida útil de um token do provedor);
+- **timeout**: a chamada de verificação tem deadline curto e o corpo da resposta é limitado, então um provedor lento não segura a requisição nem faz o processo ler sem limite.
+
+Política de falha, explícita e configurada (`ARENA_TURNSTILE_FAIL_POLICY`), nunca implícita: o default é **fechado** — um desafio que não pode ser verificado recusa a ação, porque o instante em que o provedor está inacessível é exatamente o instante em que um cliente automatizado gostaria de prosseguir. A política **aberta** existe para um operador que prefere manter o cadastro funcionando durante uma indisponibilidade do provedor; ela precisa ser pedida por nome, vale **somente** para a resposta "não conseguimos verificar" e nunca para um token inválido, replay ou configuração errada (segredo rejeitado pelo provedor é implantação quebrada, não indisponibilidade, e é recusada sob as duas políticas). Um token ausente também não é verificável: é recusado antes de qualquer chamada, sob as duas políticas.
+
+**Onde essa configuração entra:** ler o ambiente é responsabilidade do composition root (`internal/platform/config`, a única camada que toca o processo). Hoje `cmd/arena` monta apenas health, então os três nomes acima (`ARENA_TURNSTILE_SECRET_KEY`, `ARENA_TURNSTILE_HOSTNAME`, `ARENA_TURNSTILE_FAIL_POLICY`) ainda não estão em `Load`: o construtor recebe a configuração como parâmetro explícito e as variáveis entram junto com a composição dos módulos — o mesmo critério que a P16-T03 registrou para proxies confiáveis, para não criar configuração sem consumidor (e para não documentar uma variável que a validação de ambiente rejeitaria como desconhecida).
+
+O que acontece localmente também é explícito: sem segredo configurado em desenvolvimento ou teste, a composição instala um **fake local documentado** que aceita somente os tokens do widget de teste do provedor e não tem cliente HTTP, endpoint nem segredo (estruturalmente incapaz de falar com a rede); sem segredo em produção, a construção falha no boot em vez de rodar desprotegida.
+
+Limites conhecidos, que precisam de decisão antes de escalar ou antes do widget existir no browser:
+
+- **a memória de tokens gastos é por processo.** Com N instâncias, um replay pode ser reivindicado em outra instância; quem impede é o próprio uso único do provedor, que é a segunda linha por construção. Um store compartilhado é o passo necessário para tornar a garantia local global;
+- **o widget no browser ainda não existe** (fase 18). Quando ele existir, a política de CSP da P16-T01 (`script-src 'self'`) precisa permitir explicitamente o host do desafio, e o site key público entra no HTML; a secret continua nunca chegando ao browser. Não se antecipou essa permissão agora porque não há consumidor: afrouxar a CSP sem widget seria reduzir a proteção sem uso;
+- **o endpoint de verificação é uma dependência externa no caminho de um cadastro.** É o preço de fazer a pergunta ao provedor em vez de confiar no cliente, e é o motivo de a política de falha ser uma decisão registrada.
+
 ## 7. Wallet e concorrência
 
 - Ledger append-only; saldo materializado nunca é autoridade isolada.

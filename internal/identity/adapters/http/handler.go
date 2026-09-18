@@ -13,6 +13,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
 )
 
 const (
@@ -34,6 +35,7 @@ type HandlerConfig struct {
 	AuthenticateSessionUseCase   *application.AuthenticateSessionUseCase
 	SecurityManager              *security.Manager
 	RateLimit                    ratelimit.Protector
+	Challenge                    turnstile.Challenger
 	Templates                    *HTMLTemplates
 }
 
@@ -48,6 +50,7 @@ type Handler struct {
 	authenticateSession  *application.AuthenticateSessionUseCase
 	security             *security.Manager
 	rateLimit            ratelimit.Protector
+	challenge            turnstile.Challenger
 	templates            *HTMLTemplates
 }
 
@@ -68,6 +71,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		authenticateSession:  cfg.AuthenticateSessionUseCase,
 		security:             cfg.SecurityManager,
 		rateLimit:            cfg.RateLimit,
+		challenge:            cfg.Challenge,
 		templates:            templates,
 	}
 }
@@ -94,6 +98,20 @@ func (h *Handler) protect(action ratelimit.Action, next http.Handler) http.Handl
 	// cache policy wraps the throttle instead of living inside the handlers it
 	// may replace.
 	return withPrivateNoStore(h.rateLimit.Protect(action, next))
+}
+
+// challenged applies the anti-bot requirement of one authentication action.
+//
+// It sits *inside* the rate limit on purpose: a caller who is already over its
+// budget is refused before it is also made to spend a challenge, and the
+// platform layer's refusal is the one that carries Retry-After. A nil
+// challenger leaves the route as it was, which is the contract the platform
+// package documents for a composition that has not installed one.
+func (h *Handler) challenged(action turnstile.Action, next http.Handler) http.Handler {
+	if h.challenge == nil {
+		return next
+	}
+	return h.challenge.Challenge(action, next)
 }
 
 // withPrivateNoStore guarantees THR-CACHE-01 even for responses produced by
@@ -217,6 +235,15 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		IPAddress: r.RemoteAddr,
 		UserAgent: r.UserAgent(),
 	})
+	// The risk signal that gates the *next* login is maintained here, because
+	// this is the only place that knows whether the attempt succeeded: the
+	// outcome is reported before it is answered, so a run of failures counts
+	// even when the answer is an enumeration-safe problem document. The
+	// challenger keys it on the resolved peer address, never on the email, so
+	// the signal cannot become an oracle for whether an account exists.
+	if h.challenge != nil {
+		h.challenge.Observe(r, err != nil)
+	}
 	if err != nil {
 		var appErr *apperr.Error
 		if errors.As(err, &appErr) && appErr.Kind() == apperr.KindUnauthorized {
@@ -390,11 +417,16 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	// carry a policy; verification, logout and the reset form do not, because
 	// they create nothing and their costs are bounded by the token they
 	// require.
-	mux.Handle("POST /api/v1/auth/register", h.protect(ratelimit.ActionAuthRegister, http.HandlerFunc(h.Register)))
+	//
+	// Three of them also carry a challenge: registering creates an account,
+	// requesting a reset sends mail, and logging in is challenged once the
+	// caller has already failed repeatedly. The challenge is inside the
+	// throttle, so a throttled caller never spends one.
+	mux.Handle("POST /api/v1/auth/register", h.protect(ratelimit.ActionAuthRegister, h.challenged(turnstile.ActionSignup, http.HandlerFunc(h.Register))))
 	mux.HandleFunc("GET /api/v1/auth/verify", h.Verify)
-	mux.Handle("POST /api/v1/auth/login", h.protect(ratelimit.ActionAuthLogin, http.HandlerFunc(h.Login)))
+	mux.Handle("POST /api/v1/auth/login", h.protect(ratelimit.ActionAuthLogin, h.challenged(turnstile.ActionLoginElevated, http.HandlerFunc(h.Login))))
 	mux.HandleFunc("POST /api/v1/auth/logout", h.Logout)
-	mux.Handle("POST /api/v1/auth/password-reset/request", h.protect(ratelimit.ActionAuthPasswordResetRequest, http.HandlerFunc(h.RequestPasswordReset)))
+	mux.Handle("POST /api/v1/auth/password-reset/request", h.protect(ratelimit.ActionAuthPasswordResetRequest, h.challenged(turnstile.ActionPasswordReset, http.HandlerFunc(h.RequestPasswordReset))))
 	mux.HandleFunc("GET /api/v1/auth/password-reset", h.ViewPasswordReset)
 	mux.Handle("POST /api/v1/auth/password-reset/confirm", h.protect(ratelimit.ActionAuthPasswordResetConfirm, http.HandlerFunc(h.ConfirmPasswordReset)))
 }

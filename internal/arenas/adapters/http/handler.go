@@ -21,6 +21,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
 )
 
 const (
@@ -118,6 +119,7 @@ type HandlerConfig struct {
 	FeedUseCase        *application.GetArenaFeedUseCase
 	GetPublicUseCase   *application.GetPublicArenaUseCase
 	SecurityManager    *security.Manager
+	Challenge          turnstile.Challenger
 }
 
 // Handler serves the versioned arena API.
@@ -132,6 +134,7 @@ type Handler struct {
 	feed        *application.GetArenaFeedUseCase
 	getPublic   *application.GetPublicArenaUseCase
 	security    *security.Manager
+	challenge   turnstile.Challenger
 }
 
 // NewHandler constructs an arenas HTTP handler.
@@ -147,6 +150,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		feed:        cfg.FeedUseCase,
 		getPublic:   cfg.GetPublicUseCase,
 		security:    cfg.SecurityManager,
+		challenge:   cfg.Challenge,
 	}
 }
 
@@ -556,6 +560,16 @@ func parseFeedLimit(r *http.Request) (int, error) {
 	return value, nil
 }
 
+// challenged applies the anti-bot requirement of one arena action. A nil
+// challenger leaves the route as it was, which is the contract the platform
+// package documents for a composition that has not installed one.
+func (h *Handler) challenged(action turnstile.Action, next http.Handler) http.Handler {
+	if h.challenge == nil {
+		return next
+	}
+	return h.challenge.Challenge(action, next)
+}
+
 // privateRoute applies the authentication requirement when a security
 // manager is configured.
 func (h *Handler) privateRoute(next http.Handler) http.Handler {
@@ -572,7 +586,12 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("GET /api/v1/me/arena-drafts/{id}", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.GetDraft))))
 	mux.Handle("PATCH /api/v1/me/arena-drafts/{id}", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.UpdateDraft))))
 	mux.Handle("DELETE /api/v1/me/arena-drafts/{id}", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.DeleteDraft))))
-	mux.Handle("POST /api/v1/me/arena-drafts/{id}/publish", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.PublishDraft))))
+	// Publishing carries a challenge inside the authentication requirement: a
+	// publication is always challenged (the action creates public content and
+	// spends INK), and the challenge comes after the session is resolved so
+	// that an unauthenticated caller is answered about its session rather than
+	// sent to solve a challenge first.
+	mux.Handle("POST /api/v1/me/arena-drafts/{id}/publish", withPrivateNoStore(h.privateRoute(h.challenged(turnstile.ActionArenaPublish, http.HandlerFunc(h.PublishDraft)))))
 	mux.Handle("POST /api/v1/me/arenas/{id}/close", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.CloseArena))))
 
 	mux.HandleFunc("GET /api/v1/arenas", h.PublicFeed)
