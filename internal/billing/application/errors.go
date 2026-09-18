@@ -157,4 +157,14 @@ var (
 	// policy. INK packs, passes and Member are covered; anything else is a
 	// catalog error.
 	ErrRefundUnsupportedGrant = errors.New("application: product grant has no refund policy")
+
+	// Reconciliation error vocabulary (P12-T10).
+
+	// ErrInvalidReconciliationConfig indicates the reconciliation job could
+	// not be built from the given configuration.
+	ErrInvalidReconciliationConfig = errors.New("application: reconciliation configuration is invalid")
+
+	// ErrPortalCustomerNotFound indicates the account has no stored provider
+	// customer, so there is no portal to open.
+	ErrPortalCustomerNotFound = errors.New("application: billing customer was not found")
 )

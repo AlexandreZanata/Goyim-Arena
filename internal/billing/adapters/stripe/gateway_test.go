@@ -824,3 +824,52 @@ func TestNewGatewayRefusesHalfConfiguration(t *testing.T) {
 		t.Fatal("expected a gateway")
 	}
 }
+
+const stubPortalJSON = `{
+  "id": "bps_stub",
+  "object": "billing_portal.session",
+  "url": "https://billing.stripe.invalid/session/bps_stub"
+}`
+
+// TestCreatePortalSessionOpensAllowlistedReturn proves the portal call reaches
+// the provider authenticated, carrying the customer, the allowlisted return
+// URL and the caller's key, and that only the URL leaves the adapter.
+func TestCreatePortalSessionOpensAllowlistedReturn(t *testing.T) {
+	t.Parallel()
+
+	provider := newStubProvider(t, map[string]stubResponse{
+		"POST /v1/billing_portal/sessions": {status: http.StatusOK, body: stubPortalJSON},
+	})
+	gateway := provider.gateway(t, 5*time.Second)
+
+	customerID, _ := domain.ParseStripeCustomerID("cus_stub")
+	session, err := gateway.CreatePortalSession(context.Background(), application.CreatePortalSessionRequest{
+		CustomerID:     customerID,
+		ReturnURL:      "https://arena.invalid/billing/return",
+		IdempotencyKey: "portal-intent-1",
+	})
+	if err != nil {
+		t.Fatalf("CreatePortalSession error = %v", err)
+	}
+	if session.URL != "https://billing.stripe.invalid/session/bps_stub" {
+		t.Fatalf("portal URL = %q", session.URL)
+	}
+
+	requests := provider.requests()
+	if len(requests) != 1 {
+		t.Fatalf("provider received %d requests, want exactly 1", len(requests))
+	}
+	request := requests[0]
+	if request.form.Get("customer") != "cus_stub" {
+		t.Errorf("customer = %q, want cus_stub", request.form.Get("customer"))
+	}
+	if request.form.Get("return_url") != "https://arena.invalid/billing/return" {
+		t.Errorf("return_url = %q", request.form.Get("return_url"))
+	}
+	if got := request.headers.Get("Idempotency-Key"); got != "portal-intent-1" {
+		t.Errorf("Idempotency-Key = %q", got)
+	}
+	if strings.Contains(session.URL, stubSecret) {
+		t.Fatal("portal URL must never carry the secret")
+	}
+}

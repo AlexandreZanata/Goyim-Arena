@@ -96,6 +96,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		if route.Path == "/api/v1/me/passes" || route.Path == "/api/v1/me/passes/history" {
 			continue
 		}
+		if route.Path == "/api/v1/me/billing/checkout" || route.Path == "/api/v1/me/billing/subscription" || route.Path == "/api/v1/me/billing/portal" {
+			continue
+		}
 		if strings.HasPrefix(route.Path, "/api/v1/me/arenas") || route.Path == "/api/v1/arenas" || strings.HasPrefix(route.Path, "/api/v1/arenas/") {
 			continue
 		}
@@ -879,6 +882,62 @@ func propertiesOf(t *testing.T, document *contract.Document, name string) map[st
 		t.Fatalf("decode %s schema: %v", name, err)
 	}
 	return schema.Properties
+}
+
+func TestContractBillingPrivateAPIStaysPrivate(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"BillingCheckoutRequest": {"market", "product", "idempotency_key"},
+		"BillingCheckout":        {"intent_id", "status", "redirect_url", "amount_minor", "currency", "market", "product", "replayed"},
+		"BillingSubscription":    {"has_subscription", "status", "product", "market", "current_period_end", "cancel_at_period_end"},
+		"BillingPortalRequest":   {"idempotency_key"},
+		"BillingPortal":          {"portal_url"},
+	}
+	forbiddenMarkers := []string{
+		"stripe", "customer", "session", "subscription_id", "payment",
+		"price", "secret", "email", "account_id", "fraud", "admin",
+	}
+
+	for name, expectedProperties := range expected {
+		properties := propertiesOf(t, document, name)
+		for _, property := range expectedProperties {
+			if _, ok := properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range properties {
+			lowered := strings.ToLower(property)
+			for _, marker := range forbiddenMarkers {
+				if strings.Contains(lowered, marker) && property != "has_subscription" {
+					t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+				}
+			}
+		}
+	}
+
+	for path, method := range map[string]string{
+		"/api/v1/me/billing/checkout":     "post",
+		"/api/v1/me/billing/subscription": "get",
+		"/api/v1/me/billing/portal":       "post",
+	} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		operation := string(operations[method])
+		if !strings.Contains(operation, `"SessionCookie"`) {
+			t.Errorf("%s must require the SessionCookie scheme", path)
+		}
+		if !strings.Contains(operation, "private, no-store") {
+			t.Errorf("%s must document the private cache policy", path)
+		}
+		if strings.Contains(operation, "public, max-age") {
+			t.Errorf("%s must never be publicly cacheable", path)
+		}
+	}
 }
 
 func TestCompareRoutesDetectsDriftBothWays(t *testing.T) {

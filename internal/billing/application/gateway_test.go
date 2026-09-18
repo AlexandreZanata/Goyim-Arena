@@ -87,6 +87,11 @@ func (g *fakeGateway) GetSubscription(_ context.Context, id domain.StripeSubscri
 	return application.Subscription{ID: id, Status: domain.SubscriptionActive}, nil
 }
 
+func (g *fakeGateway) CreatePortalSession(_ context.Context, request application.CreatePortalSessionRequest) (application.PortalSession, error) {
+	g.requests = append(g.requests, "create portal "+request.CustomerID.String())
+	return application.PortalSession{URL: "https://billing.example/portal/session"}, nil
+}
+
 // TestPaymentGatewayPortIsConsumedWithoutTheProvider exercises the whole port
 // through the fake: provisioning a customer, starting a subscription checkout
 // and reading both objects back. The flow is expressed with billing vocabulary
@@ -230,6 +235,8 @@ func TestPortTypesNeverMentionTheProvider(t *testing.T) {
 		reflect.TypeOf((*application.CreateCheckoutSessionRequest)(nil)).Elem(),
 		reflect.TypeOf((*application.CheckoutSession)(nil)).Elem(),
 		reflect.TypeOf((*application.Subscription)(nil)).Elem(),
+		reflect.TypeOf((*application.CreatePortalSessionRequest)(nil)).Elem(),
+		reflect.TypeOf((*application.PortalSession)(nil)).Elem(),
 	}
 	for _, want := range required {
 		if !seen[want] {

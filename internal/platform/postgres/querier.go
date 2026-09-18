@@ -85,6 +85,10 @@ type Querier interface {
 	// app.accounts; payment identifiers belong to the billing module.
 	// Public lookups only ever read from app.profiles by username_normalized.
 	CreateProfile(ctx context.Context, arg CreateProfileParams) (AppProfile, error)
+	// Reconciliation runs and findings (P12-T10). A run states the window it
+	// inspected with its counters; every divergence is an immutable finding
+	// resolved only by a human justification afterwards.
+	CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (AppBillingReconciliationRun, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (AppSession, error)
 	CreateUsernameHistoryEntry(ctx context.Context, arg CreateUsernameHistoryEntryParams) error
 	// Wallet ledger queries for the PostgreSQL platform adapter.
@@ -109,6 +113,7 @@ type Querier interface {
 	// EnsureWalletAccount materializes the balance projection row for an
 	// account; a pre-existing row is left untouched, including its balances.
 	EnsureWalletAccount(ctx context.Context, accountID pgtype.UUID) error
+	FinishReconciliationRun(ctx context.Context, arg FinishReconciliationRunParams) (AppBillingReconciliationRun, error)
 	GetAccountByEmail(ctx context.Context, lower string) (AppAccount, error)
 	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
 	// Customer correlation lookup (P12-T08).
@@ -232,6 +237,7 @@ type Querier interface {
 	// provider identifier is the idempotency anchor and the commercial facts are
 	// immutable once written. Only the human resolution may be appended later.
 	InsertBillingRefundIfAbsent(ctx context.Context, arg InsertBillingRefundIfAbsentParams) (AppBillingRefund, error)
+	InsertReconciliationFinding(ctx context.Context, arg InsertReconciliationFindingParams) (AppBillingReconciliationFinding, error)
 	// Webhook event queries (P12-T05). The provider's unique event ID is the
 	// idempotency anchor: a replay resolves the existing row and never creates a
 	// second one. The processing lifecycle is enforced by CHECK constraints and
@@ -336,6 +342,11 @@ type Querier interface {
 	// Expired lots are never candidates, so they can never be consumed (P07-T03).
 	ListAvailablePassLotsForUpdate(ctx context.Context, arg ListAvailablePassLotsForUpdateParams) ([]AppArenaPassLot, error)
 	ListBillingRefundsByIntent(ctx context.Context, checkoutIntentID pgtype.UUID) ([]AppBillingRefund, error)
+	// Reconciliation window reads (P12-T10). The job compares the local mirrors
+	// created in the window against the provider and records findings without
+	// correcting anything: these selects are the only local input, ordered
+	// deterministically so runs are reproducible.
+	ListCheckoutIntentsForReconciliation(ctx context.Context, arg ListCheckoutIntentsForReconciliationParams) ([]ListCheckoutIntentsForReconciliationRow, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
 	// ListExpiredArenaPassLots derives the expired lots that still hold passes.
 	// Expiration is never written back: the predicate is evaluated at read time,
@@ -350,11 +361,14 @@ type Querier interface {
 	// appear, and the (published_at, id) tuple comparison never duplicates or
 	// skips rows (P08-T06).
 	ListPublicArenasPage(ctx context.Context, arg ListPublicArenasPageParams) ([]AppArena, error)
+	ListReconciliationFindingsByRun(ctx context.Context, runID pgtype.UUID) ([]AppBillingReconciliationFinding, error)
 	// ListRepliesPage returns one keyset page of published replies of one
 	// parent, newest first. Replies carry no derived reply count: the depth
 	// policy forbids grandchildren (P10-T05), so the count is always zero and
 	// the statement stays cheaper.
 	ListRepliesPage(ctx context.Context, arg ListRepliesPageParams) ([]ListRepliesPageRow, error)
+	ListSubscriptionsForReconciliation(ctx context.Context, arg ListSubscriptionsForReconciliationParams) ([]AppSubscription, error)
+	ListUnprocessedStripeEvents(ctx context.Context, arg ListUnprocessedStripeEventsParams) ([]AppStripeEvent, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	// ListWalletStatementPage returns one keyset-paginated page of the account
 	// statement, newest first. NULL after_* parameters select the first page;

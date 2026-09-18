@@ -316,3 +316,58 @@ ORDER BY created_at ASC, id ASC;
 UPDATE app.arena_pass_lots
 SET remaining_quantity = 0
 WHERE id = $1 AND remaining_quantity > 0;
+
+-- Reconciliation window reads (P12-T10). The job compares the local mirrors
+-- created in the window against the provider and records findings without
+-- correcting anything: these selects are the only local input, ordered
+-- deterministically so runs are reproducible.
+
+-- name: ListCheckoutIntentsForReconciliation :many
+SELECT id, account_id, market, product_id, catalog_version, currency, amount_minor, livemode, status, stripe_checkout_session_id, created_at
+FROM app.checkout_intents
+WHERE created_at >= $1 AND created_at < $2 AND livemode = $3
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListSubscriptionsForReconciliation :many
+SELECT id, account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at,
+    created_at, updated_at
+FROM app.subscriptions
+WHERE updated_at >= $1 AND updated_at < $2 AND livemode = $3
+ORDER BY updated_at ASC, id ASC;
+
+-- name: ListUnprocessedStripeEvents :many
+SELECT id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at
+FROM app.stripe_events
+WHERE stripe_created_at >= $1 AND stripe_created_at < $2 AND livemode = $3
+  AND status IN ('received', 'processing', 'failed')
+ORDER BY stripe_created_at ASC, id ASC;
+
+-- Reconciliation runs and findings (P12-T10). A run states the window it
+-- inspected with its counters; every divergence is an immutable finding
+-- resolved only by a human justification afterwards.
+
+-- name: CreateReconciliationRun :one
+INSERT INTO app.billing_reconciliation_runs (livemode, window_start, window_end, status)
+VALUES ($1, $2, $3, 'running')
+RETURNING id, livemode, window_start, window_end, status, scanned_objects, findings_count, started_at, finished_at;
+
+-- name: FinishReconciliationRun :one
+UPDATE app.billing_reconciliation_runs
+SET status = $2, scanned_objects = $3, findings_count = $4, finished_at = now()
+WHERE id = $1
+RETURNING id, livemode, window_start, window_end, status, scanned_objects, findings_count, started_at, finished_at;
+
+-- name: InsertReconciliationFinding :one
+INSERT INTO app.billing_reconciliation_findings (run_id, account_id, kind, reference, details)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, run_id, account_id, kind, reference, details, observed_at, resolved_at, resolution;
+
+-- name: ListReconciliationFindingsByRun :many
+SELECT id, run_id, account_id, kind, reference, details, observed_at, resolved_at, resolution
+FROM app.billing_reconciliation_findings
+WHERE run_id = $1
+ORDER BY observed_at ASC, id ASC;

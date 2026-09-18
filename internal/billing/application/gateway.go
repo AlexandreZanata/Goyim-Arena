@@ -40,6 +40,11 @@ type PaymentGateway interface {
 
 	// GetSubscription reads the current provider state of a subscription.
 	GetSubscription(ctx context.Context, id domain.StripeSubscriptionID) (Subscription, error)
+
+	// CreatePortalSession opens the hosted customer portal for one customer.
+	// The return URL is allowlisted by the caller: the provider only sends
+	// the buyer back to a destination this deployment declared.
+	CreatePortalSession(ctx context.Context, request CreatePortalSessionRequest) (PortalSession, error)
 }
 
 // CreateCustomerRequest asks the gateway to provision the provider customer of
@@ -142,4 +147,23 @@ type Subscription struct {
 	CancelAtPeriodEnd bool
 	// Livemode reports whether the subscription belongs to the live mode.
 	Livemode bool
+}
+
+// CreatePortalSessionRequest asks the gateway to open the hosted customer
+// portal for one customer.
+type CreatePortalSessionRequest struct {
+	// CustomerID is the private provider customer.
+	CustomerID domain.StripeCustomerID
+	// ReturnURL is where the provider sends the buyer after the portal.
+	// It is allowlisted by the caller and never comes from the browser.
+	ReturnURL string
+	// IdempotencyKey makes a retried opening resolve the same session.
+	IdempotencyKey string
+}
+
+// PortalSession is the hosted portal the buyer is sent to.
+type PortalSession struct {
+	// URL is the hosted portal page. It is the only provider value that
+	// leaves the adapter toward the browser; identifiers never do.
+	URL string
 }

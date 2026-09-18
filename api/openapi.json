@@ -386,6 +386,86 @@
         }
       }
     },
+    "/api/v1/me/billing/checkout": {
+      "post": {
+        "operationId": "createBillingCheckout",
+        "summary": "Create a server-priced checkout",
+        "description": "Creates one server-authoritative checkout for the owner's account and returns the redirect URL with the priced amount. Amount, currency and return URLs come from the versioned catalog and allowlisted configuration; provider identifiers never serialize. Served with Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["billing"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BillingCheckoutRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Checkout created.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BillingCheckout" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/v1/me/billing/subscription": {
+      "get": {
+        "operationId": "getBillingSubscription",
+        "summary": "Member subscription projection",
+        "description": "Returns the owner's Member subscription projection from the local mirror: lifecycle and period only. Provider identifiers never serialize. Served with Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["billing"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "Subscription projection.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BillingSubscription" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/me/billing/portal": {
+      "post": {
+        "operationId": "createBillingPortal",
+        "summary": "Open the customer portal",
+        "description": "Opens the hosted customer portal for the owner's stored customer and returns only the portal URL. Provider identifiers never serialize. Served with Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["billing"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BillingPortalRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Portal session.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BillingPortal" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
     "/api/v1/me/arenas/drafts": {
       "post": {
         "operationId": "createArenaDraft",
@@ -1599,6 +1679,59 @@
         "properties": {
           "items": { "type": "array", "items": { "$ref": "#/components/schemas/ArenaPassHistoryEntry" } },
           "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
+        }
+      },
+      "BillingCheckoutRequest": {
+        "type": "object",
+        "description": "Minimal purchase intent the browser may name. Amount, currency, price and return URLs are resolved by the server.",
+        "required": ["market", "product", "idempotency_key"],
+        "properties": {
+          "market": { "type": "string", "enum": ["BR", "INTERNATIONAL"] },
+          "product": { "type": "string" },
+          "idempotency_key": { "type": "string" }
+        }
+      },
+      "BillingCheckout": {
+        "type": "object",
+        "description": "Private checkout document: local intent, priced money and redirect URL. No provider identifier serializes.",
+        "required": ["intent_id", "status", "redirect_url", "amount_minor", "currency", "market", "product", "replayed"],
+        "properties": {
+          "intent_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["created", "open", "paid", "expired", "failed"] },
+          "redirect_url": { "type": "string" },
+          "amount_minor": { "type": "integer", "minimum": 1, "description": "Exact price in minor units of the currency." },
+          "currency": { "type": "string", "enum": ["BRL", "USD"] },
+          "market": { "type": "string", "enum": ["BR", "INTERNATIONAL"] },
+          "product": { "type": "string" },
+          "replayed": { "type": "boolean" }
+        }
+      },
+      "BillingSubscription": {
+        "type": "object",
+        "description": "Private Member subscription projection: lifecycle and period only. No provider identifier serializes.",
+        "required": ["has_subscription"],
+        "properties": {
+          "has_subscription": { "type": "boolean" },
+          "status": { "type": "string", "enum": ["incomplete", "incomplete_expired", "trialing", "active", "past_due", "canceled", "unpaid", "paused"] },
+          "product": { "type": "string" },
+          "market": { "type": "string", "enum": ["BR", "INTERNATIONAL"] },
+          "current_period_end": { "type": ["string", "null"], "format": "date-time" },
+          "cancel_at_period_end": { "type": "boolean" }
+        }
+      },
+      "BillingPortalRequest": {
+        "type": "object",
+        "description": "Optional operation token for an idempotent portal opening.",
+        "properties": {
+          "idempotency_key": { "type": "string" }
+        }
+      },
+      "BillingPortal": {
+        "type": "object",
+        "description": "Hosted portal session. Only the portal URL leaves the billing module.",
+        "required": ["portal_url"],
+        "properties": {
+          "portal_url": { "type": "string" }
         }
       },
       "ArenaDraftRequest": {

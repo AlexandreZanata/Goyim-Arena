@@ -137,6 +137,75 @@ func (q *Queries) CreateArenaPassLotIfAbsent(ctx context.Context, arg CreateAren
 	return i, err
 }
 
+const createReconciliationRun = `-- name: CreateReconciliationRun :one
+
+INSERT INTO app.billing_reconciliation_runs (livemode, window_start, window_end, status)
+VALUES ($1, $2, $3, 'running')
+RETURNING id, livemode, window_start, window_end, status, scanned_objects, findings_count, started_at, finished_at
+`
+
+type CreateReconciliationRunParams struct {
+	Livemode    bool
+	WindowStart pgtype.Timestamptz
+	WindowEnd   pgtype.Timestamptz
+}
+
+// Reconciliation runs and findings (P12-T10). A run states the window it
+// inspected with its counters; every divergence is an immutable finding
+// resolved only by a human justification afterwards.
+func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (AppBillingReconciliationRun, error) {
+	row := q.db.QueryRow(ctx, createReconciliationRun, arg.Livemode, arg.WindowStart, arg.WindowEnd)
+	var i AppBillingReconciliationRun
+	err := row.Scan(
+		&i.ID,
+		&i.Livemode,
+		&i.WindowStart,
+		&i.WindowEnd,
+		&i.Status,
+		&i.ScannedObjects,
+		&i.FindingsCount,
+		&i.StartedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
+const finishReconciliationRun = `-- name: FinishReconciliationRun :one
+UPDATE app.billing_reconciliation_runs
+SET status = $2, scanned_objects = $3, findings_count = $4, finished_at = now()
+WHERE id = $1
+RETURNING id, livemode, window_start, window_end, status, scanned_objects, findings_count, started_at, finished_at
+`
+
+type FinishReconciliationRunParams struct {
+	ID             pgtype.UUID
+	Status         string
+	ScannedObjects int32
+	FindingsCount  int32
+}
+
+func (q *Queries) FinishReconciliationRun(ctx context.Context, arg FinishReconciliationRunParams) (AppBillingReconciliationRun, error) {
+	row := q.db.QueryRow(ctx, finishReconciliationRun,
+		arg.ID,
+		arg.Status,
+		arg.ScannedObjects,
+		arg.FindingsCount,
+	)
+	var i AppBillingReconciliationRun
+	err := row.Scan(
+		&i.ID,
+		&i.Livemode,
+		&i.WindowStart,
+		&i.WindowEnd,
+		&i.Status,
+		&i.ScannedObjects,
+		&i.FindingsCount,
+		&i.StartedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const getAccountByStripeCustomerID = `-- name: GetAccountByStripeCustomerID :one
 SELECT account_id, stripe_customer_id, livemode, created_at
 FROM app.stripe_customers
@@ -496,6 +565,43 @@ func (q *Queries) InsertBillingRefundIfAbsent(ctx context.Context, arg InsertBil
 	return i, err
 }
 
+const insertReconciliationFinding = `-- name: InsertReconciliationFinding :one
+INSERT INTO app.billing_reconciliation_findings (run_id, account_id, kind, reference, details)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, run_id, account_id, kind, reference, details, observed_at, resolved_at, resolution
+`
+
+type InsertReconciliationFindingParams struct {
+	RunID     pgtype.UUID
+	AccountID pgtype.UUID
+	Kind      string
+	Reference string
+	Details   pgtype.Text
+}
+
+func (q *Queries) InsertReconciliationFinding(ctx context.Context, arg InsertReconciliationFindingParams) (AppBillingReconciliationFinding, error) {
+	row := q.db.QueryRow(ctx, insertReconciliationFinding,
+		arg.RunID,
+		arg.AccountID,
+		arg.Kind,
+		arg.Reference,
+		arg.Details,
+	)
+	var i AppBillingReconciliationFinding
+	err := row.Scan(
+		&i.ID,
+		&i.RunID,
+		&i.AccountID,
+		&i.Kind,
+		&i.Reference,
+		&i.Details,
+		&i.ObservedAt,
+		&i.ResolvedAt,
+		&i.Resolution,
+	)
+	return i, err
+}
+
 const insertWebhookEventIfAbsent = `-- name: InsertWebhookEventIfAbsent :one
 
 INSERT INTO app.stripe_events (
@@ -811,6 +917,70 @@ func (q *Queries) ListBillingRefundsByIntent(ctx context.Context, checkoutIntent
 	return items, nil
 }
 
+const listCheckoutIntentsForReconciliation = `-- name: ListCheckoutIntentsForReconciliation :many
+
+SELECT id, account_id, market, product_id, catalog_version, currency, amount_minor, livemode, status, stripe_checkout_session_id, created_at
+FROM app.checkout_intents
+WHERE created_at >= $1 AND created_at < $2 AND livemode = $3
+ORDER BY created_at ASC, id ASC
+`
+
+type ListCheckoutIntentsForReconciliationParams struct {
+	CreatedAt   pgtype.Timestamptz
+	CreatedAt_2 pgtype.Timestamptz
+	Livemode    bool
+}
+
+type ListCheckoutIntentsForReconciliationRow struct {
+	ID                      pgtype.UUID
+	AccountID               pgtype.UUID
+	Market                  string
+	ProductID               string
+	CatalogVersion          int32
+	Currency                string
+	AmountMinor             int64
+	Livemode                bool
+	Status                  string
+	StripeCheckoutSessionID pgtype.Text
+	CreatedAt               pgtype.Timestamptz
+}
+
+// Reconciliation window reads (P12-T10). The job compares the local mirrors
+// created in the window against the provider and records findings without
+// correcting anything: these selects are the only local input, ordered
+// deterministically so runs are reproducible.
+func (q *Queries) ListCheckoutIntentsForReconciliation(ctx context.Context, arg ListCheckoutIntentsForReconciliationParams) ([]ListCheckoutIntentsForReconciliationRow, error) {
+	rows, err := q.db.Query(ctx, listCheckoutIntentsForReconciliation, arg.CreatedAt, arg.CreatedAt_2, arg.Livemode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCheckoutIntentsForReconciliationRow{}
+	for rows.Next() {
+		var i ListCheckoutIntentsForReconciliationRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.Market,
+			&i.ProductID,
+			&i.CatalogVersion,
+			&i.Currency,
+			&i.AmountMinor,
+			&i.Livemode,
+			&i.Status,
+			&i.StripeCheckoutSessionID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpiredArenaPassLots = `-- name: ListExpiredArenaPassLots :many
 SELECT id, account_id, origin, quantity, remaining_quantity, expires_at, reference, created_at
 FROM app.arena_pass_lots
@@ -847,6 +1017,144 @@ func (q *Queries) ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredA
 			&i.ExpiresAt,
 			&i.Reference,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReconciliationFindingsByRun = `-- name: ListReconciliationFindingsByRun :many
+SELECT id, run_id, account_id, kind, reference, details, observed_at, resolved_at, resolution
+FROM app.billing_reconciliation_findings
+WHERE run_id = $1
+ORDER BY observed_at ASC, id ASC
+`
+
+func (q *Queries) ListReconciliationFindingsByRun(ctx context.Context, runID pgtype.UUID) ([]AppBillingReconciliationFinding, error) {
+	rows, err := q.db.Query(ctx, listReconciliationFindingsByRun, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppBillingReconciliationFinding{}
+	for rows.Next() {
+		var i AppBillingReconciliationFinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.RunID,
+			&i.AccountID,
+			&i.Kind,
+			&i.Reference,
+			&i.Details,
+			&i.ObservedAt,
+			&i.ResolvedAt,
+			&i.Resolution,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubscriptionsForReconciliation = `-- name: ListSubscriptionsForReconciliation :many
+SELECT id, account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at,
+    created_at, updated_at
+FROM app.subscriptions
+WHERE updated_at >= $1 AND updated_at < $2 AND livemode = $3
+ORDER BY updated_at ASC, id ASC
+`
+
+type ListSubscriptionsForReconciliationParams struct {
+	UpdatedAt   pgtype.Timestamptz
+	UpdatedAt_2 pgtype.Timestamptz
+	Livemode    bool
+}
+
+func (q *Queries) ListSubscriptionsForReconciliation(ctx context.Context, arg ListSubscriptionsForReconciliationParams) ([]AppSubscription, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionsForReconciliation, arg.UpdatedAt, arg.UpdatedAt_2, arg.Livemode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppSubscription{}
+	for rows.Next() {
+		var i AppSubscription
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.StripeSubscriptionID,
+			&i.Status,
+			&i.Livemode,
+			&i.Market,
+			&i.ProductID,
+			&i.CatalogVersion,
+			&i.StripePriceID,
+			&i.CurrentPeriodStart,
+			&i.CurrentPeriodEnd,
+			&i.CancelAtPeriodEnd,
+			&i.CanceledAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnprocessedStripeEvents = `-- name: ListUnprocessedStripeEvents :many
+SELECT id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at
+FROM app.stripe_events
+WHERE stripe_created_at >= $1 AND stripe_created_at < $2 AND livemode = $3
+  AND status IN ('received', 'processing', 'failed')
+ORDER BY stripe_created_at ASC, id ASC
+`
+
+type ListUnprocessedStripeEventsParams struct {
+	StripeCreatedAt   pgtype.Timestamptz
+	StripeCreatedAt_2 pgtype.Timestamptz
+	Livemode          bool
+}
+
+func (q *Queries) ListUnprocessedStripeEvents(ctx context.Context, arg ListUnprocessedStripeEventsParams) ([]AppStripeEvent, error) {
+	rows, err := q.db.Query(ctx, listUnprocessedStripeEvents, arg.StripeCreatedAt, arg.StripeCreatedAt_2, arg.Livemode)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppStripeEvent{}
+	for rows.Next() {
+		var i AppStripeEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.StripeEventID,
+			&i.EventType,
+			&i.Livemode,
+			&i.StripeCreatedAt,
+			&i.PayloadSha256,
+			&i.PayloadBytes,
+			&i.Status,
+			&i.Attempts,
+			&i.LastError,
+			&i.ReceivedAt,
+			&i.ProcessedAt,
 		); err != nil {
 			return nil, err
 		}

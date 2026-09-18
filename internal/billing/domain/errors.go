@@ -74,6 +74,11 @@ const (
 	CodeInvalidRefundStatus    ErrorCode = "BILLING_INVALID_REFUND_STATUS"
 	CodeInvalidRefundAmount    ErrorCode = "BILLING_INVALID_REFUND_AMOUNT"
 	CodeInvalidRefundAssess    ErrorCode = "BILLING_INVALID_REFUND_ASSESSMENT"
+
+	// Reconciliation errors (P12-T10): windowed comparison without silent
+	// correction.
+	CodeInvalidReconciliationKind   ErrorCode = "BILLING_INVALID_RECONCILIATION_KIND"
+	CodeInvalidReconciliationWindow ErrorCode = "BILLING_INVALID_RECONCILIATION_WINDOW"
 )
 
 // DomainError represents an invariant or rule failure in the billing domain.
@@ -155,4 +160,7 @@ var (
 	ErrInvalidRefundStatus     = DomainError{Code: CodeInvalidRefundStatus, Message: "refund status is outside the supported vocabulary"}
 	ErrInvalidRefundAmount     = DomainError{Code: CodeInvalidRefundAmount, Message: "refunded amount must be a positive share of the charged price"}
 	ErrInvalidRefundAssessment = DomainError{Code: CodeInvalidRefundAssess, Message: "refund assessment inputs are incoherent"}
+
+	ErrInvalidReconciliationKind   = DomainError{Code: CodeInvalidReconciliationKind, Message: "reconciliation kind is outside the supported vocabulary"}
+	ErrInvalidReconciliationWindow = DomainError{Code: CodeInvalidReconciliationWindow, Message: "reconciliation window must be a complete interval with the end after the start"}
 )

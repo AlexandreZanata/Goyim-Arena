@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/stripe/stripe-go/v78"
+	"github.com/stripe/stripe-go/v78/billingportal/session"
 	checkoutsession "github.com/stripe/stripe-go/v78/checkout/session"
 	"github.com/stripe/stripe-go/v78/customer"
 	"github.com/stripe/stripe-go/v78/subscription"
@@ -82,6 +83,7 @@ type providerClients struct {
 	customers     *customer.Client
 	sessions      *checkoutsession.Client
 	subscriptions *subscription.Client
+	portal        *session.Client
 }
 
 // String implements fmt.Stringer without ever printing the credentials held by
@@ -147,6 +149,7 @@ func NewGateway(config Config) (*Gateway, error) {
 			customers:     &customer.Client{B: backends.API, Key: key},
 			sessions:      &checkoutsession.Client{B: backends.API, Key: key},
 			subscriptions: &subscription.Client{B: backends.API, Key: key},
+			portal:        &session.Client{B: backends.API, Key: key},
 		},
 	}, nil
 }
@@ -254,6 +257,38 @@ func (g *Gateway) GetSubscription(ctx context.Context, id domain.StripeSubscript
 		return application.Subscription{}, fmt.Errorf("get subscription: %w", err)
 	}
 	return translated, nil
+}
+
+// CreatePortalSession opens the hosted customer portal for one customer.
+// The return URL is allowlisted by the caller: this adapter only refuses an
+// empty or malformed URL before opening a socket, the single-origin rule
+// lives in the typed configuration like the checkout return URLs.
+func (g *Gateway) CreatePortalSession(ctx context.Context, request application.CreatePortalSessionRequest) (application.PortalSession, error) {
+	if request.CustomerID.IsZero() {
+		return application.PortalSession{}, fmt.Errorf("create portal session: %w", application.ErrPaymentGatewayRequestInvalid)
+	}
+	if err := validateIdempotencyKey(request.IdempotencyKey); err != nil {
+		return application.PortalSession{}, fmt.Errorf("create portal session: %w", err)
+	}
+	if request.ReturnURL == "" || !validBaseURL(request.ReturnURL) {
+		return application.PortalSession{}, fmt.Errorf("create portal session: %w", application.ErrPaymentGatewayRequestInvalid)
+	}
+
+	ctx, cancel := g.deadline(ctx)
+	defer cancel()
+
+	created, err := g.clients.portal.New(&stripe.BillingPortalSessionParams{
+		Params:    stripe.Params{Context: ctx, IdempotencyKey: stripe.String(request.IdempotencyKey)},
+		Customer:  stripe.String(request.CustomerID.String()),
+		ReturnURL: stripe.String(request.ReturnURL),
+	})
+	if err != nil {
+		return application.PortalSession{}, fmt.Errorf("create portal session: %w", classify(err))
+	}
+	if created.URL == "" {
+		return application.PortalSession{}, fmt.Errorf("create portal session: %w", misconfigured(errors.New("provider answered no portal url")))
+	}
+	return application.PortalSession{URL: created.URL}, nil
 }
 
 // deadline bounds one provider call. The caller's deadline wins when it is
