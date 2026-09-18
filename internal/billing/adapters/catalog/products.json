@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "products": [
+    {
+      "market": "BR",
+      "product": "ink_10000",
+      "currency": "BRL",
+      "amount_minor": 990,
+      "grant": "INK",
+      "ink_quantity": 10000
+    },
+    {
+      "market": "BR",
+      "product": "ink_40000",
+      "currency": "BRL",
+      "amount_minor": 2490,
+      "grant": "INK",
+      "ink_quantity": 40000
+    },
+    {
+      "market": "BR",
+      "product": "ink_100000",
+      "currency": "BRL",
+      "amount_minor": 4990,
+      "grant": "INK",
+      "ink_quantity": 100000
+    },
+    {
+      "market": "BR",
+      "product": "pass_1",
+      "currency": "BRL",
+      "amount_minor": 990,
+      "grant": "ARENA_PASS",
+      "pass_quantity": 1
+    },
+    {
+      "market": "BR",
+      "product": "pass_5",
+      "currency": "BRL",
+      "amount_minor": 3990,
+      "grant": "ARENA_PASS",
+      "pass_quantity": 5
+    },
+    {
+      "market": "BR",
+      "product": "member_monthly",
+      "currency": "BRL",
+      "amount_minor": 1990,
+      "grant": "MEMBER"
+    },
+    {
+      "market": "INTERNATIONAL",
+      "product": "ink_10000",
+      "currency": "USD",
+      "amount_minor": 199,
+      "grant": "INK",
+      "ink_quantity": 10000
+    },
+    {
+      "market": "INTERNATIONAL",
+      "product": "ink_40000",
+      "currency": "USD",
+      "amount_minor": 499,
+      "grant": "INK",
+      "ink_quantity": 40000
+    },
+    {
+      "market": "INTERNATIONAL",
+      "product": "ink_100000",
+      "currency": "USD",
+      "amount_minor": 999,
+      "grant": "INK",
+      "ink_quantity": 100000
+    },
+    {
+      "market": "INTERNATIONAL",
+      "product": "pass_1",
+      "currency": "USD",
+      "amount_minor": 199,
+      "grant": "ARENA_PASS",
+      "pass_quantity": 1
+    },
+    {
+      "market": "INTERNATIONAL",
+      "product": "pass_5",
+      "currency": "USD",
+      "amount_minor": 799,
+      "grant": "ARENA_PASS",
+      "pass_quantity": 5
+    },
+    {
+      "market": "INTERNATIONAL",
+      "product": "member_monthly",
+      "currency": "USD",
+      "amount_minor": 399,
+      "grant": "MEMBER"
+    }
+  ]
+}

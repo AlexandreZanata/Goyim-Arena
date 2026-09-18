@@ -19,6 +19,26 @@ const (
 	CodeEmptyArenaID        ErrorCode = "BILLING_EMPTY_ARENA_ID"
 	CodeInvalidArenaID      ErrorCode = "BILLING_INVALID_ARENA_ID"
 	CodeNoPassAvailable     ErrorCode = "BILLING_NO_PASS_AVAILABLE"
+
+	// Catalog errors (P12-T01): the versioned price list and the commercial
+	// regions of the deployment.
+	CodeInvalidMarket          ErrorCode = "BILLING_INVALID_MARKET"
+	CodeDuplicateMarket        ErrorCode = "BILLING_DUPLICATE_MARKET"
+	CodeUnsupportedCurrency    ErrorCode = "BILLING_UNSUPPORTED_CURRENCY"
+	CodeMarketCurrencyMismatch ErrorCode = "BILLING_MARKET_CURRENCY_MISMATCH"
+	CodeInvalidMoney           ErrorCode = "BILLING_INVALID_MONEY"
+	CodeInvalidProductID       ErrorCode = "BILLING_INVALID_PRODUCT_ID"
+	CodeDuplicateProduct       ErrorCode = "BILLING_DUPLICATE_PRODUCT"
+	CodeUnknownProduct         ErrorCode = "BILLING_UNKNOWN_PRODUCT"
+	CodeProductNotPriced       ErrorCode = "BILLING_PRODUCT_NOT_PRICED"
+	CodeUnknownMarket          ErrorCode = "BILLING_UNKNOWN_MARKET"
+	CodeMarketNotEnabled       ErrorCode = "BILLING_MARKET_NOT_ENABLED"
+	CodeDuplicatePrice         ErrorCode = "BILLING_DUPLICATE_PRICE"
+	CodeInvalidStripePriceID   ErrorCode = "BILLING_INVALID_STRIPE_PRICE_ID"
+	CodePriceIDRequired        ErrorCode = "BILLING_PRICE_ID_REQUIRED"
+	CodeInvalidCatalogVersion  ErrorCode = "BILLING_INVALID_CATALOG_VERSION"
+	CodeInvalidGrant           ErrorCode = "BILLING_INVALID_GRANT"
+	CodeNoMarketEnabled        ErrorCode = "BILLING_NO_MARKET_ENABLED"
 )
 
 // DomainError represents an invariant or rule failure in the billing domain.
@@ -53,4 +73,22 @@ var (
 	ErrEmptyArenaID        = DomainError{Code: CodeEmptyArenaID, Message: "arena identifier cannot be empty"}
 	ErrInvalidArenaID      = DomainError{Code: CodeInvalidArenaID, Message: "arena identifier contains unsupported characters"}
 	ErrNoPassAvailable     = DomainError{Code: CodeNoPassAvailable, Message: "no valid arena pass is available"}
+
+	ErrInvalidMarket          = DomainError{Code: CodeInvalidMarket, Message: "market is outside the supported commercial regions"}
+	ErrDuplicateMarket        = DomainError{Code: CodeDuplicateMarket, Message: "market is enabled more than once"}
+	ErrUnsupportedCurrency    = DomainError{Code: CodeUnsupportedCurrency, Message: "currency is outside the supported ISO 4217 vocabulary"}
+	ErrMarketCurrencyMismatch = DomainError{Code: CodeMarketCurrencyMismatch, Message: "currency does not match the currency this market charges"}
+	ErrInvalidMoney           = DomainError{Code: CodeInvalidMoney, Message: "monetary amount must be a positive number of minor units"}
+	ErrInvalidProductID       = DomainError{Code: CodeInvalidProductID, Message: "product identifier is not lower snake case of three to 64 characters"}
+	ErrDuplicateProduct       = DomainError{Code: CodeDuplicateProduct, Message: "catalog carries two entries for the same market and product"}
+	ErrUnknownProduct         = DomainError{Code: CodeUnknownProduct, Message: "product is not part of the catalog"}
+	ErrProductNotPriced       = DomainError{Code: CodeProductNotPriced, Message: "product has no Stripe price provisioned in this environment"}
+	ErrUnknownMarket          = DomainError{Code: CodeUnknownMarket, Message: "market has no products in the catalog"}
+	ErrMarketNotEnabled       = DomainError{Code: CodeMarketNotEnabled, Message: "market is not enabled in this deployment"}
+	ErrDuplicatePrice         = DomainError{Code: CodeDuplicatePrice, Message: "Stripe price is configured twice for the same market and product"}
+	ErrInvalidStripePriceID   = DomainError{Code: CodeInvalidStripePriceID, Message: "Stripe price identifier is malformed"}
+	ErrPriceIDRequired        = DomainError{Code: CodePriceIDRequired, Message: "production requires a Stripe price for every enabled product"}
+	ErrInvalidCatalogVersion  = DomainError{Code: CodeInvalidCatalogVersion, Message: "catalog version must be a positive integer"}
+	ErrInvalidGrant           = DomainError{Code: CodeInvalidGrant, Message: "grant does not carry exactly the quantities its kind describes"}
+	ErrNoMarketEnabled        = DomainError{Code: CodeNoMarketEnabled, Message: "production requires at least one enabled commercial region"}
 )

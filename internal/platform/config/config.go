@@ -33,6 +33,8 @@ type Config struct {
 	dbMaxConnLifetime time.Duration
 	dbMaxConnIdleTime time.Duration
 	dbAcquireTimeout  time.Duration
+	billingMarkets    []BillingMarket
+	billingPrices     []BillingPrice
 }
 
 // Env is the deployment environment of the process.
@@ -154,6 +156,8 @@ func Load(environ []string) (Config, error) {
 		"ARENA_DB_MAX_CONN_LIFETIME":  true,
 		"ARENA_DB_MAX_CONN_IDLE_TIME": true,
 		"ARENA_DB_ACQUIRE_TIMEOUT":    true,
+		billingMarketsVariable:        true,
+		billingPriceIDsVariable:       true,
 	}
 	var validationErrors ValidationErrors
 	for name := range values {
@@ -287,6 +291,18 @@ func Load(environ []string) (Config, error) {
 		} else {
 			config.dbAcquireTimeout = d
 		}
+	}
+
+	if raw, present := values[billingMarketsVariable]; present {
+		markets, problems := parseBillingMarkets(raw)
+		config.billingMarkets = markets
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[billingPriceIDsVariable]; present {
+		prices, problems := parseBillingPrices(raw)
+		config.billingPrices = prices
+		validationErrors = append(validationErrors, problems...)
 	}
 
 	// Production-specific safety rules: the plan forbids insecure production
