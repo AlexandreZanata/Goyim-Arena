@@ -197,6 +197,7 @@ type Querier interface {
 	// the decision record, so no projection can observe an unrecorded
 	// invalidation.
 	GetAttributionForModeration(ctx context.Context, attributionID pgtype.UUID) (GetAttributionForModerationRow, error)
+	GetAuditEventByIdempotencyKey(ctx context.Context, idempotencyKey pgtype.Text) (AppAuditEvent, error)
 	GetBillingRefundByProviderID(ctx context.Context, providerRefundID string) (AppBillingRefund, error)
 	// GetCheckoutIntentBySession resolves the intent a provider session already
 	// stands for. The session identifier is unique by constraint, which is what
@@ -281,6 +282,10 @@ type Querier interface {
 	// identifier. The event must exist: a conflict without a stored event is an
 	// integrity problem.
 	GetWebhookEventByEventID(ctx context.Context, stripeEventID string) (AppStripeEvent, error)
+	// Platform administrative audit trail (P14-T01). The runtime inserts facts
+	// and reads them back for support and auditors; updates and deletes are
+	// rejected by triggers for every role, so no query here mutates history.
+	InsertAuditEvent(ctx context.Context, arg InsertAuditEventParams) (AppAuditEvent, error)
 	// Refund records (P12-T09). One row per provider refund/dispute object; the
 	// provider identifier is the idempotency anchor and the commercial facts are
 	// immutable once written. Only the human resolution may be appended later.
@@ -367,6 +372,7 @@ type Querier interface {
 	//      the official results (BR §7); these facts never reach a public
 	//      projection (CONSTITUTION §Dados pessoais).
 	ListAttributionReciprocity(ctx context.Context, arg ListAttributionReciprocityParams) ([]ListAttributionReciprocityRow, error)
+	ListAuditEventsByTarget(ctx context.Context, arg ListAuditEventsByTargetParams) ([]AppAuditEvent, error)
 	// ListAuthorArenaReputation derives the reputation projection of one
 	// author (P11-T05; BR §5.1, §6, §7): one row per Arena where the author
 	// received at least one valid attribution, with the eligible people the

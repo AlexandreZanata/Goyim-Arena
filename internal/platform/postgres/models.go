@@ -115,6 +115,26 @@ type AppArgumentSource struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+// Append-only administrative audit trail: one immutable row per administrative fact, readable by support and auditors, never rewritten
+type AppAuditEvent struct {
+	ID         pgtype.UUID
+	OccurredAt pgtype.Timestamptz
+	ActorID    pgtype.UUID
+	// Namespaced stable operation code (module.operation); greppable across wallet, moderation, billing and admin sources
+	Action string
+	// Closed target vocabulary; the identifier lives in target_id
+	TargetType string
+	TargetID   string
+	// Stable reason or rule code; free prose never enters this column
+	ReasonCode string
+	// Minimal allowlisted JSONB object (identifiers, references, transitions); payloads, secrets and PII are unrepresentable
+	Metadata []byte
+	// Caller-chosen retry key, unique when set; NULL records unconditionally
+	IdempotencyKey pgtype.Text
+	// Optional opaque correlation grouping related events recorded together
+	CorrelationID pgtype.Text
+}
+
 // Divergences found between the local state and the provider; recorded so they are reviewed instead of silently corrected
 type AppBillingReconciliationFinding struct {
 	ID    pgtype.UUID
