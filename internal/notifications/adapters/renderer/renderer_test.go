@@ -66,32 +66,40 @@ func TestRenderIsLocalized(t *testing.T) {
 }
 
 // TestRenderEscapesUntrustedValues is the core security property of the
-// package: a display name and a code are data, never markup.
+// package: a display name and a code are data, never markup — in every locale
+// and every template, because escaping is a property of the position and not
+// of the language.
 func TestRenderEscapesUntrustedValues(t *testing.T) {
 	engine := newRenderer(t)
 	hostileName := `<script>alert("x")</script>&'"><`
 	hostileCode := `<b>code</b>&"<`
-	body, err := engine.Render(domain.TemplateVerification, domain.LocaleBrazilianPortuguese, values(t, hostileName, hostileCode))
-	if err != nil {
-		t.Fatalf("Render() error = %v", err)
-	}
-	for _, raw := range []string{"<script>", "</script>", "<b>code</b>"} {
-		if strings.Contains(body.HTML, raw) {
-			t.Errorf("html contains unescaped %q: %s", raw, body.HTML)
+	for _, locale := range domain.Locales() {
+		for _, templateID := range domain.TemplateIDs() {
+			t.Run(locale.String()+"."+templateID.String(), func(t *testing.T) {
+				body, err := engine.Render(templateID, locale, values(t, hostileName, hostileCode))
+				if err != nil {
+					t.Fatalf("Render() error = %v", err)
+				}
+				for _, raw := range []string{"<script>", "</script>", "<b>code</b>"} {
+					if strings.Contains(body.HTML, raw) {
+						t.Errorf("html contains unescaped %q: %s", raw, body.HTML)
+					}
+				}
+				for _, escaped := range []string{"&lt;script&gt;", "&amp;", "&#34;", "&lt;b&gt;code&lt;/b&gt;"} {
+					if !strings.Contains(body.HTML, escaped) {
+						t.Errorf("html does not contain %q", escaped)
+					}
+				}
+				// The plain-text alternative carries the same values verbatim: it
+				// has no markup context to escape for.
+				if !strings.Contains(body.Text, hostileCode) {
+					t.Error("text body does not carry the code verbatim")
+				}
+				if strings.Contains(body.Subject, "&lt;") {
+					t.Error("subject was html-escaped: it is a plain-text header value")
+				}
+			})
 		}
-	}
-	for _, escaped := range []string{"&lt;script&gt;", "&amp;", "&#34;", "&lt;b&gt;code&lt;/b&gt;"} {
-		if !strings.Contains(body.HTML, escaped) {
-			t.Errorf("html does not contain %q", escaped)
-		}
-	}
-	// The plain-text alternative carries the same values verbatim: it has no
-	// markup context to escape for.
-	if !strings.Contains(body.Text, hostileCode) {
-		t.Error("text body does not carry the code verbatim")
-	}
-	if strings.Contains(body.Subject, "&lt;") {
-		t.Error("subject was html-escaped: it is a plain-text header value")
 	}
 }
 

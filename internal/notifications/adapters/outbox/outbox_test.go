@@ -9,10 +9,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AlexandreZanata/Goyim-Arena/internal/i18n"
 	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
 	jobsapp "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/application"
 	jobsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/domain"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/adapters/outbox"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/adapters/renderer"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/domain"
 )
@@ -445,6 +447,92 @@ func TestHandlerDeliversTheFrozenLocale(t *testing.T) {
 	}
 	if messages[0].Recipient() != "ana@example.com" {
 		t.Errorf("recipient = %q", messages[0].Recipient())
+	}
+}
+
+// TestRetryAfterTheOwnerChangesLocaleKeepsTheOriginalLanguage is the property
+// the standard asks for, proven end to end with the real renderer: the job
+// carries the facts of the message, so the language is decided when the event
+// happens and a retry after a preference change still speaks the language the
+// event spoke.
+func TestRetryAfterTheOwnerChangesLocaleKeepsTheOriginalLanguage(t *testing.T) {
+	built := newHarness(t)
+	// The event happens while the owner prefers English.
+	built.directory.ref = application.AccountRef{ID: "account-1", Locale: domain.LocaleAmericanEnglish}
+	if _, err := built.notifier.Notify(context.Background(), verificationRequest(t)); err != nil {
+		t.Fatalf("Notify() error = %v", err)
+	}
+	payloads := built.queue.payloads()
+	if len(payloads) != 1 {
+		t.Fatalf("payloads = %d, want 1", len(payloads))
+	}
+	payload := payloads[0]
+
+	// The stored payload is the canonical locale and the parameters of the
+	// message: never a rendered body, which is what lets a retry re-render
+	// after a translator's fix.
+	if strings.Contains(payload, "<") || strings.Contains(payload, "doctype") {
+		t.Errorf("payload carries markup: %s", payload)
+	}
+	for _, want := range []string{`"template":"verification"`, `"locale":"en-US"`, `"code":"` + knownCode + `"`} {
+		if !strings.Contains(payload, want) {
+			t.Errorf("payload = %s, want %s", payload, want)
+		}
+	}
+
+	// The owner then switches the interface to Portuguese.
+	built.directory.ref = application.AccountRef{ID: "account-1", Locale: domain.LocaleBrazilianPortuguese}
+
+	engine, err := renderer.NewRenderer()
+	if err != nil {
+		t.Fatalf("NewRenderer() error = %v", err)
+	}
+	deliverer, err := application.NewDeliverer(engine, built.sender)
+	if err != nil {
+		t.Fatalf("NewDeliverer() error = %v", err)
+	}
+	handler, err := outbox.NewHandler(deliverer)
+	if err != nil {
+		t.Fatalf("NewHandler() error = %v", err)
+	}
+
+	// Two attempts of the same job: the first delivery and the retry.
+	job := jobFor(t, payload)
+	for attempt := 1; attempt <= 2; attempt++ {
+		if err := handler.Handle(context.Background(), job); err != nil {
+			t.Fatalf("Handle() attempt %d error = %v", attempt, err)
+		}
+	}
+	messages := built.sender.messages
+	if len(messages) != 2 {
+		t.Fatalf("messages = %d, want the delivery and its retry", len(messages))
+	}
+	wantSubject, err := i18n.Format(domain.LocaleAmericanEnglish.String(), "email.verification.subject", nil)
+	if err != nil {
+		t.Fatalf("catalog lookup error = %v", err)
+	}
+	ptSubject, err := i18n.Format(domain.LocaleBrazilianPortuguese.String(), "email.verification.subject", nil)
+	if err != nil {
+		t.Fatalf("catalog lookup error = %v", err)
+	}
+	for index, message := range messages {
+		if message.Locale() != domain.LocaleAmericanEnglish {
+			t.Errorf("attempt %d locale = %s, want the frozen locale", index+1, message.Locale())
+		}
+		if message.Body().Subject != wantSubject {
+			t.Errorf("attempt %d subject = %q, want the original language", index+1, message.Body().Subject)
+		}
+		if strings.Contains(message.Body().HTML, ptSubject) {
+			t.Errorf("attempt %d was retargeted by the preference change", index+1)
+		}
+		if !strings.Contains(message.Body().HTML, `lang="en-US"`) {
+			t.Errorf("attempt %d document language = %q, want the frozen locale", index+1, message.Body().HTML)
+		}
+	}
+
+	// Nothing persisted changed either: the enqueue is the only write.
+	if after := built.queue.payloads(); len(after) != 1 || after[0] != payload {
+		t.Errorf("payloads after delivery = %v, want the frozen payload untouched", after)
 	}
 }
 
