@@ -18,4 +18,26 @@ var (
 	// ErrAccountNotEligible indicates that the account cannot own or mutate a
 	// profile because it is missing, unverified, suspended or deleted.
 	ErrAccountNotEligible = errors.New("application: account is not eligible to own or mutate a profile")
+
+	// ErrInvalidExportConfig indicates the personal export use cases could
+	// not be built from the given dependencies.
+	ErrInvalidExportConfig = errors.New("application: personal export configuration is invalid")
+
+	// ErrExportNotFound indicates the export is unknown, belongs to another
+	// account or is not publicly addressable; foreign and missing records
+	// are deliberately indistinguishable.
+	ErrExportNotFound = errors.New("application: personal export not found")
+
+	// ErrExportUnavailable indicates the export is not ready, has expired or
+	// exhausted its download budget.
+	ErrExportUnavailable = errors.New("application: personal export is not available")
+
+	// ErrInvalidExportToken indicates the presented download capability does
+	// not match the record; the token is never echoed back.
+	ErrInvalidExportToken = errors.New("application: personal export token is invalid")
+
+	// ErrUnknownSession indicates the session carrying the request is not
+	// resolvable; it denies like a stale session instead of being treated
+	// as fresh.
+	ErrUnknownSession = errors.New("application: session is unknown")
 )

@@ -39,6 +39,11 @@ type Querier interface {
 	// conditional predicate and the remaining_quantity CHECK together make
 	// over-consumption impossible, even under concurrent consumers (P07-T03).
 	ConsumeArenaPassLot(ctx context.Context, id pgtype.UUID) (int64, error)
+	// ConsumePersonalExportDownload serves one download and consumes one unit of
+	// the budget atomically: the token must match, the record must be ready, the
+	// link must be unexpired and the budget unexhausted. Zero rows answer an
+	// unavailable link, so a replay can never serve the document twice.
+	ConsumePersonalExportDownload(ctx context.Context, arg ConsumePersonalExportDownloadParams) (ConsumePersonalExportDownloadRow, error)
 	// CountEligiblePositionsByArena derives the public aggregate of one Arena:
 	// the initial and current distributions over eligible participants plus the
 	// eligible total. This is the explicitly approved read-only projection of
@@ -130,6 +135,17 @@ type Querier interface {
 	// EnsureWalletAccount materializes the balance projection row for an
 	// account; a pre-existing row is left untouched, including its balances.
 	EnsureWalletAccount(ctx context.Context, accountID pgtype.UUID) error
+	// Personal data export records and projections (P14-T05, docs/PRIVACY.md
+	// §4/§6, REQ-PRIV-01). The record statements only ever touch token hashes;
+	// the data projections are approved read-only reads over the account's own
+	// rows across the identity, profiles, positions, arenas, arguments, wallet,
+	// pass and billing schemas. Payment provider identifiers, webhook payloads,
+	// moderation evidence and antifraud signals are never selected.
+	// ExpirePersonalExports moves the account's ready records past their window
+	// to expired. It runs before a new request so a stale link can never block
+	// or revive a fresh one; the partial unique index only covers active
+	// records. Expiring is idempotent: repeated runs match nothing.
+	ExpirePersonalExports(ctx context.Context, arg ExpirePersonalExportsParams) (int64, error)
 	FinishReconciliationRun(ctx context.Context, arg FinishReconciliationRunParams) (AppBillingReconciliationRun, error)
 	GetAccountByEmail(ctx context.Context, lower string) (AppAccount, error)
 	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
@@ -257,6 +273,23 @@ type Querier interface {
 	GetParentArgument(ctx context.Context, argumentID pgtype.UUID) (GetParentArgumentRow, error)
 	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
+	// GetPersonalExportAccount loads the account identity plus the optional
+	// profile and communication preferences. Email belongs to the private
+	// export and never to a public projection.
+	GetPersonalExportAccount(ctx context.Context, accountID pgtype.UUID) (GetPersonalExportAccountRow, error)
+	// GetPersonalExportDownloadGuard loads the owner-scoped download state so
+	// the application can classify unknown/foreign records apart from invalid
+	// tokens and unavailable links without ever reflecting whether a foreign
+	// export exists.
+	GetPersonalExportDownloadGuard(ctx context.Context, arg GetPersonalExportDownloadGuardParams) (GetPersonalExportDownloadGuardRow, error)
+	// GetPersonalExportForGeneration loads one export record for the generation
+	// job. The token hash is deliberately not returned: generation never needs
+	// the capability.
+	GetPersonalExportForGeneration(ctx context.Context, exportID pgtype.UUID) (GetPersonalExportForGenerationRow, error)
+	// GetPersonalExportWallet returns the account's derived INK balances. An
+	// account that never used the wallet has no row; the application reports
+	// zeroed balances.
+	GetPersonalExportWallet(ctx context.Context, accountID pgtype.UUID) (GetPersonalExportWalletRow, error)
 	// GetPositionChangeForAttributor loads one position change scoped to its
 	// account and locks it FOR UPDATE: attribution recording serializes per
 	// change, so the cumulative three-argument limit cannot be bypassed by
@@ -449,6 +482,48 @@ type Querier interface {
 	// the (created_at, id) tuple comparison never duplicates or skips rows. An
 	// empty status filter lists every lifecycle.
 	ListModerationCasesPage(ctx context.Context, arg ListModerationCasesPageParams) ([]ListModerationCasesPageRow, error)
+	// ListPersonalExportArenaDrafts returns the account's unpublished drafts:
+	// private data that only exists in the personal export.
+	ListPersonalExportArenaDrafts(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportArenaDraftsRow, error)
+	// ListPersonalExportArgumentSources returns the sources of the given
+	// arguments in deterministic order.
+	ListPersonalExportArgumentSources(ctx context.Context, argumentIds []pgtype.UUID) ([]ListPersonalExportArgumentSourcesRow, error)
+	// ListPersonalExportArguments returns the account's own arguments and
+	// replies, published and withdrawn. Moderation-removed content is restricted
+	// evidence and stays out; the placeholder status is not part of the personal
+	// export either.
+	ListPersonalExportArguments(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportArgumentsRow, error)
+	// ListPersonalExportCheckoutIntents returns the account's local purchase
+	// history: product, market, amount and status only. Provider session and
+	// payment identifiers stay out of every export.
+	ListPersonalExportCheckoutIntents(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportCheckoutIntentsRow, error)
+	// ListPersonalExportPassConsumptions returns the account's pass
+	// consumptions, oldest first.
+	ListPersonalExportPassConsumptions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportPassConsumptionsRow, error)
+	// ListPersonalExportPassLots returns the account's Arena Pass lots without
+	// the grant reference, which may embed provider or subscription
+	// identifiers.
+	ListPersonalExportPassLots(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportPassLotsRow, error)
+	// ListPersonalExportPositionChanges returns the account's individual change
+	// history, oldest first.
+	ListPersonalExportPositionChanges(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportPositionChangesRow, error)
+	// ListPersonalExportPositions returns the account's individual positions,
+	// with the Arena identity as context needed to understand them.
+	ListPersonalExportPositions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportPositionsRow, error)
+	// ListPersonalExportSessions returns the account's own sessions without
+	// device signals: the IP address and user agent are restricted security
+	// data and never enter the export.
+	ListPersonalExportSessions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportSessionsRow, error)
+	// ListPersonalExportSubscriptions returns the account's subscriptions with
+	// periods and cancellation state, never provider or price identifiers.
+	ListPersonalExportSubscriptions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportSubscriptionsRow, error)
+	// ListPersonalExportUsernameHistory returns every username the account ever
+	// held, oldest first.
+	ListPersonalExportUsernameHistory(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportUsernameHistoryRow, error)
+	// ListPersonalExportWalletTransactions returns the account's INK ledger:
+	// signed bucket deltas only. The operation reference (which may embed
+	// provider identifiers) is never selected.
+	ListPersonalExportWalletTransactions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportWalletTransactionsRow, error)
 	// ListPositionChanges returns the private change history of one account in
 	// one Arena, newest first; the chain order is the version (P09-T06).
 	ListPositionChanges(ctx context.Context, arg ListPositionChangesParams) ([]AppPositionChange, error)
@@ -480,6 +555,10 @@ type Querier interface {
 	MarkCheckoutIntentPaid(ctx context.Context, stripeCheckoutSessionID pgtype.Text) error
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
+	// MarkPersonalExportReady attaches the generated document once. The status
+	// guard resolves concurrent generations: only the first writer wins and the
+	// loser resolves the recorded replay.
+	MarkPersonalExportReady(ctx context.Context, arg MarkPersonalExportReadyParams) (int64, error)
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.
 	PingHealth(ctx context.Context) (int32, error)
 	// PublishArenaDraft performs the draft→published transition under the
@@ -506,6 +585,11 @@ type Querier interface {
 	// rows aborts the whole outcome instead of recording a phantom restore.
 	// The original action row is never edited or deleted.
 	ReopenArenaForAppeal(ctx context.Context, id pgtype.UUID) (ReopenArenaForAppealRow, error)
+	// RequestPersonalExport creates the account's active export or rotates the
+	// token of the existing one. The partial unique index resolves concurrent
+	// re-requests: the winner keeps one active record and every caller receives
+	// it.
+	RequestPersonalExport(ctx context.Context, arg RequestPersonalExportParams) (RequestPersonalExportRow, error)
 	// ResolveAuthorByUsername resolves a public username to the author identity
 	// used by the reputation projection (P11-T06). Resolution is read-only over
 	// the profiles projection and matches the canonical normalized username,

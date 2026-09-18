@@ -243,6 +243,27 @@ type AppCommunicationPreferenceHistory struct {
 	ChangedAt      pgtype.Timestamptz
 }
 
+// Personal data export jobs: owner-scoped, token-protected, expiring and download-limited; the document never contains restricted antifraud or provider secret data
+type AppDataExport struct {
+	ID        pgtype.UUID
+	AccountID pgtype.UUID
+	Status    string
+	// SHA-256 of the opaque download token; the raw capability is returned exactly once to the owner
+	DownloadTokenHash []byte
+	RequestedAt       pgtype.Timestamptz
+	GeneratedAt       pgtype.Timestamptz
+	ExpiresAt         pgtype.Timestamptz
+	// Versioned machine-readable export document (JSON text), immutable once written
+	Document pgtype.Text
+	// SHA-256 of the exact document bytes served to the owner
+	DocumentSha256 pgtype.Text
+	DownloadCount  int32
+	// Download budget frozen per export: policy changes never retrofit existing records
+	MaxDownloads     int32
+	LastDownloadedAt pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
 // Private projection of one account position in one Arena: immutable initial choice plus current choice and optimistic version
 type AppDebatePosition struct {
 	ArenaID   pgtype.UUID

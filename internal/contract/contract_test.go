@@ -92,6 +92,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		if strings.HasPrefix(route.Path, "/api/v1/profiles/") || route.Path == "/api/v1/me/profile" {
 			continue
 		}
+		if strings.HasPrefix(route.Path, "/api/v1/me/exports") {
+			continue
+		}
 		if route.Path == "/api/v1/me/wallet" || route.Path == "/api/v1/me/wallet/transactions" {
 			continue
 		}
@@ -312,6 +315,114 @@ func TestContractProfileSchemasExposeOnlyAllowedFields(t *testing.T) {
 // payment identifiers, antifraud flags or administrative notes), the public
 // statuses never include draft or removed, authenticated routes require the
 // session cookie and the public reads document the ETag revalidation.
+// TestContractPersonalExportIsPrivateStepUpAndBounded is the contract-level
+// proof of P14-T05: the personal export schemas declare exactly the allowed
+// properties (no provider identifiers, credentials, device signals or
+// moderation evidence), every property is required (the document is
+// deterministic), both routes require the owner session, the request is
+// step-up protected and every response is private, no-store.
+func TestContractPersonalExportIsPrivateStepUpAndBounded(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"PersonalExportJob":             {"export_id", "status", "download_token"},
+		"PersonalExportDocument":        {"schema_version", "generated_at", "excluded_categories", "account", "positions", "position_changes", "arena_drafts", "arguments", "wallet", "passes", "billing"},
+		"PersonalExportAccount":         {"id", "email", "status", "email_verified", "created_at", "profile", "preferences", "username_history", "sessions"},
+		"PersonalExportProfile":         {"username", "interface_locale", "timezone", "created_at", "updated_at"},
+		"PersonalExportPreference":      {"marketing_opt_in", "updated_at"},
+		"PersonalExportUsername":        {"username", "changed_at"},
+		"PersonalExportSession":         {"id", "created_at", "expires_at", "revoked_at"},
+		"PersonalExportPosition":        {"arena_id", "arena_slug", "arena_statement", "initial_position", "current_position", "version", "created_at", "updated_at"},
+		"PersonalExportPositionChange":  {"arena_id", "from_position", "to_position", "version", "changed_at"},
+		"PersonalExportArenaDraft":      {"id", "statement", "context", "category", "language", "version", "created_at"},
+		"PersonalExportArgument":        {"id", "arena_id", "parent_id", "relation", "content", "status", "created_at", "withdrawn_at", "sources"},
+		"PersonalExportSource":          {"url", "description"},
+		"PersonalExportWallet":          {"balance_free", "balance_purchased", "transactions"},
+		"PersonalExportWalletEntry":     {"operation", "bucket", "amount", "created_at"},
+		"PersonalExportPasses":          {"lots", "consumptions"},
+		"PersonalExportPassLot":         {"origin", "quantity", "remaining", "expires_at", "created_at"},
+		"PersonalExportPassConsumption": {"arena_id", "consumed_at"},
+		"PersonalExportBilling":         {"checkout_intents", "subscriptions"},
+		"PersonalExportCheckoutIntent":  {"product_id", "market", "currency", "amount_minor", "status", "created_at", "paid_at"},
+		"PersonalExportSubscription":    {"product_id", "status", "current_period_start", "current_period_end", "cancel_at_period_end", "created_at", "updated_at"},
+	}
+	forbiddenTokens := []string{
+		"stripe", "cus", "cs", "pi", "sub", "price", "customer", "password", "credential",
+		"secret", "hash", "ip", "device", "user_agent", "reporter", "moderation", "fraud",
+		"justification", "payload",
+	}
+	for name, expectedProperties := range expected {
+		raw, ok := document.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", name)
+		}
+		properties := propertiesOf(t, document, name)
+		if len(properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range properties {
+			// "download_token" is the capability delivered to the owner;
+			// the forbidden set targets persistence secrets and provider
+			// identifiers, so token hashes and provider IDs never appear.
+			if property == "download_token" {
+				continue
+			}
+			for _, token := range strings.Split(strings.ToLower(property), "_") {
+				for _, marker := range forbiddenTokens {
+					if token == marker {
+						t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+					}
+				}
+			}
+		}
+
+		var schema struct {
+			Required []string `json:"required"`
+		}
+		if err := json.Unmarshal(raw, &schema); err != nil {
+			t.Fatalf("decode %s required list: %v", name, err)
+		}
+		if len(schema.Required) != len(expectedProperties) {
+			t.Errorf("%s requires %d properties, want every declared property", name, len(schema.Required))
+		}
+	}
+
+	request, ok := document.Paths["/api/v1/me/exports"]
+	if !ok {
+		t.Fatal("contract is missing /api/v1/me/exports")
+	}
+	requestOperation := string(request["post"])
+	for _, marker := range []string{`"SessionCookie"`, "step_up_required", "15 minutes", "no-store", `"202"`, `"#/components/schemas/PersonalExportJob"`} {
+		if !strings.Contains(requestOperation, marker) {
+			t.Errorf("POST /api/v1/me/exports must document %q", marker)
+		}
+	}
+
+	download, ok := document.Paths["/api/v1/me/exports/{id}/download"]
+	if !ok {
+		t.Fatal("contract is missing /api/v1/me/exports/{id}/download")
+	}
+	downloadOperation := string(download["get"])
+	for _, marker := range []string{`"SessionCookie"`, `"name": "token"`, `"required": true`, "no-store", `"404"`, `"#/components/schemas/PersonalExportDocument"`} {
+		if !strings.Contains(downloadOperation, marker) {
+			t.Errorf("GET /api/v1/me/exports/{id}/download must document %q", marker)
+		}
+	}
+	if strings.Contains(downloadOperation, "public, max-age") {
+		t.Error("the personal export must never be publicly cacheable")
+	}
+}
+
+// TestContractArenaSchemasExposeOnlyAllowedFields is the contract-level proof
+// of P08-T02: the Arena documents declare exactly the allowed properties
+// and no draft or moderation data.
 func TestContractArenaSchemasExposeOnlyAllowedFields(t *testing.T) {
 	t.Parallel()
 
