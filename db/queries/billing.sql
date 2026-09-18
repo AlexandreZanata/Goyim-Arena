@@ -278,3 +278,41 @@ WHERE account_id = $1
   AND status IN ('active', 'trialing')
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- Refund records (P12-T09). One row per provider refund/dispute object; the
+-- provider identifier is the idempotency anchor and the commercial facts are
+-- immutable once written. Only the human resolution may be appended later.
+
+-- name: InsertBillingRefundIfAbsent :one
+INSERT INTO app.billing_refunds (
+    account_id, checkout_intent_id, provider_refund_id, source, status,
+    charged_amount_minor, refunded_amount_minor, ink_revoked, passes_revoked,
+    needs_review, review_reason
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (provider_refund_id) DO NOTHING
+RETURNING id, account_id, checkout_intent_id, provider_refund_id, source, status,
+    charged_amount_minor, refunded_amount_minor, ink_revoked, passes_revoked,
+    needs_review, review_reason, created_at, resolved_at, resolution;
+
+-- name: GetBillingRefundByProviderID :one
+SELECT id, account_id, checkout_intent_id, provider_refund_id, source, status,
+    charged_amount_minor, refunded_amount_minor, ink_revoked, passes_revoked,
+    needs_review, review_reason, created_at, resolved_at, resolution
+FROM app.billing_refunds
+WHERE provider_refund_id = $1;
+
+-- name: ListBillingRefundsByIntent :many
+SELECT id, account_id, checkout_intent_id, provider_refund_id, source, status,
+    charged_amount_minor, refunded_amount_minor, ink_revoked, passes_revoked,
+    needs_review, review_reason, created_at, resolved_at, resolution
+FROM app.billing_refunds
+WHERE checkout_intent_id = $1
+ORDER BY created_at ASC, id ASC;
+
+-- ZeroPassLotRemaining revokes every remaining pass of one lot without
+-- deleting history: consumption rows stay, only the remaining projection is
+-- zeroed. It reports how many rows were actually revoked.
+-- name: ZeroPassLotRemaining :execrows
+UPDATE app.arena_pass_lots
+SET remaining_quantity = 0
+WHERE id = $1 AND remaining_quantity > 0;

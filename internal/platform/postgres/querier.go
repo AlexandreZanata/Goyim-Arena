@@ -162,6 +162,7 @@ type Querier interface {
 	// the decision record, so no projection can observe an unrecorded
 	// invalidation.
 	GetAttributionForModeration(ctx context.Context, attributionID pgtype.UUID) (GetAttributionForModerationRow, error)
+	GetBillingRefundByProviderID(ctx context.Context, providerRefundID string) (AppBillingRefund, error)
 	// GetCheckoutIntentBySession resolves the intent a provider session already
 	// stands for. The session identifier is unique by constraint, which is what
 	// makes a replay resolve the original intent instead of creating a second one.
@@ -227,6 +228,10 @@ type Querier interface {
 	// identifier. The event must exist: a conflict without a stored event is an
 	// integrity problem.
 	GetWebhookEventByEventID(ctx context.Context, stripeEventID string) (AppStripeEvent, error)
+	// Refund records (P12-T09). One row per provider refund/dispute object; the
+	// provider identifier is the idempotency anchor and the commercial facts are
+	// immutable once written. Only the human resolution may be appended later.
+	InsertBillingRefundIfAbsent(ctx context.Context, arg InsertBillingRefundIfAbsentParams) (AppBillingRefund, error)
 	// Webhook event queries (P12-T05). The provider's unique event ID is the
 	// idempotency anchor: a replay resolves the existing row and never creates a
 	// second one. The processing lifecycle is enforced by CHECK constraints and
@@ -330,6 +335,7 @@ type Querier interface {
 	// consumption order: nearest expiration first, then lots that never expire.
 	// Expired lots are never candidates, so they can never be consumed (P07-T03).
 	ListAvailablePassLotsForUpdate(ctx context.Context, arg ListAvailablePassLotsForUpdateParams) ([]AppArenaPassLot, error)
+	ListBillingRefundsByIntent(ctx context.Context, checkoutIntentID pgtype.UUID) ([]AppBillingRefund, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
 	// ListExpiredArenaPassLots derives the expired lots that still hold passes.
 	// Expiration is never written back: the predicate is evaluated at read time,
@@ -432,6 +438,10 @@ type Querier interface {
 	// author scope, recording the withdrawal instant once. Zero rows mean the
 	// status moved concurrently: the caller re-reads and resolves (P10-T06).
 	WithdrawArgument(ctx context.Context, arg WithdrawArgumentParams) (WithdrawArgumentRow, error)
+	// ZeroPassLotRemaining revokes every remaining pass of one lot without
+	// deleting history: consumption rows stay, only the remaining projection is
+	// zeroed. It reports how many rows were actually revoked.
+	ZeroPassLotRemaining(ctx context.Context, id pgtype.UUID) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -207,7 +207,7 @@ func TestWalletOperationTypeAndReferenceConstraints(t *testing.T) {
 
 	validTypes := []string{
 		"credit_free", "credit_member", "credit_purchase", "credit_refund",
-		"credit_admin", "debit_argument", "debit_admin", "expire_free",
+		"credit_admin", "debit_argument", "debit_admin", "debit_refund", "expire_free",
 	}
 	for i, operationType := range validTypes {
 		if _, err := q.CreateWalletOperation(ctx, postgres.CreateWalletOperationParams{

@@ -142,4 +142,19 @@ var (
 	// ErrInvalidMemberConfig indicates the member entitlements use case could
 	// not be built from the given configuration.
 	ErrInvalidMemberConfig = errors.New("application: member entitlements configuration is invalid")
+
+	// Refund error vocabulary (P12-T09).
+
+	// ErrInvalidRefundConfig indicates the refund use case could not be built
+	// from the given configuration.
+	ErrInvalidRefundConfig = errors.New("application: refund configuration is invalid")
+
+	// ErrRefundIntentNotSettled indicates the intent never settled: only a
+	// paid intent granted a benefit, so only it can be compensated.
+	ErrRefundIntentNotSettled = errors.New("application: checkout intent never settled")
+
+	// ErrRefundUnsupportedGrant indicates the product grant has no refund
+	// policy. INK packs, passes and Member are covered; anything else is a
+	// catalog error.
+	ErrRefundUnsupportedGrant = errors.New("application: product grant has no refund policy")
 )

@@ -47,7 +47,8 @@ func (d Direction) Apply(amount Ink) (int64, error) {
 
 // OperationType is the stable vocabulary of INK operations. The values are
 // mirrored exactly by the CHECK constraint of app.wallet_operations
-// (migration 00008), and each type fixes the direction of its transactions.
+// (migrations 00008 and 00021), and each type fixes the direction of its
+// transactions.
 type OperationType string
 
 const (
@@ -58,7 +59,12 @@ const (
 	OperationCreditAdmin    OperationType = "credit_admin"
 	OperationDebitArgument  OperationType = "debit_argument"
 	OperationDebitAdmin     OperationType = "debit_admin"
-	OperationExpireFree     OperationType = "expire_free"
+	// OperationDebitRefund removes purchased INK after a verified refund or
+	// chargeback (P12-T09). It is a non-administrative debit: the webhook is
+	// the authority, the ledger entry is the compensating operation and a
+	// shortfall never becomes a negative balance — it becomes a review flag.
+	OperationDebitRefund OperationType = "debit_refund"
+	OperationExpireFree  OperationType = "expire_free"
 )
 
 // operationTypeDirection is the single source of truth for the vocabulary
@@ -71,6 +77,7 @@ var operationTypeDirection = map[OperationType]Direction{
 	OperationCreditAdmin:    DirectionCredit,
 	OperationDebitArgument:  DirectionDebit,
 	OperationDebitAdmin:     DirectionDebit,
+	OperationDebitRefund:    DirectionDebit,
 	// Expiring the unused franchise removes FREE_INK: a debit.
 	OperationExpireFree: DirectionDebit,
 }
@@ -85,6 +92,7 @@ func AllOperationTypes() []OperationType {
 		OperationCreditAdmin,
 		OperationDebitArgument,
 		OperationDebitAdmin,
+		OperationDebitRefund,
 		OperationExpireFree,
 	}
 }

@@ -266,6 +266,37 @@ func (q *Queries) GetArenaPassLotByGrant(ctx context.Context, arg GetArenaPassLo
 	return i, err
 }
 
+const getBillingRefundByProviderID = `-- name: GetBillingRefundByProviderID :one
+SELECT id, account_id, checkout_intent_id, provider_refund_id, source, status,
+    charged_amount_minor, refunded_amount_minor, ink_revoked, passes_revoked,
+    needs_review, review_reason, created_at, resolved_at, resolution
+FROM app.billing_refunds
+WHERE provider_refund_id = $1
+`
+
+func (q *Queries) GetBillingRefundByProviderID(ctx context.Context, providerRefundID string) (AppBillingRefund, error) {
+	row := q.db.QueryRow(ctx, getBillingRefundByProviderID, providerRefundID)
+	var i AppBillingRefund
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.CheckoutIntentID,
+		&i.ProviderRefundID,
+		&i.Source,
+		&i.Status,
+		&i.ChargedAmountMinor,
+		&i.RefundedAmountMinor,
+		&i.InkRevoked,
+		&i.PassesRevoked,
+		&i.NeedsReview,
+		&i.ReviewReason,
+		&i.CreatedAt,
+		&i.ResolvedAt,
+		&i.Resolution,
+	)
+	return i, err
+}
+
 const getCheckoutIntentBySession = `-- name: GetCheckoutIntentBySession :one
 SELECT id, account_id, market, product_id, catalog_version, currency, amount_minor, livemode, status, stripe_checkout_session_id, created_at
 FROM app.checkout_intents
@@ -396,6 +427,71 @@ func (q *Queries) GetWebhookEventByEventID(ctx context.Context, stripeEventID st
 		&i.LastError,
 		&i.ReceivedAt,
 		&i.ProcessedAt,
+	)
+	return i, err
+}
+
+const insertBillingRefundIfAbsent = `-- name: InsertBillingRefundIfAbsent :one
+
+INSERT INTO app.billing_refunds (
+    account_id, checkout_intent_id, provider_refund_id, source, status,
+    charged_amount_minor, refunded_amount_minor, ink_revoked, passes_revoked,
+    needs_review, review_reason
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT (provider_refund_id) DO NOTHING
+RETURNING id, account_id, checkout_intent_id, provider_refund_id, source, status,
+    charged_amount_minor, refunded_amount_minor, ink_revoked, passes_revoked,
+    needs_review, review_reason, created_at, resolved_at, resolution
+`
+
+type InsertBillingRefundIfAbsentParams struct {
+	AccountID           pgtype.UUID
+	CheckoutIntentID    pgtype.UUID
+	ProviderRefundID    string
+	Source              string
+	Status              string
+	ChargedAmountMinor  int64
+	RefundedAmountMinor int64
+	InkRevoked          int64
+	PassesRevoked       int32
+	NeedsReview         bool
+	ReviewReason        pgtype.Text
+}
+
+// Refund records (P12-T09). One row per provider refund/dispute object; the
+// provider identifier is the idempotency anchor and the commercial facts are
+// immutable once written. Only the human resolution may be appended later.
+func (q *Queries) InsertBillingRefundIfAbsent(ctx context.Context, arg InsertBillingRefundIfAbsentParams) (AppBillingRefund, error) {
+	row := q.db.QueryRow(ctx, insertBillingRefundIfAbsent,
+		arg.AccountID,
+		arg.CheckoutIntentID,
+		arg.ProviderRefundID,
+		arg.Source,
+		arg.Status,
+		arg.ChargedAmountMinor,
+		arg.RefundedAmountMinor,
+		arg.InkRevoked,
+		arg.PassesRevoked,
+		arg.NeedsReview,
+		arg.ReviewReason,
+	)
+	var i AppBillingRefund
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.CheckoutIntentID,
+		&i.ProviderRefundID,
+		&i.Source,
+		&i.Status,
+		&i.ChargedAmountMinor,
+		&i.RefundedAmountMinor,
+		&i.InkRevoked,
+		&i.PassesRevoked,
+		&i.NeedsReview,
+		&i.ReviewReason,
+		&i.CreatedAt,
+		&i.ResolvedAt,
+		&i.Resolution,
 	)
 	return i, err
 }
@@ -659,6 +755,51 @@ func (q *Queries) ListAvailablePassLotsForUpdate(ctx context.Context, arg ListAv
 			&i.ExpiresAt,
 			&i.Reference,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBillingRefundsByIntent = `-- name: ListBillingRefundsByIntent :many
+SELECT id, account_id, checkout_intent_id, provider_refund_id, source, status,
+    charged_amount_minor, refunded_amount_minor, ink_revoked, passes_revoked,
+    needs_review, review_reason, created_at, resolved_at, resolution
+FROM app.billing_refunds
+WHERE checkout_intent_id = $1
+ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListBillingRefundsByIntent(ctx context.Context, checkoutIntentID pgtype.UUID) ([]AppBillingRefund, error) {
+	rows, err := q.db.Query(ctx, listBillingRefundsByIntent, checkoutIntentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AppBillingRefund{}
+	for rows.Next() {
+		var i AppBillingRefund
+		if err := rows.Scan(
+			&i.ID,
+			&i.AccountID,
+			&i.CheckoutIntentID,
+			&i.ProviderRefundID,
+			&i.Source,
+			&i.Status,
+			&i.ChargedAmountMinor,
+			&i.RefundedAmountMinor,
+			&i.InkRevoked,
+			&i.PassesRevoked,
+			&i.NeedsReview,
+			&i.ReviewReason,
+			&i.CreatedAt,
+			&i.ResolvedAt,
+			&i.Resolution,
 		); err != nil {
 			return nil, err
 		}
@@ -1059,4 +1200,21 @@ func (q *Queries) UpsertSubscription(ctx context.Context, arg UpsertSubscription
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const zeroPassLotRemaining = `-- name: ZeroPassLotRemaining :execrows
+UPDATE app.arena_pass_lots
+SET remaining_quantity = 0
+WHERE id = $1 AND remaining_quantity > 0
+`
+
+// ZeroPassLotRemaining revokes every remaining pass of one lot without
+// deleting history: consumption rows stay, only the remaining projection is
+// zeroed. It reports how many rows were actually revoked.
+func (q *Queries) ZeroPassLotRemaining(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, zeroPassLotRemaining, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

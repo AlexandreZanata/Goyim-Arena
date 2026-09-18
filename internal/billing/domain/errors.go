@@ -65,6 +65,15 @@ const (
 	CodeInvalidWebhookEventID   ErrorCode = "BILLING_INVALID_WEBHOOK_EVENT_ID"
 	CodeEmptyWebhookEventType   ErrorCode = "BILLING_EMPTY_WEBHOOK_EVENT_TYPE"
 	CodeInvalidWebhookEventType ErrorCode = "BILLING_INVALID_WEBHOOK_EVENT_TYPE"
+
+	// Refund errors (P12-T09): explicit policy for money going back.
+	CodeInvalidStripeRefundID  ErrorCode = "BILLING_INVALID_STRIPE_REFUND_ID"
+	CodeInvalidStripeDisputeID ErrorCode = "BILLING_INVALID_STRIPE_DISPUTE_ID"
+	CodeInvalidStripeChargeID  ErrorCode = "BILLING_INVALID_STRIPE_CHARGE_ID"
+	CodeInvalidRefundSource    ErrorCode = "BILLING_INVALID_REFUND_SOURCE"
+	CodeInvalidRefundStatus    ErrorCode = "BILLING_INVALID_REFUND_STATUS"
+	CodeInvalidRefundAmount    ErrorCode = "BILLING_INVALID_REFUND_AMOUNT"
+	CodeInvalidRefundAssess    ErrorCode = "BILLING_INVALID_REFUND_ASSESSMENT"
 )
 
 // DomainError represents an invariant or rule failure in the billing domain.
@@ -138,4 +147,12 @@ var (
 	ErrInvalidWebhookEventID   = DomainError{Code: CodeInvalidWebhookEventID, Message: "webhook event identifier is malformed"}
 	ErrEmptyWebhookEventType   = DomainError{Code: CodeEmptyWebhookEventType, Message: "webhook event type cannot be empty"}
 	ErrInvalidWebhookEventType = DomainError{Code: CodeInvalidWebhookEventType, Message: "webhook event type is outside the provider vocabulary"}
+
+	ErrInvalidStripeRefundID   = DomainError{Code: CodeInvalidStripeRefundID, Message: "Stripe refund identifier is malformed"}
+	ErrInvalidStripeDisputeID  = DomainError{Code: CodeInvalidStripeDisputeID, Message: "Stripe dispute identifier is malformed"}
+	ErrInvalidStripeChargeID   = DomainError{Code: CodeInvalidStripeChargeID, Message: "Stripe charge identifier is malformed"}
+	ErrInvalidRefundSource     = DomainError{Code: CodeInvalidRefundSource, Message: "refund source is outside the supported vocabulary"}
+	ErrInvalidRefundStatus     = DomainError{Code: CodeInvalidRefundStatus, Message: "refund status is outside the supported vocabulary"}
+	ErrInvalidRefundAmount     = DomainError{Code: CodeInvalidRefundAmount, Message: "refunded amount must be a positive share of the charged price"}
+	ErrInvalidRefundAssessment = DomainError{Code: CodeInvalidRefundAssess, Message: "refund assessment inputs are incoherent"}
 )

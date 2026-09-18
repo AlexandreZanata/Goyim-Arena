@@ -59,6 +59,7 @@ func TestOperationTypeVocabularyMirrorsLedgerCheck(t *testing.T) {
 		"credit_admin",
 		"debit_argument",
 		"debit_admin",
+		"debit_refund",
 		"expire_free",
 	}
 
@@ -110,6 +111,7 @@ func TestOperationTypeDirections(t *testing.T) {
 	debits := []domain.OperationType{
 		domain.OperationDebitArgument,
 		domain.OperationDebitAdmin,
+		domain.OperationDebitRefund,
 		domain.OperationExpireFree,
 	}
 	for _, operationType := range debits {

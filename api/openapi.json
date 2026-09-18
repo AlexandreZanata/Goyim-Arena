@@ -1538,6 +1538,7 @@
               "credit_admin",
               "debit_argument",
               "debit_admin",
+              "debit_refund",
               "expire_free"
             ]
           },

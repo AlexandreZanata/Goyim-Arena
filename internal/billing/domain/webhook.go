@@ -121,3 +121,28 @@ func (t WebhookEventType) IsCheckoutSessionExpired() bool {
 func (t WebhookEventType) IsSubscriptionEvent() bool {
 	return len(t.value) > 22 && t.value[:22] == "customer.subscription."
 }
+
+// IsRefundEvent reports whether this event type reverses money of a one-off
+// payment: a refunded charge or a refund object lifecycle event. Only these
+// types may trigger the compensating refund path (P12-T09).
+func (t WebhookEventType) IsRefundEvent() bool {
+	switch t.value {
+	case "charge.refunded", "refund.created", "refund.updated":
+		return true
+	default:
+		return false
+	}
+}
+
+// IsDisputeEvent reports whether this event type contests money of a payment:
+// a chargeback lifecycle event. Disputes follow the same compensation as
+// refunds but always wait for human review.
+func (t WebhookEventType) IsDisputeEvent() bool {
+	switch t.value {
+	case "charge.dispute.created", "charge.dispute.updated", "charge.dispute.closed",
+		"charge.dispute.funds_withdrawn", "charge.dispute.funds_reinstated":
+		return true
+	default:
+		return false
+	}
+}

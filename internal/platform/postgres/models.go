@@ -133,6 +133,33 @@ type AppBillingReconciliationRun struct {
 	FinishedAt     pgtype.Timestamptz
 }
 
+// Explicit refund and chargeback records: one row per provider refund/dispute object, with the compensating quantities and the human review flag
+type AppBillingRefund struct {
+	ID               pgtype.UUID
+	AccountID        pgtype.UUID
+	CheckoutIntentID pgtype.UUID
+	// Private provider refund (re_...) or dispute (dp_...) identifier; the idempotency anchor of the compensation, never part of a public projection, export or log
+	ProviderRefundID string
+	// Whether the money was returned (refund) or contested (dispute/chargeback); disputes always wait for review
+	Source string
+	// Explicit outcome: applied when the unused benefit covered the reversal, needs_review when support/fraud must decide
+	Status              string
+	ChargedAmountMinor  int64
+	RefundedAmountMinor int64
+	// Purchased INK withdrawn by the compensating debit_refund entry; capped at the available balance so consumption never becomes a negative balance
+	InkRevoked int64
+	// Remaining purchased passes revoked by zeroing the lot projection; consumed passes are never rewritten, they become review
+	PassesRevoked int32
+	// True when part of the benefit was already consumed, the refund was partial over passes, the source was a dispute, or nothing reversible remained
+	NeedsReview bool
+	// Machine-readable reason the row waits for review (for example already_consumed, partial_pass_refund, chargeback)
+	ReviewReason pgtype.Text
+	CreatedAt    pgtype.Timestamptz
+	ResolvedAt   pgtype.Timestamptz
+	// Justification written when a human resolves the review; the rest of the record is immutable
+	Resolution pgtype.Text
+}
+
 // Editorial Arena categories; seeded by migrations, display names resolve through the versioned i18n catalogs
 type AppCategory struct {
 	Slug         string

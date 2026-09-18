@@ -36,6 +36,10 @@ type ProcessWebhookDependencies struct {
 	// entitlements (P12-T08). It is optional: when nil, subscription events
 	// are acknowledged but not settled.
 	MemberSettler *ApplyMemberEntitlementsUseCase
+	// RefundSettler handles verified refunds and chargebacks with explicit
+	// compensating entries (P12-T09). It is optional: when nil, refund and
+	// dispute events are acknowledged but not compensated.
+	RefundSettler *ApplyRefundUseCase
 	// Clock supplies the instants of the local record.
 	Clock Clock
 }
@@ -72,6 +76,7 @@ type ProcessWebhookUseCase struct {
 	settler       *SettleCheckoutUseCase
 	passSettler   *SettleArenaPassUseCase
 	memberSettler *ApplyMemberEntitlementsUseCase
+	refundSettler *ApplyRefundUseCase
 	clock         Clock
 }
 
@@ -93,6 +98,7 @@ func NewProcessWebhookUseCase(deps ProcessWebhookDependencies) (*ProcessWebhookU
 		settler:       deps.Settler,
 		passSettler:   deps.PassSettler,
 		memberSettler: deps.MemberSettler,
+		refundSettler: deps.RefundSettler,
 		clock:         deps.Clock,
 	}, nil
 }
@@ -173,6 +179,10 @@ func (uc *ProcessWebhookUseCase) processEvent(ctx context.Context, rawBody []byt
 		return uc.handleCheckoutSessionExpired(ctx, rawBody)
 	case eventType.IsSubscriptionEvent():
 		return uc.handleSubscriptionEvent(ctx, rawBody, eventType)
+	case eventType.IsRefundEvent():
+		return uc.handleRefundEvent(ctx, rawBody, domain.RefundSourceRefund)
+	case eventType.IsDisputeEvent():
+		return uc.handleRefundEvent(ctx, rawBody, domain.RefundSourceDispute)
 	default:
 		// Unknown event types are acknowledged but not handled.
 		return nil
@@ -254,6 +264,27 @@ func (uc *ProcessWebhookUseCase) handleSubscriptionEvent(ctx context.Context, ra
 
 	if _, err := uc.memberSettler.Execute(ctx, cmd); err != nil {
 		return fmt.Errorf("apply member entitlements: %w", err)
+	}
+
+	return nil
+}
+
+// handleRefundEvent processes verified refunds and chargebacks (P12-T09).
+// The money-back object never mints a benefit: it only withdraws the unused
+// share with append-only compensating entries, and any shortfall becomes a
+// review flag instead of a negative balance.
+func (uc *ProcessWebhookUseCase) handleRefundEvent(ctx context.Context, rawBody []byte, source domain.RefundSource) error {
+	if uc.refundSettler == nil {
+		return nil
+	}
+
+	cmd, err := parseRefundFromEvent(rawBody, source)
+	if err != nil {
+		return fmt.Errorf("parse refund event: %w", err)
+	}
+
+	if _, err := uc.refundSettler.Execute(ctx, cmd); err != nil {
+		return fmt.Errorf("apply refund: %w", err)
 	}
 
 	return nil
@@ -594,4 +625,72 @@ func extractPriceIDFromSubscriptionJSON(body string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("price id not found in subscription object")
+}
+
+// parseRefundFromEvent extracts the refund correlation from the event body
+// (data.object). The parser stays HTTP-free like every application parser:
+// it extracts known fields with string matching instead of importing
+// encoding/json.
+//
+// The minimal contract is explicit: the nested object carries the provider
+// refund/dispute identifier as "id" (re_... or dp_...), the original
+// checkout session as "checkout_session" (cs_test_.../cs_live_...) and the
+// returned money as "amount_refunded" (falling back to "amount"). The charged
+// price always comes from the local intent, never from the event, so a
+// tampered amount cannot change the reversible quantity beyond the charged
+// ceiling enforced by the use case.
+func parseRefundFromEvent(rawBody []byte, source domain.RefundSource) (ApplyRefundCommand, error) {
+	body := string(rawBody)
+
+	dataIdx := strings.Index(body, "\"data\"")
+	if dataIdx < 0 {
+		return ApplyRefundCommand{}, fmt.Errorf("data field not found")
+	}
+	objectIdx := strings.Index(body[dataIdx:], "\"object\"")
+	if objectIdx < 0 {
+		return ApplyRefundCommand{}, fmt.Errorf("object field not found in data")
+	}
+	nestedBody := body[dataIdx+objectIdx:]
+
+	refundIDStr, err := extractJSONString(nestedBody, "id")
+	if err != nil {
+		return ApplyRefundCommand{}, fmt.Errorf("extract refund id: %w", err)
+	}
+	if source.IsDispute() {
+		if _, err := domain.ParseStripeDisputeID(refundIDStr); err != nil {
+			return ApplyRefundCommand{}, fmt.Errorf("parse dispute id: %w", err)
+		}
+	} else {
+		if _, err := domain.ParseStripeRefundID(refundIDStr); err != nil {
+			return ApplyRefundCommand{}, fmt.Errorf("parse refund id: %w", err)
+		}
+	}
+
+	sessionStr, err := extractJSONString(nestedBody, "checkout_session")
+	if err != nil {
+		return ApplyRefundCommand{}, fmt.Errorf("extract checkout session: %w", err)
+	}
+	sessionID, err := domain.ParseStripeCheckoutSessionID(sessionStr, false)
+	if err != nil {
+		liveID, liveErr := domain.ParseStripeCheckoutSessionID(sessionStr, true)
+		if liveErr != nil {
+			return ApplyRefundCommand{}, fmt.Errorf("parse checkout session: %w", err)
+		}
+		sessionID = liveID
+	}
+
+	refunded, err := extractJSONInt64(nestedBody, "amount_refunded")
+	if err != nil || refunded < 1 {
+		refunded, err = extractJSONInt64(nestedBody, "amount")
+		if err != nil || refunded < 1 {
+			return ApplyRefundCommand{}, fmt.Errorf("extract refunded amount: %w", err)
+		}
+	}
+
+	return ApplyRefundCommand{
+		SessionID:           sessionID,
+		ProviderRefundID:    refundIDStr,
+		Source:              source,
+		RefundedAmountMinor: refunded,
+	}, nil
 }
