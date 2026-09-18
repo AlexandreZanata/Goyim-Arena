@@ -45,6 +45,17 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	}
 }
 
+// queriesFor binds the queries to the caller transaction when one is
+// carried by the context (P07-T05): the deletion workflow joins the shared
+// transaction so anonymization and evidence commit or roll back together.
+// Without a shared transaction the repository stays autocommit.
+func (r *Repository) queriesFor(ctx context.Context) *platformpg.Queries {
+	if tx, ok := platformpg.TxFromContext(ctx); ok {
+		return r.queries.WithTx(tx)
+	}
+	return r.queries
+}
+
 // CreateProfileWithUsernameHistory atomically creates the profile and its
 // first username history entry.
 func (r *Repository) CreateProfileWithUsernameHistory(

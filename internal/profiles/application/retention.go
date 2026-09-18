@@ -1,0 +1,305 @@
+package application
+
+import (
+	"context"
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/AlexandreZanata/Goyim-Arena/internal/profiles/domain"
+)
+
+// RetentionHoldSelection is what the job tells the repository about the
+// holds in force for one class: whether the whole class is held, and which
+// accounts of that class are held. The repository applies it as an exclusion
+// when it purges or anonymizes, so a hold is enforced where the data lives
+// and not only in the orchestrator.
+type RetentionHoldSelection struct {
+	// ClassHeld reports a hold over the whole class.
+	ClassHeld bool
+	// Accounts lists the held accounts of the class, sorted and unique.
+	Accounts []string
+}
+
+// RetentionHoldSet resolves active holds into the questions the job asks.
+type RetentionHoldSet struct {
+	classWide map[domain.RetentionClass]bool
+	accounts  map[domain.RetentionClass]map[string]bool
+	count     int
+}
+
+// NewRetentionHoldSet validates the stored holds and indexes them by class.
+// An incoherent hold is refused instead of being silently ignored: a hold
+// that cannot be enforced must stop the job, because purging held data is
+// irreversible.
+func NewRetentionHoldSet(holds []domain.RetentionHold) (*RetentionHoldSet, error) {
+	set := &RetentionHoldSet{
+		classWide: make(map[domain.RetentionClass]bool),
+		accounts:  make(map[domain.RetentionClass]map[string]bool),
+	}
+	for _, hold := range holds {
+		if err := hold.Validate(); err != nil {
+			return nil, fmt.Errorf("retention hold %s: %w", hold.ID, err)
+		}
+		set.count++
+		if hold.IsClassWide() {
+			set.classWide[hold.Class] = true
+			continue
+		}
+		account := hold.AccountID
+		if set.accounts[hold.Class] == nil {
+			set.accounts[hold.Class] = make(map[string]bool)
+		}
+		set.accounts[hold.Class][account] = true
+	}
+	return set, nil
+}
+
+// ClassHeld reports whether the whole class is held.
+func (s *RetentionHoldSet) ClassHeld(class domain.RetentionClass) bool {
+	if s == nil {
+		return false
+	}
+	return s.classWide[class]
+}
+
+// HeldAccounts returns the held accounts of a class in a deterministic
+// order, so two runs over the same holds build the same statement.
+func (s *RetentionHoldSet) HeldAccounts(class domain.RetentionClass) []string {
+	if s == nil || len(s.accounts[class]) == 0 {
+		return nil
+	}
+	accounts := make([]string, 0, len(s.accounts[class]))
+	for account := range s.accounts[class] {
+		accounts = append(accounts, account)
+	}
+	sort.Strings(accounts)
+	return accounts
+}
+
+// Len returns how many active holds the set carries.
+func (s *RetentionHoldSet) Len() int {
+	if s == nil {
+		return 0
+	}
+	return s.count
+}
+
+// RetentionCounts is what one class enforcement did: records removed, records
+// whose restricted references were stripped, records kept under an
+// obligation and records preserved by an active hold.
+type RetentionCounts struct {
+	Purged     int32
+	Anonymized int32
+	Retained   int32
+	Held       int32
+}
+
+// RetentionRunRecord is one ledger entry to append: the class, the instant
+// the run executed, the terminal boundary it applied (absent for retained
+// classes) and the counts. It carries no content and no subject identifier.
+type RetentionRunRecord struct {
+	Class      domain.RetentionClass
+	ExecutedAt time.Time
+	CutoffAt   *time.Time
+	Counts     RetentionCounts
+}
+
+// RetentionRun is a recorded ledger entry. Replayed reports that the class
+// already recorded this instant: the counts are the ones the ledger already
+// held, never a second outcome.
+type RetentionRun struct {
+	ID         string
+	Class      domain.RetentionClass
+	ExecutedAt time.Time
+	CutoffAt   *time.Time
+	Counts     RetentionCounts
+	Replayed   bool
+}
+
+// RetentionRepository executes the policy and records it. Purges and
+// anonymizations must join the caller transaction when one is carried by the
+// context, so the data change and its ledger entry commit or roll back
+// together.
+type RetentionRepository interface {
+	// ActiveRetentionHolds returns the holds in force, whole-class holds
+	// included.
+	ActiveRetentionHolds(ctx context.Context) ([]domain.RetentionHold, error)
+
+	// PurgeTerminalTokens removes verification and recovery tokens that were
+	// used or expired at or before the cutoff, except those preserved by a
+	// hold.
+	PurgeTerminalTokens(ctx context.Context, cutoff time.Time, held RetentionHoldSelection) (RetentionCounts, error)
+
+	// PurgeTerminalSessions removes sessions revoked or expired at or before
+	// the cutoff, except those preserved by a hold.
+	PurgeTerminalSessions(ctx context.Context, cutoff time.Time, held RetentionHoldSelection) (RetentionCounts, error)
+
+	// AnonymizeTerminalSessionReferentials strips the client IP and user
+	// agent of terminal sessions past the cutoff, except those preserved by
+	// a hold.
+	AnonymizeTerminalSessionReferentials(ctx context.Context, cutoff time.Time, held RetentionHoldSelection) (RetentionCounts, error)
+
+	// PurgeExpiredExports purges export documents whose link expired at or
+	// before the cutoff and expires requests that were never generated by
+	// then, except those preserved by a hold.
+	PurgeExpiredExports(ctx context.Context, cutoff, executedAt time.Time, held RetentionHoldSelection) (RetentionCounts, error)
+
+	// CountRetainedAuditEvents counts the administrative trail kept as
+	// evidence.
+	CountRetainedAuditEvents(ctx context.Context) (int32, error)
+
+	// CountRetainedBillingRows counts the payment and reconciliation records
+	// kept as evidence.
+	CountRetainedBillingRows(ctx context.Context) (int32, error)
+
+	// RecordRetentionRun appends one ledger entry, resolving the recorded
+	// one when the class already recorded that instant.
+	RecordRetentionRun(ctx context.Context, record RetentionRunRecord) (*RetentionRun, error)
+}
+
+// RetentionSummary is the outcome of one enforcement: one run per governed
+// class, in the fixed policy order.
+type RetentionSummary struct {
+	Runs []RetentionRun
+}
+
+// EnforceRetentionUseCase executes the retention policy: every governed
+// class is enforced once, in the declared order, inside its own transaction,
+// and the outcome is appended to the ledger. It is idempotent — a replayed
+// run finds nothing left to purge, and the same execution instant resolves
+// the recorded entry instead of duplicating it. It never touches held rows.
+type EnforceRetentionUseCase struct {
+	repository RetentionRepository
+	uow        UnitOfWork
+	clock      Clock
+}
+
+// NewEnforceRetentionUseCase builds the use case, refusing incomplete
+// composition.
+func NewEnforceRetentionUseCase(repository RetentionRepository, uow UnitOfWork, clock Clock) (*EnforceRetentionUseCase, error) {
+	if repository == nil || uow == nil || clock == nil {
+		return nil, ErrInvalidRetentionConfig
+	}
+	return &EnforceRetentionUseCase{repository: repository, uow: uow, clock: clock}, nil
+}
+
+// Execute enforces every class of the policy at the injected instant. A
+// failure stops the run: the remaining classes are not enforced, the ledger
+// keeps only what really happened and the caller retries.
+func (uc *EnforceRetentionUseCase) Execute(ctx context.Context) (*RetentionSummary, error) {
+	now := uc.clock.Now().UTC()
+
+	holds, err := uc.repository.ActiveRetentionHolds(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("load retention holds: %w", err)
+	}
+	holdSet, err := NewRetentionHoldSet(holds)
+	if err != nil {
+		return nil, err
+	}
+
+	summary := &RetentionSummary{Runs: []RetentionRun{}}
+	for _, schedule := range domain.RetentionSchedules() {
+		if err := schedule.IsValid(); err != nil {
+			return nil, err
+		}
+
+		cutoff, hasCutoff := schedule.Cutoff(now)
+		if schedule.HasCutoff() != hasCutoff {
+			return nil, domain.ErrInvalidRetentionSchedule
+		}
+
+		var recorded RetentionRun
+		err := uc.uow.WithinTransaction(ctx, func(txCtx context.Context) error {
+			counts, err := uc.enforceClass(txCtx, schedule, cutoff, hasCutoff, now, holdSet)
+			if err != nil {
+				return err
+			}
+			record := RetentionRunRecord{
+				Class:      schedule.Class,
+				ExecutedAt: now,
+				Counts:     counts,
+			}
+			if hasCutoff {
+				boundary := cutoff
+				record.CutoffAt = &boundary
+			}
+			run, err := uc.repository.RecordRetentionRun(txCtx, record)
+			if err != nil {
+				return err
+			}
+			recorded = *run
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("retention class %s: %w", schedule.Class, err)
+		}
+		summary.Runs = append(summary.Runs, recorded)
+	}
+	return summary, nil
+}
+
+// enforceClass executes the action of one class. The dispatch is exhaustive:
+// a class without an implementation is refused instead of being skipped, so
+// adding a class to the policy without executing it fails loudly.
+func (uc *EnforceRetentionUseCase) enforceClass(
+	ctx context.Context,
+	schedule domain.RetentionSchedule,
+	cutoff time.Time,
+	hasCutoff bool,
+	now time.Time,
+	holds *RetentionHoldSet,
+) (RetentionCounts, error) {
+	held := RetentionHoldSelection{
+		ClassHeld: holds.ClassHeld(schedule.Class),
+		Accounts:  holds.HeldAccounts(schedule.Class),
+	}
+
+	switch schedule.Action {
+	case domain.RetentionActionPurge:
+		if !hasCutoff {
+			return RetentionCounts{}, domain.ErrInvalidRetentionSchedule
+		}
+		switch schedule.Class {
+		case domain.RetentionClassTokens:
+			return uc.repository.PurgeTerminalTokens(ctx, cutoff, held)
+		case domain.RetentionClassSessions:
+			return uc.repository.PurgeTerminalSessions(ctx, cutoff, held)
+		case domain.RetentionClassExports:
+			return uc.repository.PurgeExpiredExports(ctx, cutoff, now, held)
+		default:
+			return RetentionCounts{}, domain.ErrUnknownRetentionClass
+		}
+	case domain.RetentionActionAnonymize:
+		if !hasCutoff {
+			return RetentionCounts{}, domain.ErrInvalidRetentionSchedule
+		}
+		if schedule.Class != domain.RetentionClassAbuseSignals {
+			return RetentionCounts{}, domain.ErrUnknownRetentionClass
+		}
+		return uc.repository.AnonymizeTerminalSessionReferentials(ctx, cutoff, held)
+	case domain.RetentionActionRetain:
+		if hasCutoff {
+			return RetentionCounts{}, domain.ErrInvalidRetentionSchedule
+		}
+		switch schedule.Class {
+		case domain.RetentionClassReferentialLogs:
+			retained, err := uc.repository.CountRetainedAuditEvents(ctx)
+			if err != nil {
+				return RetentionCounts{}, err
+			}
+			return RetentionCounts{Retained: retained}, nil
+		case domain.RetentionClassBilling:
+			retained, err := uc.repository.CountRetainedBillingRows(ctx)
+			if err != nil {
+				return RetentionCounts{}, err
+			}
+			return RetentionCounts{Retained: retained}, nil
+		default:
+			return RetentionCounts{}, domain.ErrUnknownRetentionClass
+		}
+	default:
+		return RetentionCounts{}, domain.ErrInvalidRetentionSchedule
+	}
+}

@@ -11,6 +11,15 @@ import (
 )
 
 type Querier interface {
+	// AnonymizeDeletedAccount replaces the account's private identity with the
+	// opaque placeholder: the stable identifier survives for referential
+	// integrity, the email stops being personal data, and the account moves to
+	// the terminal deleted state.
+	AnonymizeDeletedAccount(ctx context.Context, arg AnonymizeDeletedAccountParams) (int64, error)
+	// AnonymizeTerminalSessionReferentials strips the client IP and user agent
+	// of terminal sessions past the prevention window. The session row itself
+	// survives until its own, longer retention window elapses.
+	AnonymizeTerminalSessionReferentials(ctx context.Context, arg AnonymizeTerminalSessionReferentialsParams) (AnonymizeTerminalSessionReferentialsRow, error)
 	// ApplyFreeBalanceDelta applies a signed net delta to the FREE_INK balance:
 	// the monthly renewal expires the remaining franchise and grants the next
 	// one in a single statement. The CHECK (balance_free >= 0) still guards the
@@ -20,6 +29,10 @@ type Querier interface {
 	// statement; the CHECK (balance >= 0) guards the invariant even if a caller
 	// gets the plan wrong.
 	ApplyWalletDebit(ctx context.Context, arg ApplyWalletDebitParams) (AppWalletAccount, error)
+	// CancelDeletionRequest cancels the active request inside its window; the
+	// status guard makes the transition once-only and terminal records
+	// immutable.
+	CancelDeletionRequest(ctx context.Context, arg CancelDeletionRequestParams) (CancelDeletionRequestRow, error)
 	ClaimModerationAppeal(ctx context.Context, id pgtype.UUID) (ClaimModerationAppealRow, error)
 	ClaimModerationCase(ctx context.Context, arg ClaimModerationCaseParams) (ClaimModerationCaseRow, error)
 	// CloseArena performs the published→closed transition requested by the
@@ -39,6 +52,11 @@ type Querier interface {
 	// conditional predicate and the remaining_quantity CHECK together make
 	// over-consumption impossible, even under concurrent consumers (P07-T03).
 	ConsumeArenaPassLot(ctx context.Context, id pgtype.UUID) (int64, error)
+	// ConsumePersonalExportDownload serves one download and consumes one unit of
+	// the budget atomically: the token must match, the record must be ready, the
+	// link must be unexpired and the budget unexhausted. Zero rows answer an
+	// unavailable link, so a replay can never serve the document twice.
+	ConsumePersonalExportDownload(ctx context.Context, arg ConsumePersonalExportDownloadParams) (ConsumePersonalExportDownloadRow, error)
 	// CountEligiblePositionsByArena derives the public aggregate of one Arena:
 	// the initial and current distributions over eligible participants plus the
 	// eligible total. This is the explicitly approved read-only projection of
@@ -48,6 +66,14 @@ type Querier interface {
 	// counts only — account identifiers never leave the database (P09-T05).
 	CountEligiblePositionsByArena(ctx context.Context, arenaID pgtype.UUID) (CountEligiblePositionsByArenaRow, error)
 	CountRecentModerationReportsByReporter(ctx context.Context, arg CountRecentModerationReportsByReporterParams) (int64, error)
+	// CountRetainedAuditEvents counts the administrative trail kept as
+	// evidence. The trail is append-only for every role, so the retention
+	// policy never schedules a purge for this class.
+	CountRetainedAuditEvents(ctx context.Context) (int32, error)
+	// CountRetainedBillingRows counts the payment, subscription, refund and
+	// reconciliation records kept as evidence of money and of the
+	// reconciliation duty. No row of the billing module is ever deleted.
+	CountRetainedBillingRows(ctx context.Context) (int32, error)
 	// Identity and authentication queries for the PostgreSQL platform adapter.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (AppAccount, error)
 	// Arena draft queries for the PostgreSQL platform adapter.
@@ -78,6 +104,16 @@ type Querier interface {
 	// (P11-T03).
 	CreateAttribution(ctx context.Context, arg CreateAttributionParams) (pgtype.UUID, error)
 	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
+	// Account deletion state machine (P14-T06, docs/PRIVACY.md §4/§5, BR §10).
+	// The record statements only ever touch the deletion table and the account
+	// row; the execution statements purge private rows and anonymize public
+	// authorship while the billing, ledger, pass, moderation and audit schemas
+	// stay untouched.
+	// CreateDeletionRequest creates a new active request. The partial unique
+	// index resolves concurrent requests: the loser inserts nothing and re-reads
+	// the winner, so the cooldown never restarts. A canceled record may be
+	// followed by a fresh one; the terminal history is retained.
+	CreateDeletionRequest(ctx context.Context, arg CreateDeletionRequestParams) (CreateDeletionRequestRow, error)
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
 	CreateModerationAction(ctx context.Context, arg CreateModerationActionParams) (AppModerationAction, error)
 	// Structured report queries for the PostgreSQL platform adapter (P13-T03).
@@ -104,6 +140,10 @@ type Querier interface {
 	// inspected with its counters; every divergence is an immutable finding
 	// resolved only by a human justification afterwards.
 	CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (AppBillingReconciliationRun, error)
+	// CreateRetentionRun appends one ledger row per class and execution
+	// instant. A replayed run resolves the original record instead of
+	// duplicating or rewriting it.
+	CreateRetentionRun(ctx context.Context, arg CreateRetentionRunParams) (AppRetentionRun, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (AppSession, error)
 	CreateUsernameHistoryEntry(ctx context.Context, arg CreateUsernameHistoryEntryParams) error
 	// Wallet ledger queries for the PostgreSQL platform adapter.
@@ -126,10 +166,51 @@ type Querier interface {
 	DecideModerationAppeal(ctx context.Context, arg DecideModerationAppealParams) (DecideModerationAppealRow, error)
 	DecideModerationCase(ctx context.Context, arg DecideModerationCaseParams) (DecideModerationCaseRow, error)
 	DeleteArenaDraft(ctx context.Context, arg DeleteArenaDraftParams) (int64, error)
+	// DeleteDeletedAccountCommunicationPreferenceHistory removes the preference
+	// audit trail.
+	DeleteDeletedAccountCommunicationPreferenceHistory(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountCommunicationPreferences removes the explicit opt-ins.
+	DeleteDeletedAccountCommunicationPreferences(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountCredentials removes the password credential, so no
+	// stored secret survives the deletion.
+	DeleteDeletedAccountCredentials(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountDraftRelations removes linkage rows that reference the
+	// account's unpublished drafts: a relation is only meaningful while both
+	// Arenas exist, and drafts do not survive the deletion.
+	DeleteDeletedAccountDraftRelations(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountDrafts removes the account's unpublished drafts:
+	// private content with no retention obligation. Published Arenas are
+	// untouched and keep their stable author id.
+	DeleteDeletedAccountDrafts(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountProfile removes the profile so public authorship
+	// becomes unresolvable while published content keeps its stable author id.
+	DeleteDeletedAccountProfile(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountResetTokens removes every password reset token of the
+	// account.
+	DeleteDeletedAccountResetTokens(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountSessions removes every session, so no credential of
+	// the deleted account can ever authenticate again.
+	DeleteDeletedAccountSessions(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountUsernameHistory removes the username audit trail.
+	DeleteDeletedAccountUsernameHistory(ctx context.Context, accountID pgtype.UUID) (int64, error)
+	// DeleteDeletedAccountVerificationTokens removes every email verification
+	// token of the account.
+	DeleteDeletedAccountVerificationTokens(ctx context.Context, accountID pgtype.UUID) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	// EnsureWalletAccount materializes the balance projection row for an
 	// account; a pre-existing row is left untouched, including its balances.
 	EnsureWalletAccount(ctx context.Context, accountID pgtype.UUID) error
+	// Personal data export records and projections (P14-T05, docs/PRIVACY.md
+	// §4/§6, REQ-PRIV-01). The record statements only ever touch token hashes;
+	// the data projections are approved read-only reads over the account's own
+	// rows across the identity, profiles, positions, arenas, arguments, wallet,
+	// pass and billing schemas. Payment provider identifiers, webhook payloads,
+	// moderation evidence and antifraud signals are never selected.
+	// ExpirePersonalExports moves the account's ready records past their window
+	// to expired. It runs before a new request so a stale link can never block
+	// or revive a fresh one; the partial unique index only covers active
+	// records. Expiring is idempotent: repeated runs match nothing.
+	ExpirePersonalExports(ctx context.Context, arg ExpirePersonalExportsParams) (int64, error)
 	FinishReconciliationRun(ctx context.Context, arg FinishReconciliationRunParams) (AppBillingReconciliationRun, error)
 	GetAccountByEmail(ctx context.Context, lower string) (AppAccount, error)
 	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
@@ -149,6 +230,20 @@ type Querier interface {
 	// can never be influenced by who pays or who is popular (P13-T02).
 	GetAdminRoleByAccount(ctx context.Context, accountID pgtype.UUID) (AppAdminRole, error)
 	GetArenaByID(ctx context.Context, id pgtype.UUID) (AppArena, error)
+	// Public Arena export projections (P14-T04, docs/TRANSPARENCY.md §7). These
+	// are the approved read-only projections over the arenas, positions,
+	// arguments, sources and attribution schemas: every statement only reads,
+	// returns public columns and never lets an account identifier leave the
+	// database. Aggregates carry integer counts; the argument list is strictly
+	// keyset-paginated so a large Arena is read page by page.
+	// GetArenaExportHeader resolves the publicly readable Arena (published,
+	// closed or restricted) with its derived aggregates in one read: eligible
+	// participant distributions, the total accepted position changes and the
+	// valid influence counts. Unknown, draft and removed Arenas return no row.
+	// The eligibility predicates mirror the public position aggregate
+	// (CountEligiblePositionsByArena) and the public attribution metrics
+	// (GetArgumentAttributionMetrics) exactly.
+	GetArenaExportHeader(ctx context.Context, arenaID pgtype.UUID) (GetArenaExportHeaderRow, error)
 	GetArenaForCreator(ctx context.Context, arg GetArenaForCreatorParams) (AppArena, error)
 	// Target resolution for report filing (P13-T03). Each read returns the
 	// owner and the lifecycle needed to distinguish unknown targets from
@@ -211,6 +306,9 @@ type Querier interface {
 	// GetDebatePosition returns the private projection of one account in one
 	// Arena.
 	GetDebatePosition(ctx context.Context, arg GetDebatePositionParams) (AppDebatePosition, error)
+	// GetDeletionRequestForAccount loads the owner-scoped deletion state: the
+	// active request when one exists, otherwise the most recent terminal record.
+	GetDeletionRequestForAccount(ctx context.Context, accountID pgtype.UUID) (GetDeletionRequestForAccountRow, error)
 	// GetDerivedWalletBalance recomputes both bucket balances exclusively from
 	// the append-only ledger: the source of truth for the cached projection
 	// (P06-T05, REQ-WAL-01).
@@ -243,6 +341,23 @@ type Querier interface {
 	GetParentArgument(ctx context.Context, argumentID pgtype.UUID) (GetParentArgumentRow, error)
 	GetPasswordCredentialByAccountID(ctx context.Context, accountID pgtype.UUID) (AppPasswordCredential, error)
 	GetPasswordResetTokenByHash(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
+	// GetPersonalExportAccount loads the account identity plus the optional
+	// profile and communication preferences. Email belongs to the private
+	// export and never to a public projection.
+	GetPersonalExportAccount(ctx context.Context, accountID pgtype.UUID) (GetPersonalExportAccountRow, error)
+	// GetPersonalExportDownloadGuard loads the owner-scoped download state so
+	// the application can classify unknown/foreign records apart from invalid
+	// tokens and unavailable links without ever reflecting whether a foreign
+	// export exists.
+	GetPersonalExportDownloadGuard(ctx context.Context, arg GetPersonalExportDownloadGuardParams) (GetPersonalExportDownloadGuardRow, error)
+	// GetPersonalExportForGeneration loads one export record for the generation
+	// job. The token hash is deliberately not returned: generation never needs
+	// the capability.
+	GetPersonalExportForGeneration(ctx context.Context, exportID pgtype.UUID) (GetPersonalExportForGenerationRow, error)
+	// GetPersonalExportWallet returns the account's derived INK balances. An
+	// account that never used the wallet has no row; the application reports
+	// zeroed balances.
+	GetPersonalExportWallet(ctx context.Context, accountID pgtype.UUID) (GetPersonalExportWalletRow, error)
 	// GetPositionChangeForAttributor loads one position change scoped to its
 	// account and locks it FOR UPDATE: attribution recording serializes per
 	// change, so the cumulative three-argument limit cannot be bypassed by
@@ -261,6 +376,10 @@ type Querier interface {
 	// It never selects email, credentials, internal financial identifiers or
 	// administrative flags, and deliberately omits account_id.
 	GetPublicProfileByUsername(ctx context.Context, usernameNormalized string) (GetPublicProfileByUsernameRow, error)
+	// GetRetentionRunForClassAt resolves the recorded run of one class and
+	// instant, so a replay reports what the ledger holds instead of inventing a
+	// second outcome.
+	GetRetentionRunForClassAt(ctx context.Context, arg GetRetentionRunForClassAtParams) (AppRetentionRun, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	// Session freshness for step-up evaluation (P13-T07). The age counts from
 	// session creation as of the caller's instant; unknown sessions deny
@@ -329,12 +448,38 @@ type Querier interface {
 	// identifier can never be mistaken for a legitimate buyer. A missing row means
 	// the account does not exist at all.
 	IsAccountEligibleForPurchase(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
+	// Data retention statements (P14-T07, docs/PRIVACY.md §1/§5,
+	// REQ-PRIV-01). One schedule per governed class decides the action; these
+	// statements execute it and count what happened.
+	//
+	// Every purge and anonymize statement:
+	//   * is scoped by the class cutoff (now minus the class window) applied to
+	//     the terminal instant of the record (used, revoked or expired), so a
+	//     record inside the window is never touched;
+	//   * excludes the accounts covered by an active hold of that class, and
+	//     the whole class when a class-wide hold is in force;
+	//   * returns the affected count and the count preserved by holds in one
+	//     statement, so the ledger cannot disagree with what happened.
+	//
+	// Retained classes purge nothing by design: their statements only count the
+	// records kept under obligation.
+	// ListActiveRetentionHolds resolves the holds in force for the job.
+	ListActiveRetentionHolds(ctx context.Context) ([]ListActiveRetentionHoldsRow, error)
 	// ListArenaArgumentsPage returns one keyset page of published top-level
 	// arguments of one relation in one Arena, newest first, with the derived
 	// published-reply count computed in the same statement (no N+1). Withdrawn
 	// and removed arguments never appear in public lists (P10-T07).
 	ListArenaArgumentsPage(ctx context.Context, arg ListArenaArgumentsPageParams) ([]ListArenaArgumentsPageRow, error)
 	ListArenaDraftsForCreator(ctx context.Context, creatorID pgtype.UUID) ([]AppArena, error)
+	// ListArenaExportArguments returns one bounded page of published and
+	// withdrawn arguments of one Arena, oldest first, strictly after the
+	// position. Removed arguments never appear. The adapter withholds the
+	// content of withdrawn arguments exactly as the public argument adapter
+	// does: the placeholder keeps the public status and dates while the
+	// retracted text never reaches the document. Influence counts mirror
+	// GetArgumentAttributionMetrics and remain historical facts (withdrawal
+	// never rewrites them).
+	ListArenaExportArguments(ctx context.Context, arg ListArenaExportArgumentsParams) ([]ListArenaExportArgumentsRow, error)
 	ListArenaPassConsumptionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListArenaPassConsumptionsByAccountRow, error)
 	// ListArenaPassConsumptionsPage returns one keyset-paginated page of the
 	// owner's consumption history, newest first. NULL after_* parameters select
@@ -411,10 +556,17 @@ type Querier interface {
 	// deterministically so runs are reproducible.
 	ListCheckoutIntentsForReconciliation(ctx context.Context, arg ListCheckoutIntentsForReconciliationParams) ([]ListCheckoutIntentsForReconciliationRow, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
+	// ListDueDeletionRequests returns active requests whose cooldown elapsed,
+	// oldest first, so the workflow can execute them.
+	ListDueDeletionRequests(ctx context.Context, dueBefore pgtype.Timestamptz) ([]ListDueDeletionRequestsRow, error)
 	// ListExpiredArenaPassLots derives the expired lots that still hold passes.
 	// Expiration is never written back: the predicate is evaluated at read time,
 	// so the sweep is a pure derivation and repeated runs are identical (P07-T04).
 	ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredArenaPassLotsParams) ([]AppArenaPassLot, error)
+	// ListExportArgumentSources returns the structured sources of the given
+	// arguments in deterministic order. The adapter only asks for published
+	// arguments: withdrawn content withholds its sources too.
+	ListExportArgumentSources(ctx context.Context, argumentIds []pgtype.UUID) ([]ListExportArgumentSourcesRow, error)
 	// Triage queue reads (P13-T07). One keyset-paginated page of case routing,
 	// newest first: target, lifecycle, priority, claim holder and instants.
 	// Restricted evidence (reporter context, justifications, appeal contexts)
@@ -422,6 +574,48 @@ type Querier interface {
 	// the (created_at, id) tuple comparison never duplicates or skips rows. An
 	// empty status filter lists every lifecycle.
 	ListModerationCasesPage(ctx context.Context, arg ListModerationCasesPageParams) ([]ListModerationCasesPageRow, error)
+	// ListPersonalExportArenaDrafts returns the account's unpublished drafts:
+	// private data that only exists in the personal export.
+	ListPersonalExportArenaDrafts(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportArenaDraftsRow, error)
+	// ListPersonalExportArgumentSources returns the sources of the given
+	// arguments in deterministic order.
+	ListPersonalExportArgumentSources(ctx context.Context, argumentIds []pgtype.UUID) ([]ListPersonalExportArgumentSourcesRow, error)
+	// ListPersonalExportArguments returns the account's own arguments and
+	// replies, published and withdrawn. Moderation-removed content is restricted
+	// evidence and stays out; the placeholder status is not part of the personal
+	// export either.
+	ListPersonalExportArguments(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportArgumentsRow, error)
+	// ListPersonalExportCheckoutIntents returns the account's local purchase
+	// history: product, market, amount and status only. Provider session and
+	// payment identifiers stay out of every export.
+	ListPersonalExportCheckoutIntents(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportCheckoutIntentsRow, error)
+	// ListPersonalExportPassConsumptions returns the account's pass
+	// consumptions, oldest first.
+	ListPersonalExportPassConsumptions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportPassConsumptionsRow, error)
+	// ListPersonalExportPassLots returns the account's Arena Pass lots without
+	// the grant reference, which may embed provider or subscription
+	// identifiers.
+	ListPersonalExportPassLots(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportPassLotsRow, error)
+	// ListPersonalExportPositionChanges returns the account's individual change
+	// history, oldest first.
+	ListPersonalExportPositionChanges(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportPositionChangesRow, error)
+	// ListPersonalExportPositions returns the account's individual positions,
+	// with the Arena identity as context needed to understand them.
+	ListPersonalExportPositions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportPositionsRow, error)
+	// ListPersonalExportSessions returns the account's own sessions without
+	// device signals: the IP address and user agent are restricted security
+	// data and never enter the export.
+	ListPersonalExportSessions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportSessionsRow, error)
+	// ListPersonalExportSubscriptions returns the account's subscriptions with
+	// periods and cancellation state, never provider or price identifiers.
+	ListPersonalExportSubscriptions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportSubscriptionsRow, error)
+	// ListPersonalExportUsernameHistory returns every username the account ever
+	// held, oldest first.
+	ListPersonalExportUsernameHistory(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportUsernameHistoryRow, error)
+	// ListPersonalExportWalletTransactions returns the account's INK ledger:
+	// signed bucket deltas only. The operation reference (which may embed
+	// provider identifiers) is never selected.
+	ListPersonalExportWalletTransactions(ctx context.Context, accountID pgtype.UUID) ([]ListPersonalExportWalletTransactionsRow, error)
 	// ListPositionChanges returns the private change history of one account in
 	// one Arena, newest first; the chain order is the version (P09-T06).
 	ListPositionChanges(ctx context.Context, arg ListPositionChangesParams) ([]AppPositionChange, error)
@@ -451,14 +645,41 @@ type Querier interface {
 	// paid_at is non-null exactly when status is paid. The trigger allows
 	// open → paid only once.
 	MarkCheckoutIntentPaid(ctx context.Context, stripeCheckoutSessionID pgtype.Text) error
+	// MarkDeletionExecuted records the terminal executed state on the active
+	// request. The cooldown is enforced in the statement itself (defense in
+	// depth): a request whose window has not elapsed can never execute early.
+	MarkDeletionExecuted(ctx context.Context, arg MarkDeletionExecutedParams) (int64, error)
 	MarkEmailVerificationTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
 	MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID) (int64, error)
+	// MarkPersonalExportReady attaches the generated document once. The status
+	// guard resolves concurrent generations: only the first writer wins and the
+	// loser resolves the recorded replay.
+	MarkPersonalExportReady(ctx context.Context, arg MarkPersonalExportReadyParams) (int64, error)
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.
 	PingHealth(ctx context.Context) (int32, error)
 	// PublishArenaDraft performs the draft→published transition under the
 	// optimistic version check inside the publication transaction, so the Arena
 	// row and the consumed Arena Pass commit together (P08-T04).
 	PublishArenaDraft(ctx context.Context, arg PublishArenaDraftParams) (AppArena, error)
+	// PurgeDeletedAccountExports expires the account's personal exports and
+	// drops their documents: the private data copy never outlives the account.
+	// The records survive as retention evidence, matching the export invariant.
+	PurgeDeletedAccountExports(ctx context.Context, arg PurgeDeletedAccountExportsParams) (int64, error)
+	// PurgeExpiredExportDocuments purges the document bytes of exports whose
+	// link expired at or before the cutoff and expires requests that were never
+	// generated by the cutoff. The record itself is retained: migration 00026
+	// forbids deleting export rows, and the download capability is already
+	// worthless once the record is expired.
+	PurgeExpiredExportDocuments(ctx context.Context, arg PurgeExpiredExportDocumentsParams) (PurgeExpiredExportDocumentsRow, error)
+	// PurgeTerminalRecoveryTokens removes password recovery tokens that were
+	// used or expired at or before the cutoff.
+	PurgeTerminalRecoveryTokens(ctx context.Context, arg PurgeTerminalRecoveryTokensParams) (PurgeTerminalRecoveryTokensRow, error)
+	// PurgeTerminalSessions removes sessions revoked or expired at or before
+	// the cutoff; the restricted client references travel with the row.
+	PurgeTerminalSessions(ctx context.Context, arg PurgeTerminalSessionsParams) (PurgeTerminalSessionsRow, error)
+	// PurgeTerminalVerificationTokens removes verification tokens that were
+	// used or expired at or before the cutoff.
+	PurgeTerminalVerificationTokens(ctx context.Context, arg PurgeTerminalVerificationTokensParams) (PurgeTerminalVerificationTokensRow, error)
 	ReactivateAccountForAppeal(ctx context.Context, id pgtype.UUID) (ReactivateAccountForAppealRow, error)
 	// RecordCheckoutIntentIfAbsent inserts the commercial decision exactly once per
 	// provider session, so a replay of the same operation resolves the stored
@@ -479,6 +700,11 @@ type Querier interface {
 	// rows aborts the whole outcome instead of recording a phantom restore.
 	// The original action row is never edited or deleted.
 	ReopenArenaForAppeal(ctx context.Context, id pgtype.UUID) (ReopenArenaForAppealRow, error)
+	// RequestPersonalExport creates the account's active export or rotates the
+	// token of the existing one. The partial unique index resolves concurrent
+	// re-requests: the winner keeps one active record and every caller receives
+	// it.
+	RequestPersonalExport(ctx context.Context, arg RequestPersonalExportParams) (RequestPersonalExportRow, error)
 	// ResolveAuthorByUsername resolves a public username to the author identity
 	// used by the reputation projection (P11-T06). Resolution is read-only over
 	// the profiles projection and matches the canonical normalized username,
@@ -496,6 +722,10 @@ type Querier interface {
 	// Arena under the optimistic version check (P08-T05).
 	RestrictArena(ctx context.Context, arg RestrictArenaParams) (AppArena, error)
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
+	// RevokeDeletedAccountAdminRoles revokes any active administrative role of
+	// the deleted account. The assignment row is retained as restricted audit
+	// evidence; marking it revoked removes the latent privilege.
+	RevokeDeletedAccountAdminRoles(ctx context.Context, arg RevokeDeletedAccountAdminRolesParams) (int64, error)
 	RevokeSession(ctx context.Context, tokenHash []byte) error
 	SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAccount, error)
 	SuspendAccountForModeration(ctx context.Context, id pgtype.UUID) (SuspendAccountForModerationRow, error)

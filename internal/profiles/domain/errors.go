@@ -21,6 +21,9 @@ const (
 	CodeInvalidLocale           ErrorCode = "PROFILE_INVALID_LOCALE"
 	CodeUnsupportedLocale       ErrorCode = "PROFILE_UNSUPPORTED_LOCALE"
 	CodeInvalidTimezone         ErrorCode = "PROFILE_INVALID_TIMEZONE"
+	CodeUnknownRetentionClass   ErrorCode = "PROFILE_UNKNOWN_RETENTION_CLASS"
+	CodeInvalidRetentionPolicy  ErrorCode = "PROFILE_INVALID_RETENTION_POLICY"
+	CodeInvalidRetentionHold    ErrorCode = "PROFILE_INVALID_RETENTION_HOLD"
 )
 
 // DomainError represents an invariant or rule failure in the profiles domain.
@@ -42,19 +45,22 @@ func (e DomainError) Is(target error) bool {
 }
 
 var (
-	ErrEmptyAccountID          = DomainError{Code: CodeEmptyAccountID, Message: "account identifier cannot be empty"}
-	ErrEmptyUsername           = DomainError{Code: CodeEmptyUsername, Message: "username cannot be empty"}
-	ErrUsernameTooShort        = DomainError{Code: CodeUsernameTooShort, Message: "username is shorter than the minimum allowed length"}
-	ErrUsernameTooLong         = DomainError{Code: CodeUsernameTooLong, Message: "username is longer than the maximum allowed length"}
-	ErrUsernameNonASCII        = DomainError{Code: CodeUsernameNonASCII, Message: "username contains non-ASCII characters"}
-	ErrInvalidUsernameFormat   = DomainError{Code: CodeInvalidUsernameFormat, Message: "username format is invalid"}
-	ErrUsernameReserved        = DomainError{Code: CodeUsernameReserved, Message: "username is reserved"}
-	ErrUsernameUnchanged       = DomainError{Code: CodeUsernameUnchanged, Message: "username is unchanged"}
-	ErrUsernameCooldown        = DomainError{Code: CodeUsernameCooldown, Message: "username cannot be changed before the cooldown elapses"}
-	ErrInvalidCooldown         = DomainError{Code: CodeInvalidCooldown, Message: "username change cooldown cannot be negative"}
-	ErrInvalidReservedUsername = DomainError{Code: CodeInvalidReservedUsername, Message: "reserved username list contains an invalid username"}
-	ErrEmptyLocale             = DomainError{Code: CodeEmptyLocale, Message: "interface locale cannot be empty"}
-	ErrInvalidLocale           = DomainError{Code: CodeInvalidLocale, Message: "interface locale is not a well-formed BCP 47 tag"}
-	ErrUnsupportedLocale       = DomainError{Code: CodeUnsupportedLocale, Message: "interface locale is not supported by the product"}
-	ErrInvalidTimezone         = DomainError{Code: CodeInvalidTimezone, Message: "timezone is not a valid IANA time zone name"}
+	ErrEmptyAccountID           = DomainError{Code: CodeEmptyAccountID, Message: "account identifier cannot be empty"}
+	ErrEmptyUsername            = DomainError{Code: CodeEmptyUsername, Message: "username cannot be empty"}
+	ErrUsernameTooShort         = DomainError{Code: CodeUsernameTooShort, Message: "username is shorter than the minimum allowed length"}
+	ErrUsernameTooLong          = DomainError{Code: CodeUsernameTooLong, Message: "username is longer than the maximum allowed length"}
+	ErrUsernameNonASCII         = DomainError{Code: CodeUsernameNonASCII, Message: "username contains non-ASCII characters"}
+	ErrInvalidUsernameFormat    = DomainError{Code: CodeInvalidUsernameFormat, Message: "username format is invalid"}
+	ErrUsernameReserved         = DomainError{Code: CodeUsernameReserved, Message: "username is reserved"}
+	ErrUsernameUnchanged        = DomainError{Code: CodeUsernameUnchanged, Message: "username is unchanged"}
+	ErrUsernameCooldown         = DomainError{Code: CodeUsernameCooldown, Message: "username cannot be changed before the cooldown elapses"}
+	ErrInvalidCooldown          = DomainError{Code: CodeInvalidCooldown, Message: "username change cooldown cannot be negative"}
+	ErrInvalidReservedUsername  = DomainError{Code: CodeInvalidReservedUsername, Message: "reserved username list contains an invalid username"}
+	ErrEmptyLocale              = DomainError{Code: CodeEmptyLocale, Message: "interface locale cannot be empty"}
+	ErrInvalidLocale            = DomainError{Code: CodeInvalidLocale, Message: "interface locale is not a well-formed BCP 47 tag"}
+	ErrUnsupportedLocale        = DomainError{Code: CodeUnsupportedLocale, Message: "interface locale is not supported by the product"}
+	ErrInvalidTimezone          = DomainError{Code: CodeInvalidTimezone, Message: "timezone is not a valid IANA time zone name"}
+	ErrUnknownRetentionClass    = DomainError{Code: CodeUnknownRetentionClass, Message: "retention class is not part of the executable policy"}
+	ErrInvalidRetentionSchedule = DomainError{Code: CodeInvalidRetentionPolicy, Message: "retention schedule is incoherent"}
+	ErrInvalidRetentionHold     = DomainError{Code: CodeInvalidRetentionHold, Message: "retention hold is incoherent"}
 )

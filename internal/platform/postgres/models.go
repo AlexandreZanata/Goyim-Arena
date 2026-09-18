@@ -19,6 +19,20 @@ type AppAccount struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+// Account deletion state machine: requested (cooling-off, cancellable), executed or canceled; the record is retained as evidence after execution
+type AppAccountDeletionRequest struct {
+	ID          pgtype.UUID
+	AccountID   pgtype.UUID
+	Status      string
+	RequestedAt pgtype.Timestamptz
+	// Instant the anonymization executed; after it the account can never authenticate again
+	ExecutedAt pgtype.Timestamptz
+	CanceledAt pgtype.Timestamptz
+	// Holder-provided cancellation reason; restricted evidence, never part of a public projection
+	CancelReason pgtype.Text
+	UpdatedAt    pgtype.Timestamptz
+}
+
 // Minimal administrative assignments: one row per account, granted by an existing account, revocable with a dated revocation
 type AppAdminRole struct {
 	AccountID pgtype.UUID
@@ -243,6 +257,27 @@ type AppCommunicationPreferenceHistory struct {
 	ChangedAt      pgtype.Timestamptz
 }
 
+// Personal data export jobs: owner-scoped, token-protected, expiring and download-limited; the document never contains restricted antifraud or provider secret data
+type AppDataExport struct {
+	ID        pgtype.UUID
+	AccountID pgtype.UUID
+	Status    string
+	// SHA-256 of the opaque download token; the raw capability is returned exactly once to the owner
+	DownloadTokenHash []byte
+	RequestedAt       pgtype.Timestamptz
+	GeneratedAt       pgtype.Timestamptz
+	ExpiresAt         pgtype.Timestamptz
+	// Versioned machine-readable export document (JSON text), immutable once written
+	Document pgtype.Text
+	// SHA-256 of the exact document bytes served to the owner
+	DocumentSha256 pgtype.Text
+	DownloadCount  int32
+	// Download budget frozen per export: policy changes never retrofit existing records
+	MaxDownloads     int32
+	LastDownloadedAt pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
 // Private projection of one account position in one Arena: immutable initial choice plus current choice and optimistic version
 type AppDebatePosition struct {
 	ArenaID   pgtype.UUID
@@ -398,6 +433,42 @@ type AppProfile struct {
 	UpdatedAt          pgtype.Timestamptz
 	// Optional IANA timezone preference of the account; NULL means not informed (UTC fallback)
 	Timezone pgtype.Text
+}
+
+// Legal and contractual holds: while a hold is active the retention job purges and anonymizes nothing for the held class or account; holds are never deleted
+type AppRetentionHold struct {
+	ID pgtype.UUID
+	// Governed retention class, the same closed vocabulary the executable policy declares
+	DataClass string
+	// Held account; NULL holds the whole class
+	AccountID pgtype.UUID
+	// Stable reason code of the hold (never free prose)
+	ReasonCode string
+	// Administrative account that placed the hold; retained as provenance
+	PlacedBy   pgtype.UUID
+	PlacedAt   pgtype.Timestamptz
+	ReleasedAt pgtype.Timestamptz
+	// Stable reason code written once when the hold is released
+	ReleaseReasonCode pgtype.Text
+}
+
+// Append-only retention ledger: one row per governed class and execution with counts only, so enforcement is auditable without storing any content
+type AppRetentionRun struct {
+	ID pgtype.UUID
+	// Governed retention class the run enforced
+	DataClass string
+	// Instant the run enforced the schedule, from the injected clock
+	ExecutedAt pgtype.Timestamptz
+	// Terminal boundary the run applied (now minus the class window); NULL for classes retained without a purge horizon
+	CutoffAt pgtype.Timestamptz
+	// Records removed by the run
+	PurgedCount int32
+	// Records whose restricted references were stripped by the run
+	AnonymizedCount int32
+	// Records kept under a retention obligation by the run
+	RetainedCount int32
+	// Records the run preserved because an active legal hold covered them
+	HeldCount int32
 }
 
 // goose forward-only migration history for the app schema (schema_metadata version table required by the master plan)

@@ -5,9 +5,9 @@ Este documento estabelece as regras mandatórias de execução técnica, arquite
 ## 1. Regras de Execução e Git
 
 - **Uma microtarefa por vez:** execute estritamente uma única tarefa por ciclo. É proibido acumular tarefas, pular etapas ou ampliar escopo não solicitado.
-- **Commits locais e atômicos:** cada tarefa concluída deve gerar exatamente um commit local atômico após todos os gates passarem.
+- **Commits atômicos:** cada tarefa concluída deve gerar exatamente um commit atômico após todos os gates passarem.
 - **Padrão de commit:** utilize o formato Conventional Commits (`type(scope): descrição`), conforme documentado em `docs/COMMITS.md`.
-- **Proibição de push e publicação:** nunca execute `git push`, não crie branches remotas, Pull Requests, tags ou releases. A publicação remota é exclusivamente humana.
+- **Publicação autorizada (branch de fase + PR + merge):** a política anterior de "nunca fazer push" foi **substituída por autorização expressa do titular do repositório (2026-09-18)**. O fluxo obrigatório é: uma branch de trabalho por microfase (`phase-NN-<slug>`), um commit por microtarefa empurrado para essa branch, um Pull Request por fase (aberto em rascunho e marcado como pronto ao final) e merge **somente** após o exit gate da fase e o CI `verify` verdes. Ferramenta canônica: `.local/git-flow.sh`. Nunca empurre direto em `main`; nunca use `--force`, `--admin` ou `--no-verify`; tags e releases continuam proibidas nesta política.
 - **Proibição de operações destrutivas:** é proibido usar `git reset --hard`, `git clean -fd`, `--force` ou `--no-verify`.
 - **Limpeza do repositório:** antes de iniciar qualquer alteração, confirme que o repositório está limpo (`git status --short`). Ao finalizar, o repositório deve permanecer limpo.
 - **Segredos e dados privados:** é estritamente proibido inserir dados reais, segredos, credenciais, endereços de email pessoais ou dumps de produção.

@@ -13,6 +13,26 @@ type Clock interface {
 	Now() time.Time
 }
 
+// Random exposes cryptographically secure random bytes to profiles use
+// cases, keeping randomness an injected effect (ADR-012). It mirrors the
+// minimal reader the identity module uses.
+type Random interface {
+	// Read fills buffer with cryptographically secure random bytes and
+	// returns the number of bytes written, or an error when the entropy
+	// source fails. It must not return fewer bytes with a nil error.
+	Read(buffer []byte) (int, error)
+}
+
+// UnitOfWork runs a function inside one database transaction. The deletion
+// workflow uses it so the state transition and its audit record commit or
+// roll back together. The concrete manager is composed at bootstrap; the
+// module never imports another module's adapters.
+type UnitOfWork interface {
+	// WithinTransaction begins a transaction, makes it available to
+	// participants through the context and commits only when fn returns nil.
+	WithinTransaction(ctx context.Context, fn func(ctx context.Context) error) error
+}
+
 // ProfileRepository persists profiles and their auditable username history.
 // Writes that combine a profile mutation with an audit entry must be atomic.
 type ProfileRepository interface {
