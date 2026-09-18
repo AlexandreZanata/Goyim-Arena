@@ -50,6 +50,7 @@ func TestLoadReadsProvidedVariables(t *testing.T) {
 		"ARENA_ADDR=0.0.0.0:443",
 		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
 		"ARENA_LOG_LEVEL=warn",
+		"ARENA_STRIPE_SECRET_KEY=sk_test_provided",
 	))
 	if err != nil {
 		t.Fatalf("load valid production variables: %v", err)
@@ -141,12 +142,16 @@ func TestLoadAcceptsProductionWithSecrets(t *testing.T) {
 	config, err := Load(environ(
 		"ARENA_ENV=production",
 		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
+		"ARENA_STRIPE_SECRET_KEY=sk_live_production",
 	))
 	if err != nil {
 		t.Fatalf("load secure production: %v", err)
 	}
 	if !config.IsProduction() || !config.DatabaseURL().IsSet() {
 		t.Fatal("secure production should load cleanly")
+	}
+	if !config.StripeSecretKey().IsSet() {
+		t.Fatal("secure production should carry the payment credential")
 	}
 }
 
@@ -157,7 +162,7 @@ func TestConfigAndSecretsNeverPrintRawValues(t *testing.T) {
 
 	const secretDSN = "postgres://arena:super-secret-password@db.internal:5432/arena"
 
-	config, err := Load(environ("ARENA_ENV=production", "ARENA_DATABASE_URL="+secretDSN))
+	config, err := Load(environ("ARENA_ENV=production", "ARENA_DATABASE_URL="+secretDSN, "ARENA_STRIPE_SECRET_KEY=sk_live_redaction"))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -186,7 +191,7 @@ func TestConfigAndSecretsNeverPrintRawValues(t *testing.T) {
 	}
 
 	// Secret values never reach validation error messages either.
-	_, loadErr := Load(environ("ARENA_ENV=production", "ARENA_DATABASE_URL=postgres://user:topsecret@h/x", "ARENA_LOG_LEVEL=bogus"))
+	_, loadErr := Load(environ("ARENA_ENV=production", "ARENA_DATABASE_URL=postgres://user:topsecret@h/x", "ARENA_LOG_LEVEL=bogus", "ARENA_STRIPE_SECRET_KEY=sk_live_redaction"))
 	if loadErr == nil {
 		t.Fatal("expected unrelated validation error")
 	}
@@ -204,11 +209,13 @@ func TestValidationErrorsFormat(t *testing.T) {
 		t.Fatalf("error must be ValidationErrors, got %T", err)
 	}
 	rendered := validationErrors.Error()
-	if !strings.HasPrefix(rendered, "invalid configuration (1 problem(s)):") {
+	if !strings.HasPrefix(rendered, "invalid configuration (2 problem(s)):") {
 		t.Errorf("summary header missing: %q", rendered)
 	}
-	if !strings.Contains(rendered, "- ARENA_DATABASE_URL") {
-		t.Errorf("named variable missing: %q", rendered)
+	for _, variable := range []string{"ARENA_DATABASE_URL", "ARENA_STRIPE_SECRET_KEY"} {
+		if !strings.Contains(rendered, "- "+variable) {
+			t.Errorf("named variable %s missing: %q", variable, rendered)
+		}
 	}
 }
 

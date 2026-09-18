@@ -24,6 +24,7 @@ func TestLoadWithoutBillingConfigurationSellsNothing(t *testing.T) {
 	production, err := Load(environ(
 		"ARENA_ENV=production",
 		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
+		"ARENA_STRIPE_SECRET_KEY=sk_live_production",
 	))
 	if err != nil {
 		t.Fatalf("production without billing variables must load: %v", err)

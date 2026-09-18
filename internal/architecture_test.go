@@ -61,6 +61,22 @@ var forbiddenExternal = []string{
 	"golang.org/x/",
 }
 
+// providerSDKPrefixes are the package prefixes of the payment provider SDK
+// (docs/DEPENDENCIES.md §4: github.com/stripe/stripe-go), and
+// providerSDKAllowlist lists the directories allowed to import them.
+//
+// The dependency is homologated for one owner — the billing payment adapter —
+// and the composition root, which wires it. Everywhere else, including other
+// adapters, the port is the only way in (P12-T03: "busca confirma imports
+// Stripe somente no adapter/bootstrap").
+var providerSDKPrefixes = []string{"github.com/stripe/stripe-go"}
+
+var providerSDKAllowlist = []string{
+	"internal/billing/adapters/stripe/",
+	"internal/bootstrap/",
+	"cmd/",
+}
+
 // businessModules are the module directories required by the plan and
 // docs/ARCHITECTURE.md §4.
 var businessModules = []string{
@@ -349,6 +365,96 @@ func TestNoDirectClockOrRandomOutsidePlatform(t *testing.T) {
 
 	if len(violations) > 0 {
 		t.Fatalf("clock/random gate violations:\n%s", strings.Join(violations, "\n"))
+	}
+}
+
+// TestProviderSDKIsConfinedToItsAdapter is the mechanical form of the P12-T03
+// validation for the payment provider integration: the SDK may only be
+// imported by the adapter that owns it (or by the composition root that wires
+// it), so no business layer, other adapter or tooling can depend on provider
+// types.
+func TestProviderSDKIsConfinedToItsAdapter(t *testing.T) {
+	root := repositoryRoot(t)
+	fset := token.NewFileSet()
+
+	skipped := map[string]bool{".git": true, "node_modules": true, "vendor": true, ".local": true}
+	importingFiles := make(map[string]string)
+
+	walkErr := filepath.WalkDir(root, func(path string, dirEntry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if dirEntry.IsDir() {
+			if skipped[dirEntry.Name()] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+
+		source, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
+		if parseErr != nil {
+			t.Errorf("parse %s: %v", path, parseErr)
+			return nil
+		}
+		relPath, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		relPath = filepath.ToSlash(relPath)
+
+		for _, importSpec := range source.Imports {
+			importPath, unquoteErr := strconv.Unquote(importSpec.Path.Value)
+			if unquoteErr != nil {
+				t.Errorf("%s: unparsable import %s", relPath, importSpec.Path.Value)
+				continue
+			}
+			for _, prefix := range providerSDKPrefixes {
+				if strings.HasPrefix(importPath, prefix) {
+					importingFiles[relPath] = importPath
+				}
+			}
+		}
+		return nil
+	})
+	if walkErr != nil {
+		t.Fatalf("walk repository: %v", walkErr)
+	}
+
+	// The adapter must actually be what imports the SDK: without this
+	// assertion a rename of the dependency would make the gate vacuous.
+	if len(importingFiles) == 0 {
+		t.Fatal("no package imports the payment provider SDK: the gate would be vacuous")
+	}
+
+	for relPath, importPath := range importingFiles {
+		allowed := false
+		for _, prefix := range providerSDKAllowlist {
+			if strings.HasPrefix(relPath, prefix) {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			t.Errorf("%s imports %q — the provider SDK belongs to its adapter only (allowed: %s)",
+				relPath, importPath, strings.Join(providerSDKAllowlist, ", "))
+		}
+	}
+
+	// Domain and application layers are covered by the dependency direction
+	// test; this one proves the adapter is the only other importer.
+	for _, prefix := range providerSDKAllowlist[:1] {
+		found := false
+		for relPath := range importingFiles {
+			if strings.HasPrefix(relPath, prefix) {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("no file under %s imports the provider SDK", prefix)
+		}
 	}
 }
 

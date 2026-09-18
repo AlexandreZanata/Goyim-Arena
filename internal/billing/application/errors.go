@@ -18,3 +18,52 @@ var (
 	// secret is shorter than the 256-bit minimum.
 	ErrWeakHistoryCursorSecret = errors.New("application: pass history cursor secret must be at least 32 bytes")
 )
+
+// Payment gateway error vocabulary (P12-T03).
+//
+// The port classifies every provider failure into one of these sentinels, so
+// use cases decide on meaning (retry, reconcile, alert an operator) instead of
+// inspecting provider errors. Two rules hold for all of them, enforced by the
+// adapter and covered by tests:
+//
+//   - the provider's free-form message never travels: it can echo request
+//     values, and the payload of a diagnostic belongs to the request log the
+//     provider keeps, reachable through the request id that IS attached;
+//   - a failure never carries the credentials, the customer, the email or any
+//     other personal data.
+var (
+	// ErrPaymentGatewayUnavailable indicates the provider could not be
+	// reached or answered a server-side failure or a rate limit. The outcome
+	// of the call is unknown, so a retry must reuse the same idempotency key.
+	ErrPaymentGatewayUnavailable = errors.New("application: payment gateway is unavailable")
+
+	// ErrPaymentGatewayTimeout indicates the call exceeded the configured
+	// deadline. Nothing about the outcome is known: the operation may or may
+	// not have completed at the provider, so the only safe continuations are
+	// retrying with the same idempotency key or reconciling the object.
+	ErrPaymentGatewayTimeout = errors.New("application: payment gateway did not answer within the configured timeout")
+
+	// ErrPaymentGatewayRejected indicates the provider refused the request
+	// itself (invalid parameters, a card the issuer declined). Retrying the
+	// same request is pointless.
+	ErrPaymentGatewayRejected = errors.New("application: payment gateway refused the request")
+
+	// ErrPaymentGatewayMisconfigured indicates the integration with the
+	// provider is broken: the credentials were rejected or the provider
+	// answered something outside the contract this adapter accepts. Retrying
+	// does not help; an operator must act.
+	ErrPaymentGatewayMisconfigured = errors.New("application: payment gateway credentials or contract are misconfigured")
+
+	// ErrPaymentGatewayRequestInvalid indicates the port was called with a
+	// request the gateway cannot serve (a missing idempotency key, an
+	// identifier from the wrong provider mode). It is a programming error at
+	// the call site and is detected before any request reaches the provider.
+	ErrPaymentGatewayRequestInvalid = errors.New("application: payment gateway request is invalid")
+)
+
+// IsRetryablePaymentGatewayError reports whether a failed gateway call may be
+// retried with the same idempotency key. Only failures whose outcome is
+// unknown qualify; a refusal or a misconfiguration is permanent.
+func IsRetryablePaymentGatewayError(err error) bool {
+	return errors.Is(err, ErrPaymentGatewayUnavailable) || errors.Is(err, ErrPaymentGatewayTimeout)
+}

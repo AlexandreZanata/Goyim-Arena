@@ -39,6 +39,19 @@ const (
 	CodeInvalidCatalogVersion  ErrorCode = "BILLING_INVALID_CATALOG_VERSION"
 	CodeInvalidGrant           ErrorCode = "BILLING_INVALID_GRANT"
 	CodeNoMarketEnabled        ErrorCode = "BILLING_NO_MARKET_ENABLED"
+
+	// Provider vocabulary errors (P12-T03): the identifiers and statuses the
+	// payment gateway port exchanges, mirrored from migration 00020.
+	CodeInvalidStripeCustomerID      ErrorCode = "BILLING_INVALID_STRIPE_CUSTOMER_ID"
+	CodeInvalidStripeSessionID       ErrorCode = "BILLING_INVALID_STRIPE_SESSION_ID"
+	CodeStripeSessionModeMismatch    ErrorCode = "BILLING_STRIPE_SESSION_MODE_MISMATCH"
+	CodeInvalidStripePaymentIntentID ErrorCode = "BILLING_INVALID_STRIPE_PAYMENT_INTENT_ID"
+	CodeInvalidStripeSubscriptionID  ErrorCode = "BILLING_INVALID_STRIPE_SUBSCRIPTION_ID"
+	CodeInvalidCheckoutSessionStatus ErrorCode = "BILLING_INVALID_CHECKOUT_SESSION_STATUS"
+	CodeInvalidSubscriptionStatus    ErrorCode = "BILLING_INVALID_SUBSCRIPTION_STATUS"
+	CodeInvalidCheckoutMode          ErrorCode = "BILLING_INVALID_CHECKOUT_MODE"
+	CodeInvalidBillingPeriod         ErrorCode = "BILLING_INVALID_BILLING_PERIOD"
+	CodeInvalidCheckoutPaymentStatus ErrorCode = "BILLING_INVALID_CHECKOUT_PAYMENT_STATUS"
 )
 
 // DomainError represents an invariant or rule failure in the billing domain.
@@ -91,4 +104,15 @@ var (
 	ErrInvalidCatalogVersion  = DomainError{Code: CodeInvalidCatalogVersion, Message: "catalog version must be a positive integer"}
 	ErrInvalidGrant           = DomainError{Code: CodeInvalidGrant, Message: "grant does not carry exactly the quantities its kind describes"}
 	ErrNoMarketEnabled        = DomainError{Code: CodeNoMarketEnabled, Message: "production requires at least one enabled commercial region"}
+
+	ErrInvalidStripeCustomerID           = DomainError{Code: CodeInvalidStripeCustomerID, Message: "Stripe customer identifier is malformed"}
+	ErrInvalidStripeCheckoutSessionID    = DomainError{Code: CodeInvalidStripeSessionID, Message: "Stripe checkout session identifier is malformed"}
+	ErrStripeCheckoutSessionModeMismatch = DomainError{Code: CodeStripeSessionModeMismatch, Message: "Stripe checkout session belongs to the other provider mode"}
+	ErrInvalidStripePaymentIntentID      = DomainError{Code: CodeInvalidStripePaymentIntentID, Message: "Stripe payment intent identifier is malformed"}
+	ErrInvalidStripeSubscriptionID       = DomainError{Code: CodeInvalidStripeSubscriptionID, Message: "Stripe subscription identifier is malformed"}
+	ErrInvalidCheckoutSessionStatus      = DomainError{Code: CodeInvalidCheckoutSessionStatus, Message: "checkout session status is outside the provider vocabulary"}
+	ErrInvalidSubscriptionStatus         = DomainError{Code: CodeInvalidSubscriptionStatus, Message: "subscription status is outside the provider vocabulary"}
+	ErrInvalidCheckoutMode               = DomainError{Code: CodeInvalidCheckoutMode, Message: "checkout mode is outside the supported vocabulary"}
+	ErrInvalidBillingPeriod              = DomainError{Code: CodeInvalidBillingPeriod, Message: "billing period must be a complete interval with the end after the start"}
+	ErrInvalidCheckoutPaymentStatus      = DomainError{Code: CodeInvalidCheckoutPaymentStatus, Message: "checkout payment status is outside the provider vocabulary"}
 )

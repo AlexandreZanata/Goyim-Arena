@@ -35,6 +35,8 @@ type Config struct {
 	dbAcquireTimeout  time.Duration
 	billingMarkets    []BillingMarket
 	billingPrices     []BillingPrice
+	stripeSecretKey   Secret
+	stripeTimeout     time.Duration
 }
 
 // Env is the deployment environment of the process.
@@ -158,6 +160,8 @@ func Load(environ []string) (Config, error) {
 		"ARENA_DB_ACQUIRE_TIMEOUT":    true,
 		billingMarketsVariable:        true,
 		billingPriceIDsVariable:       true,
+		stripeSecretKeyVariable:       true,
+		stripeTimeoutVariable:         true,
 	}
 	var validationErrors ValidationErrors
 	for name := range values {
@@ -178,6 +182,7 @@ func Load(environ []string) (Config, error) {
 		dbMaxConnLifetime: 1 * time.Hour,
 		dbMaxConnIdleTime: 30 * time.Minute,
 		dbAcquireTimeout:  5 * time.Second,
+		stripeTimeout:     10 * time.Second,
 	}
 
 	if raw, present := values["ARENA_ENV"]; present {
@@ -305,11 +310,36 @@ func Load(environ []string) (Config, error) {
 		validationErrors = append(validationErrors, problems...)
 	}
 
+	if raw, present := values[stripeSecretKeyVariable]; present {
+		secret, problems := parseStripeSecretKey(raw)
+		config.stripeSecretKey = secret
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[stripeTimeoutVariable]; present {
+		timeout, problems := parseStripeTimeout(raw)
+		if len(problems) == 0 {
+			config.stripeTimeout = timeout
+		}
+		validationErrors = append(validationErrors, problems...)
+	}
+
 	// Production-specific safety rules: the plan forbids insecure production
 	// defaults, so required secrets must be present in that environment.
 	if config.env == EnvProduction && !config.databaseURL.IsSet() {
 		validationErrors = append(validationErrors, ValidationError{
 			Variable: "ARENA_DATABASE_URL",
+			Problem:  "required when ARENA_ENV=production",
+		})
+	}
+
+	// Selling is impossible without the payment provider credential, and the
+	// versioned catalog already refuses to build in production without an
+	// enabled commercial region, so production always sells: the credential is
+	// part of the production safety rules.
+	if config.env == EnvProduction && !config.stripeSecretKey.IsSet() {
+		validationErrors = append(validationErrors, ValidationError{
+			Variable: stripeSecretKeyVariable,
 			Problem:  "required when ARENA_ENV=production",
 		})
 	}
