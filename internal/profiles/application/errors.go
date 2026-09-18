@@ -60,4 +60,8 @@ var (
 	// ErrInvalidCancelReason indicates the cancellation reason exceeds the
 	// accepted bound.
 	ErrInvalidCancelReason = errors.New("application: account deletion cancel reason is invalid")
+
+	// ErrInvalidRetentionConfig indicates the retention use case could not
+	// be built from the given dependencies.
+	ErrInvalidRetentionConfig = errors.New("application: retention configuration is invalid")
 )

@@ -16,6 +16,10 @@ type Querier interface {
 	// integrity, the email stops being personal data, and the account moves to
 	// the terminal deleted state.
 	AnonymizeDeletedAccount(ctx context.Context, arg AnonymizeDeletedAccountParams) (int64, error)
+	// AnonymizeTerminalSessionReferentials strips the client IP and user agent
+	// of terminal sessions past the prevention window. The session row itself
+	// survives until its own, longer retention window elapses.
+	AnonymizeTerminalSessionReferentials(ctx context.Context, arg AnonymizeTerminalSessionReferentialsParams) (AnonymizeTerminalSessionReferentialsRow, error)
 	// ApplyFreeBalanceDelta applies a signed net delta to the FREE_INK balance:
 	// the monthly renewal expires the remaining franchise and grants the next
 	// one in a single statement. The CHECK (balance_free >= 0) still guards the
@@ -62,6 +66,14 @@ type Querier interface {
 	// counts only — account identifiers never leave the database (P09-T05).
 	CountEligiblePositionsByArena(ctx context.Context, arenaID pgtype.UUID) (CountEligiblePositionsByArenaRow, error)
 	CountRecentModerationReportsByReporter(ctx context.Context, arg CountRecentModerationReportsByReporterParams) (int64, error)
+	// CountRetainedAuditEvents counts the administrative trail kept as
+	// evidence. The trail is append-only for every role, so the retention
+	// policy never schedules a purge for this class.
+	CountRetainedAuditEvents(ctx context.Context) (int32, error)
+	// CountRetainedBillingRows counts the payment, subscription, refund and
+	// reconciliation records kept as evidence of money and of the
+	// reconciliation duty. No row of the billing module is ever deleted.
+	CountRetainedBillingRows(ctx context.Context) (int32, error)
 	// Identity and authentication queries for the PostgreSQL platform adapter.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (AppAccount, error)
 	// Arena draft queries for the PostgreSQL platform adapter.
@@ -128,6 +140,10 @@ type Querier interface {
 	// inspected with its counters; every divergence is an immutable finding
 	// resolved only by a human justification afterwards.
 	CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (AppBillingReconciliationRun, error)
+	// CreateRetentionRun appends one ledger row per class and execution
+	// instant. A replayed run resolves the original record instead of
+	// duplicating or rewriting it.
+	CreateRetentionRun(ctx context.Context, arg CreateRetentionRunParams) (AppRetentionRun, error)
 	CreateSession(ctx context.Context, arg CreateSessionParams) (AppSession, error)
 	CreateUsernameHistoryEntry(ctx context.Context, arg CreateUsernameHistoryEntryParams) error
 	// Wallet ledger queries for the PostgreSQL platform adapter.
@@ -360,6 +376,10 @@ type Querier interface {
 	// It never selects email, credentials, internal financial identifiers or
 	// administrative flags, and deliberately omits account_id.
 	GetPublicProfileByUsername(ctx context.Context, usernameNormalized string) (GetPublicProfileByUsernameRow, error)
+	// GetRetentionRunForClassAt resolves the recorded run of one class and
+	// instant, so a replay reports what the ledger holds instead of inventing a
+	// second outcome.
+	GetRetentionRunForClassAt(ctx context.Context, arg GetRetentionRunForClassAtParams) (AppRetentionRun, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	// Session freshness for step-up evaluation (P13-T07). The age counts from
 	// session creation as of the caller's instant; unknown sessions deny
@@ -428,6 +448,23 @@ type Querier interface {
 	// identifier can never be mistaken for a legitimate buyer. A missing row means
 	// the account does not exist at all.
 	IsAccountEligibleForPurchase(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
+	// Data retention statements (P14-T07, docs/PRIVACY.md §1/§5,
+	// REQ-PRIV-01). One schedule per governed class decides the action; these
+	// statements execute it and count what happened.
+	//
+	// Every purge and anonymize statement:
+	//   * is scoped by the class cutoff (now minus the class window) applied to
+	//     the terminal instant of the record (used, revoked or expired), so a
+	//     record inside the window is never touched;
+	//   * excludes the accounts covered by an active hold of that class, and
+	//     the whole class when a class-wide hold is in force;
+	//   * returns the affected count and the count preserved by holds in one
+	//     statement, so the ledger cannot disagree with what happened.
+	//
+	// Retained classes purge nothing by design: their statements only count the
+	// records kept under obligation.
+	// ListActiveRetentionHolds resolves the holds in force for the job.
+	ListActiveRetentionHolds(ctx context.Context) ([]ListActiveRetentionHoldsRow, error)
 	// ListArenaArgumentsPage returns one keyset page of published top-level
 	// arguments of one relation in one Arena, newest first, with the derived
 	// published-reply count computed in the same statement (no N+1). Withdrawn
@@ -628,6 +665,21 @@ type Querier interface {
 	// drops their documents: the private data copy never outlives the account.
 	// The records survive as retention evidence, matching the export invariant.
 	PurgeDeletedAccountExports(ctx context.Context, arg PurgeDeletedAccountExportsParams) (int64, error)
+	// PurgeExpiredExportDocuments purges the document bytes of exports whose
+	// link expired at or before the cutoff and expires requests that were never
+	// generated by the cutoff. The record itself is retained: migration 00026
+	// forbids deleting export rows, and the download capability is already
+	// worthless once the record is expired.
+	PurgeExpiredExportDocuments(ctx context.Context, arg PurgeExpiredExportDocumentsParams) (PurgeExpiredExportDocumentsRow, error)
+	// PurgeTerminalRecoveryTokens removes password recovery tokens that were
+	// used or expired at or before the cutoff.
+	PurgeTerminalRecoveryTokens(ctx context.Context, arg PurgeTerminalRecoveryTokensParams) (PurgeTerminalRecoveryTokensRow, error)
+	// PurgeTerminalSessions removes sessions revoked or expired at or before
+	// the cutoff; the restricted client references travel with the row.
+	PurgeTerminalSessions(ctx context.Context, arg PurgeTerminalSessionsParams) (PurgeTerminalSessionsRow, error)
+	// PurgeTerminalVerificationTokens removes verification tokens that were
+	// used or expired at or before the cutoff.
+	PurgeTerminalVerificationTokens(ctx context.Context, arg PurgeTerminalVerificationTokensParams) (PurgeTerminalVerificationTokensRow, error)
 	ReactivateAccountForAppeal(ctx context.Context, id pgtype.UUID) (ReactivateAccountForAppealRow, error)
 	// RecordCheckoutIntentIfAbsent inserts the commercial decision exactly once per
 	// provider session, so a replay of the same operation resolves the stored

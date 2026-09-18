@@ -61,7 +61,27 @@ Pedidos devem ser autenticados sem exigir dados excessivos.
 
 Excluir conta não é sinônimo de apagar todo registro público imediatamente. Para preservar coerência de conversas e interesses legítimos, conteúdo público pode permanecer com autoria anonimizada, desde que essa possibilidade seja informada antes da publicação e revisada juridicamente.
 
-Dados privados sem obrigação de retenção devem ser eliminados. Registros financeiros, antifraude ou legais podem ter retenção limitada e acesso restrito. O cronograma exato de retenção deve ser definido antes do beta público.
+Dados privados sem obrigação de retenção devem ser eliminados. Registros financeiros, antifraude ou legais podem ter retenção limitada e acesso restrito.
+
+### Cronograma de retenção
+
+O cronograma é executável: a política vive em `internal/profiles/domain/retention.go`, é aplicada por um job que roda uma vez por classe e registra no livro `app.retention_runs` apenas contagens, classe e instantes — nunca conteúdo, identificador de titular ou payload. Cada classe tem uma ação e uma janela contada a partir do instante em que o registro se tornou terminal (usado, expirado ou revogado); o limite é inclusivo.
+
+| Classe | Dados | Ação | Janela |
+|---|---|---|---|
+| `tokens` | hashes dos tokens de verificação de email e de recuperação de senha | apagar | 30 dias após o uso ou a expiração |
+| `sessions` | sessões de servidor revogadas ou expiradas | apagar | 30 dias após a revogação ou a expiração |
+| `referential_logs` | trilha administrativa append-only (`app.audit_events`), que referencia titular, alvo e motivo | reter como evidência | indefinida |
+| `exports` | documento da exportação pessoal | apagar o documento e expirar o registro (o registro permanece) | 24 horas após o link expirar; um pedido nunca gerado expira 24 horas após o pedido |
+| `abuse_signals` | IP de origem e user agent registrados na sessão | anonimizar (os campos passam a nulo; a linha permanece até a janela da classe `sessions`) | 7 dias após o término da sessão |
+| `billing` | compras, assinaturas, reembolsos, eventos do provedor e reconciliação | reter como evidência financeira | indefinida |
+
+Regras que acompanham o cronograma:
+
+- **retenção legal e contratual:** uma retenção ativa (`app.retention_holds`) nomeia uma classe e um titular, ou a classe inteira, e suspende a ação sobre os registros cobertos; retenções são evidência, nunca são apagadas e a liberação é única e datada;
+- **classes são independentes:** uma retenção na classe `sessions` preserva a linha da sessão, mas não impede a anonimização do IP e do user agent, que pertencem à classe `abuse_signals`;
+- **idempotência:** repetir a execução no mesmo instante resolve o registro já gravado, e executar mais tarde encontra apenas o que ainda está fora da janela;
+- **provas:** `internal/profiles/domain/retention_test.go`, `internal/profiles/application/retention_test.go`, `internal/platform/postgres/retention_schema_test.go` e `internal/profiles/adapters/postgres/retention_test.go` cobrem limites exatos, retenção legal simulada, idempotência e contagens; qualquer mudança de janela ou ação é uma mudança de política e exige revisão jurídica registrada.
 
 ## 6. Exportações
 
@@ -97,7 +117,7 @@ A idade mínima e o tratamento de menores são questões bloqueadoras para o bet
 
 - inventário de dados e finalidades;
 - base legal por tratamento;
-- política de retenção;
+- política de retenção com o cronograma executável revisado juridicamente;
 - canal para titulares;
 - contratos e subprocessadores;
 - resposta a incidentes;

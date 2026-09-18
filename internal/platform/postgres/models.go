@@ -435,6 +435,42 @@ type AppProfile struct {
 	Timezone pgtype.Text
 }
 
+// Legal and contractual holds: while a hold is active the retention job purges and anonymizes nothing for the held class or account; holds are never deleted
+type AppRetentionHold struct {
+	ID pgtype.UUID
+	// Governed retention class, the same closed vocabulary the executable policy declares
+	DataClass string
+	// Held account; NULL holds the whole class
+	AccountID pgtype.UUID
+	// Stable reason code of the hold (never free prose)
+	ReasonCode string
+	// Administrative account that placed the hold; retained as provenance
+	PlacedBy   pgtype.UUID
+	PlacedAt   pgtype.Timestamptz
+	ReleasedAt pgtype.Timestamptz
+	// Stable reason code written once when the hold is released
+	ReleaseReasonCode pgtype.Text
+}
+
+// Append-only retention ledger: one row per governed class and execution with counts only, so enforcement is auditable without storing any content
+type AppRetentionRun struct {
+	ID pgtype.UUID
+	// Governed retention class the run enforced
+	DataClass string
+	// Instant the run enforced the schedule, from the injected clock
+	ExecutedAt pgtype.Timestamptz
+	// Terminal boundary the run applied (now minus the class window); NULL for classes retained without a purge horizon
+	CutoffAt pgtype.Timestamptz
+	// Records removed by the run
+	PurgedCount int32
+	// Records whose restricted references were stripped by the run
+	AnonymizedCount int32
+	// Records kept under a retention obligation by the run
+	RetainedCount int32
+	// Records the run preserved because an active legal hold covered them
+	HeldCount int32
+}
+
 // goose forward-only migration history for the app schema (schema_metadata version table required by the master plan)
 type AppSchemaMetadatum struct {
 	ID        int32
