@@ -41,18 +41,50 @@ func TestWorkerUsageAndArgumentValidation(t *testing.T) {
 }
 
 // TestWorkerFailsFastWithoutDatabaseURL pins the fail-fast behavior: without
-// ARENA_DATABASE_URL the worker stops before opening anything.
+// ARENA_DATABASE_URL the worker stops before opening anything, and it stops
+// promptly rather than starting to consume jobs.
+//
+// The test establishes its own precondition instead of inheriting it. The CI
+// job exports ARENA_DATABASE_URL for every package, so the assertion was only
+// ever exercised on machines that happened to have no database configured:
+// with the variable set, run("worker") booted a real worker and blocked until
+// SIGTERM, which the suite reported as a ten-minute package timeout rather
+// than as a failure. Clearing the variable makes the precondition true by
+// construction, and the bound below keeps a future regression from hanging
+// the suite — a fail-fast test that can hang is not testing fail-fast.
 func TestWorkerFailsFastWithoutDatabaseURL(t *testing.T) {
-	t.Parallel()
+	// t.Setenv restores the previous value on cleanup, which is what keeps the
+	// rest of the package hermetic; it cannot be combined with t.Parallel.
+	t.Setenv("ARENA_DATABASE_URL", "")
 
-	_, _, err := runForTest(t, "worker")
-	if err == nil {
-		t.Skip("ARENA_* environment is configured; skipping the no-config assertion")
+	stdoutFile, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatalf("create temp file: %v", err)
 	}
-	if !strings.Contains(err.Error(), "ARENA_") {
-		t.Errorf("error should name the missing ARENA_* configuration, got: %v", err)
+	defer stdoutFile.Close()
+
+	// run is called on its own goroutine so the wait can be bounded, and every
+	// t.Fatal stays on the test goroutine.
+	errs := make(chan error, 1)
+	go func() { errs <- run([]string{"worker"}, stdoutFile) }()
+
+	select {
+	case err := <-errs:
+		if err == nil {
+			t.Fatal("worker without ARENA_DATABASE_URL must not start")
+		}
+		if !strings.Contains(err.Error(), "ARENA_") {
+			t.Errorf("error should name the missing ARENA_* configuration, got: %v", err)
+		}
+	case <-time.After(failFastDeadline):
+		t.Fatalf("worker did not stop within %s without ARENA_DATABASE_URL: it must fail fast, not start consuming jobs", failFastDeadline)
 	}
 }
+
+// failFastDeadline bounds the no-configuration path. It does no I/O — the
+// configuration is refused before any connection is attempted — so the real
+// cost is microseconds.
+const failFastDeadline = 10 * time.Second
 
 // TestWorkerBootsAndStopsOnSIGTERM is the process-level lifecycle validation
 // of P15-T02: the binary boots against a real database, logs the started
