@@ -1079,6 +1079,61 @@
         }
       }
     },
+    "/api/v1/arenas/{id}/export": {
+      "get": {
+        "operationId": "exportPublicArena",
+        "summary": "Versioned public Arena export",
+        "description": "Returns one page of the versioned public Arena export (schema_version 1): Arena identity and state, aggregate position distributions with low-count suppression, valid influence counts, and a keyset-paginated list of public arguments with their sources. Only public data serializes: no individual position, individual change history or attributor identity is ever part of the document. The strong ETag is the content hash of the exact body; revalidate with If-None-Match. Unknown, draft and removed Arenas are not found.",
+        "tags": ["transparency"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Stable public Arena identifier.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque server-signed cursor returned as next_cursor by the previous page.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1..100); defaults to 20.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One page of the versioned public Arena export.",
+            "headers": {
+              "ETag": { "description": "Strong validator computed over the content hash of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Public cache policy (public, max-age=60).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ArenaExport" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "404": { "$ref": "#/components/responses/NotFound" }
+        }
+      }
+    },
     "/api/v1/me/arenas/{id}/position": {
       "post": {
         "operationId": "confirmPosition",
@@ -2081,6 +2136,73 @@
           "actions_recorded": { "type": "integer", "minimum": 0 },
           "appeals_filed": { "type": "integer", "minimum": 0 },
           "appeals_reversed": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ArenaExport": {
+        "type": "object",
+        "description": "Versioned public Arena export (schema_version 1). Only public data serializes: Arena identity and state, aggregate positions, valid influence counts and public arguments; no individual position, individual change history or attributor identity is ever part of the document.",
+        "required": ["schema_version", "arena", "positions", "influence", "arguments"],
+        "properties": {
+          "schema_version": { "type": "integer", "minimum": 1 },
+          "arena": { "$ref": "#/components/schemas/PublicArena" },
+          "positions": { "$ref": "#/components/schemas/ArenaExportPositions" },
+          "influence": { "$ref": "#/components/schemas/ArenaExportInfluence" },
+          "arguments": { "$ref": "#/components/schemas/ArenaExportArgumentPage" }
+        }
+      },
+      "ArenaExportPositions": {
+        "type": "object",
+        "description": "Aggregated position picture of one Arena. Below the low-count threshold every count is withheld (suppressed true, participants_total and position_changes zero and distributions zeroed), so a small sample never reveals an individual position; individual change histories never serialize.",
+        "required": ["participants_total", "suppressed", "position_changes", "initial", "current"],
+        "properties": {
+          "participants_total": { "type": "integer", "minimum": 0 },
+          "suppressed": { "type": "boolean" },
+          "position_changes": { "type": "integer", "minimum": 0 },
+          "initial": { "$ref": "#/components/schemas/PositionDistribution" },
+          "current": { "$ref": "#/components/schemas/PositionDistribution" }
+        }
+      },
+      "ArenaExportInfluence": {
+        "type": "object",
+        "description": "Valid influence counts of one Arena: valid attribution events and the distinct authors credited there. Counts only: no attributor, account or email data is ever part of this document.",
+        "required": ["valid_attributions", "influenced_authors"],
+        "properties": {
+          "valid_attributions": { "type": "integer", "minimum": 0 },
+          "influenced_authors": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ArenaExportArgumentInfluence": {
+        "type": "object",
+        "description": "Public counts of one exported argument: valid attribution events and the eligible people who credited it, each counted once. Counts only: no attributor identity ever serializes.",
+        "required": ["valid_attributions", "distinct_people"],
+        "properties": {
+          "valid_attributions": { "type": "integer", "minimum": 0 },
+          "distinct_people": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ArenaExportArgument": {
+        "type": "object",
+        "description": "One public argument of the export. Content and sources are withheld (null and empty array) while the argument is withdrawn; removed arguments never appear.",
+        "required": ["id", "parent_id", "relation", "content", "status", "created_at", "withdrawn_at", "sources", "influence"],
+        "properties": {
+          "id": { "type": "string" },
+          "parent_id": { "type": ["string", "null"], "description": "Null for top-level arguments." },
+          "relation": { "type": "string", "enum": ["support", "oppose", "context"] },
+          "content": { "type": ["string", "null"], "description": "Null when retracted by the author." },
+          "status": { "type": "string", "enum": ["published", "withdrawn"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "withdrawn_at": { "type": ["string", "null"], "format": "date-time" },
+          "sources": { "type": "array", "items": { "$ref": "#/components/schemas/ArgumentSource" } },
+          "influence": { "$ref": "#/components/schemas/ArenaExportArgumentInfluence" }
+        }
+      },
+      "ArenaExportArgumentPage": {
+        "type": "object",
+        "description": "Cursor page of exported arguments, oldest first.",
+        "required": ["items", "next_cursor"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/ArenaExportArgument" } },
+          "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
         }
       },
       "ModerationReportRequest": {

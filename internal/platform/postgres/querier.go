@@ -149,6 +149,20 @@ type Querier interface {
 	// can never be influenced by who pays or who is popular (P13-T02).
 	GetAdminRoleByAccount(ctx context.Context, accountID pgtype.UUID) (AppAdminRole, error)
 	GetArenaByID(ctx context.Context, id pgtype.UUID) (AppArena, error)
+	// Public Arena export projections (P14-T04, docs/TRANSPARENCY.md §7). These
+	// are the approved read-only projections over the arenas, positions,
+	// arguments, sources and attribution schemas: every statement only reads,
+	// returns public columns and never lets an account identifier leave the
+	// database. Aggregates carry integer counts; the argument list is strictly
+	// keyset-paginated so a large Arena is read page by page.
+	// GetArenaExportHeader resolves the publicly readable Arena (published,
+	// closed or restricted) with its derived aggregates in one read: eligible
+	// participant distributions, the total accepted position changes and the
+	// valid influence counts. Unknown, draft and removed Arenas return no row.
+	// The eligibility predicates mirror the public position aggregate
+	// (CountEligiblePositionsByArena) and the public attribution metrics
+	// (GetArgumentAttributionMetrics) exactly.
+	GetArenaExportHeader(ctx context.Context, arenaID pgtype.UUID) (GetArenaExportHeaderRow, error)
 	GetArenaForCreator(ctx context.Context, arg GetArenaForCreatorParams) (AppArena, error)
 	// Target resolution for report filing (P13-T03). Each read returns the
 	// owner and the lifecycle needed to distinguish unknown targets from
@@ -335,6 +349,15 @@ type Querier interface {
 	// and removed arguments never appear in public lists (P10-T07).
 	ListArenaArgumentsPage(ctx context.Context, arg ListArenaArgumentsPageParams) ([]ListArenaArgumentsPageRow, error)
 	ListArenaDraftsForCreator(ctx context.Context, creatorID pgtype.UUID) ([]AppArena, error)
+	// ListArenaExportArguments returns one bounded page of published and
+	// withdrawn arguments of one Arena, oldest first, strictly after the
+	// position. Removed arguments never appear. The adapter withholds the
+	// content of withdrawn arguments exactly as the public argument adapter
+	// does: the placeholder keeps the public status and dates while the
+	// retracted text never reaches the document. Influence counts mirror
+	// GetArgumentAttributionMetrics and remain historical facts (withdrawal
+	// never rewrites them).
+	ListArenaExportArguments(ctx context.Context, arg ListArenaExportArgumentsParams) ([]ListArenaExportArgumentsRow, error)
 	ListArenaPassConsumptionsByAccount(ctx context.Context, accountID pgtype.UUID) ([]ListArenaPassConsumptionsByAccountRow, error)
 	// ListArenaPassConsumptionsPage returns one keyset-paginated page of the
 	// owner's consumption history, newest first. NULL after_* parameters select
@@ -415,6 +438,10 @@ type Querier interface {
 	// Expiration is never written back: the predicate is evaluated at read time,
 	// so the sweep is a pure derivation and repeated runs are identical (P07-T04).
 	ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredArenaPassLotsParams) ([]AppArenaPassLot, error)
+	// ListExportArgumentSources returns the structured sources of the given
+	// arguments in deterministic order. The adapter only asks for published
+	// arguments: withdrawn content withholds its sources too.
+	ListExportArgumentSources(ctx context.Context, argumentIds []pgtype.UUID) ([]ListExportArgumentSourcesRow, error)
 	// Triage queue reads (P13-T07). One keyset-paginated page of case routing,
 	// newest first: target, lifecycle, priority, claim holder and instants.
 	// Restricted evidence (reporter context, justifications, appeal contexts)

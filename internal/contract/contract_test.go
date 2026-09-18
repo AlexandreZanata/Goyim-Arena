@@ -1079,6 +1079,80 @@ func TestContractTransparencyStaysPublicAndPrivate(t *testing.T) {
 	}
 }
 
+// TestContractArenaExportIsVersionedPublicAndBounded is the contract-level
+// proof of P14-T04: the versioned public Arena export declares exactly the
+// public properties (no account, creator, attributor or individual position
+// marker), stays unauthenticated, documents the content-hash ETag, the
+// short public cache policy and the cursor pagination bounds.
+func TestContractArenaExportIsVersionedPublicAndBounded(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"ArenaExport":                  {"schema_version", "arena", "positions", "influence", "arguments"},
+		"ArenaExportPositions":         {"participants_total", "suppressed", "position_changes", "initial", "current"},
+		"ArenaExportInfluence":         {"valid_attributions", "influenced_authors"},
+		"ArenaExportArgumentInfluence": {"valid_attributions", "distinct_people"},
+		"ArenaExportArgument":          {"id", "parent_id", "relation", "content", "status", "created_at", "withdrawn_at", "sources", "influence"},
+		"ArenaExportArgumentPage":      {"items", "next_cursor"},
+	}
+	forbiddenTokens := []string{
+		"account", "author", "attributor", "creator", "email", "password", "credential",
+		"stripe", "customer", "billing", "payment", "fraud", "admin", "reason", "actor",
+		"notes", "ip", "user_agent", "position_id", "change_id",
+	}
+	for name, expectedProperties := range expected {
+		properties := propertiesOf(t, document, name)
+		if len(properties) != len(expectedProperties) {
+			t.Fatalf("%s declares %d properties, want exactly %d", name, len(properties), len(expectedProperties))
+		}
+		for _, property := range expectedProperties {
+			if _, ok := properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		for property := range properties {
+			for _, token := range strings.Split(strings.ToLower(property), "_") {
+				for _, marker := range forbiddenTokens {
+					if token == marker {
+						t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+					}
+				}
+			}
+		}
+	}
+
+	// The document is versioned: schema_version is required and pinned to
+	// v1 by minimum 1; the Arena reference reuses the public document.
+	exportRaw := string(document.Components.Schemas["ArenaExport"])
+	for _, marker := range []string{`"schema_version"`, `"minimum": 1`, `"#/components/schemas/PublicArena"`} {
+		if !strings.Contains(exportRaw, marker) {
+			t.Errorf("ArenaExport must document %q", marker)
+		}
+	}
+
+	operations, ok := document.Paths["/api/v1/arenas/{id}/export"]
+	if !ok {
+		t.Fatal("contract is missing /api/v1/arenas/{id}/export")
+	}
+	operation := string(operations["get"])
+	if strings.Contains(operation, `"SessionCookie"`) {
+		t.Error("the export must stay public")
+	}
+	for _, marker := range []string{
+		"ETag", "public, max-age=60", `"304"`, "If-None-Match", `"404"`,
+		`"cursor"`, `"limit"`, `"maximum": 100`, `"#/components/schemas/ArenaExport"`,
+	} {
+		if !strings.Contains(operation, marker) {
+			t.Errorf("export operation must document %q", marker)
+		}
+	}
+	if strings.Contains(operation, "no-store") {
+		t.Error("the export must be cacheable, never no-store")
+	}
+}
+
 func TestCompareRoutesDetectsDriftBothWays(t *testing.T) {
 	t.Parallel()
 
