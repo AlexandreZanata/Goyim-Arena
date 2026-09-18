@@ -11,6 +11,40 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimModerationAppeal = `-- name: ClaimModerationAppeal :one
+UPDATE app.moderation_appeals
+SET status = 'under_review'
+WHERE id = $1 AND status = 'open'
+RETURNING id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at
+`
+
+type ClaimModerationAppealRow struct {
+	ID             pgtype.UUID
+	ActionID       pgtype.UUID
+	AppellantID    pgtype.UUID
+	Status         string
+	ReviewerID     pgtype.UUID
+	DecisionReason pgtype.Text
+	CreatedAt      pgtype.Timestamptz
+	DecidedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ClaimModerationAppeal(ctx context.Context, id pgtype.UUID) (ClaimModerationAppealRow, error) {
+	row := q.db.QueryRow(ctx, claimModerationAppeal, id)
+	var i ClaimModerationAppealRow
+	err := row.Scan(
+		&i.ID,
+		&i.ActionID,
+		&i.AppellantID,
+		&i.Status,
+		&i.ReviewerID,
+		&i.DecisionReason,
+		&i.CreatedAt,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
 const claimModerationCase = `-- name: ClaimModerationCase :one
 UPDATE app.moderation_cases
 SET status = 'under_review', claimed_by = $2, claimed_at = $3, lease_expires_at = $4, updated_at = now()
@@ -194,6 +228,54 @@ func (q *Queries) CreateModerationReport(ctx context.Context, arg CreateModerati
 	return i, err
 }
 
+const decideModerationAppeal = `-- name: DecideModerationAppeal :one
+UPDATE app.moderation_appeals
+SET status = $2, reviewer_id = $3, decision_reason = $4, decided_at = $5
+WHERE id = $1 AND status = 'under_review'
+RETURNING id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at
+`
+
+type DecideModerationAppealParams struct {
+	ID             pgtype.UUID
+	Status         string
+	ReviewerID     pgtype.UUID
+	DecisionReason pgtype.Text
+	DecidedAt      pgtype.Timestamptz
+}
+
+type DecideModerationAppealRow struct {
+	ID             pgtype.UUID
+	ActionID       pgtype.UUID
+	AppellantID    pgtype.UUID
+	Status         string
+	ReviewerID     pgtype.UUID
+	DecisionReason pgtype.Text
+	CreatedAt      pgtype.Timestamptz
+	DecidedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) DecideModerationAppeal(ctx context.Context, arg DecideModerationAppealParams) (DecideModerationAppealRow, error) {
+	row := q.db.QueryRow(ctx, decideModerationAppeal,
+		arg.ID,
+		arg.Status,
+		arg.ReviewerID,
+		arg.DecisionReason,
+		arg.DecidedAt,
+	)
+	var i DecideModerationAppealRow
+	err := row.Scan(
+		&i.ID,
+		&i.ActionID,
+		&i.AppellantID,
+		&i.Status,
+		&i.ReviewerID,
+		&i.DecisionReason,
+		&i.CreatedAt,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
 const decideModerationCase = `-- name: DecideModerationCase :one
 UPDATE app.moderation_cases
 SET status = 'decided', claimed_by = NULL, claimed_at = NULL, lease_expires_at = NULL, updated_at = now()
@@ -368,6 +450,122 @@ func (q *Queries) GetDuplicateModerationReport(ctx context.Context, arg GetDupli
 	return i, err
 }
 
+const getModerationActionForAppeal = `-- name: GetModerationActionForAppeal :one
+
+SELECT a.id, a.case_id, a.action_type, a.actor_id, a.rule_applied, a.created_at,
+    c.target_type, c.target_arena_id, c.target_argument_id, c.target_account_id,
+    COALESCE(ar.creator_id, ag.author_id, ac.id) AS target_owner_id
+FROM app.moderation_actions a
+JOIN app.moderation_cases c ON c.id = a.case_id
+LEFT JOIN app.arenas ar ON ar.id = c.target_arena_id
+LEFT JOIN app.arguments ag ON ag.id = c.target_argument_id
+LEFT JOIN app.accounts ac ON ac.id = c.target_account_id
+WHERE a.id = $1
+`
+
+type GetModerationActionForAppealRow struct {
+	ID               pgtype.UUID
+	CaseID           pgtype.UUID
+	ActionType       string
+	ActorID          pgtype.UUID
+	RuleApplied      string
+	CreatedAt        pgtype.Timestamptz
+	TargetType       string
+	TargetArenaID    pgtype.UUID
+	TargetArgumentID pgtype.UUID
+	TargetAccountID  pgtype.UUID
+	TargetOwnerID    pgtype.UUID
+}
+
+// Appeal reads and lifecycle (P13-T06). Exactly one appeal contests one
+// action: the UNIQUE constraint refuses the second contest, and the
+// adapter maps the violation to the duplicate sentinel instead of
+// surfacing storage detail.
+func (q *Queries) GetModerationActionForAppeal(ctx context.Context, id pgtype.UUID) (GetModerationActionForAppealRow, error) {
+	row := q.db.QueryRow(ctx, getModerationActionForAppeal, id)
+	var i GetModerationActionForAppealRow
+	err := row.Scan(
+		&i.ID,
+		&i.CaseID,
+		&i.ActionType,
+		&i.ActorID,
+		&i.RuleApplied,
+		&i.CreatedAt,
+		&i.TargetType,
+		&i.TargetArenaID,
+		&i.TargetArgumentID,
+		&i.TargetAccountID,
+		&i.TargetOwnerID,
+	)
+	return i, err
+}
+
+const getModerationAppealByAction = `-- name: GetModerationAppealByAction :one
+SELECT id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at
+FROM app.moderation_appeals
+WHERE action_id = $1
+`
+
+type GetModerationAppealByActionRow struct {
+	ID             pgtype.UUID
+	ActionID       pgtype.UUID
+	AppellantID    pgtype.UUID
+	Status         string
+	ReviewerID     pgtype.UUID
+	DecisionReason pgtype.Text
+	CreatedAt      pgtype.Timestamptz
+	DecidedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) GetModerationAppealByAction(ctx context.Context, actionID pgtype.UUID) (GetModerationAppealByActionRow, error) {
+	row := q.db.QueryRow(ctx, getModerationAppealByAction, actionID)
+	var i GetModerationAppealByActionRow
+	err := row.Scan(
+		&i.ID,
+		&i.ActionID,
+		&i.AppellantID,
+		&i.Status,
+		&i.ReviewerID,
+		&i.DecisionReason,
+		&i.CreatedAt,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
+const getModerationAppealByID = `-- name: GetModerationAppealByID :one
+SELECT id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at
+FROM app.moderation_appeals
+WHERE id = $1
+`
+
+type GetModerationAppealByIDRow struct {
+	ID             pgtype.UUID
+	ActionID       pgtype.UUID
+	AppellantID    pgtype.UUID
+	Status         string
+	ReviewerID     pgtype.UUID
+	DecisionReason pgtype.Text
+	CreatedAt      pgtype.Timestamptz
+	DecidedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) GetModerationAppealByID(ctx context.Context, id pgtype.UUID) (GetModerationAppealByIDRow, error) {
+	row := q.db.QueryRow(ctx, getModerationAppealByID, id)
+	var i GetModerationAppealByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.ActionID,
+		&i.AppellantID,
+		&i.Status,
+		&i.ReviewerID,
+		&i.DecisionReason,
+		&i.CreatedAt,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
 const getModerationCaseByID = `-- name: GetModerationCaseByID :one
 
 SELECT c.id, c.target_type, c.target_arena_id, c.target_argument_id, c.target_account_id,
@@ -414,6 +612,45 @@ func (q *Queries) GetModerationCaseByID(ctx context.Context, id pgtype.UUID) (Ge
 	return i, err
 }
 
+const insertModerationAppeal = `-- name: InsertModerationAppeal :one
+INSERT INTO app.moderation_appeals (action_id, appellant_id, context)
+VALUES ($1, $2, $3)
+RETURNING id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at
+`
+
+type InsertModerationAppealParams struct {
+	ActionID    pgtype.UUID
+	AppellantID pgtype.UUID
+	Context     string
+}
+
+type InsertModerationAppealRow struct {
+	ID             pgtype.UUID
+	ActionID       pgtype.UUID
+	AppellantID    pgtype.UUID
+	Status         string
+	ReviewerID     pgtype.UUID
+	DecisionReason pgtype.Text
+	CreatedAt      pgtype.Timestamptz
+	DecidedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) InsertModerationAppeal(ctx context.Context, arg InsertModerationAppealParams) (InsertModerationAppealRow, error) {
+	row := q.db.QueryRow(ctx, insertModerationAppeal, arg.ActionID, arg.AppellantID, arg.Context)
+	var i InsertModerationAppealRow
+	err := row.Scan(
+		&i.ID,
+		&i.ActionID,
+		&i.AppellantID,
+		&i.Status,
+		&i.ReviewerID,
+		&i.DecisionReason,
+		&i.CreatedAt,
+		&i.DecidedAt,
+	)
+	return i, err
+}
+
 const invalidateArgumentAttributions = `-- name: InvalidateArgumentAttributions :execrows
 UPDATE app.persuasion_attributions
 SET status = 'invalid',
@@ -438,6 +675,26 @@ func (q *Queries) InvalidateArgumentAttributions(ctx context.Context, arg Invali
 	return result.RowsAffected(), nil
 }
 
+const reactivateAccountForAppeal = `-- name: ReactivateAccountForAppeal :one
+UPDATE app.accounts
+SET status = 'active',
+    updated_at = now()
+WHERE id = $1 AND status = 'suspended'
+RETURNING id, status
+`
+
+type ReactivateAccountForAppealRow struct {
+	ID     pgtype.UUID
+	Status string
+}
+
+func (q *Queries) ReactivateAccountForAppeal(ctx context.Context, id pgtype.UUID) (ReactivateAccountForAppealRow, error) {
+	row := q.db.QueryRow(ctx, reactivateAccountForAppeal, id)
+	var i ReactivateAccountForAppealRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
 const removeArgumentForModeration = `-- name: RemoveArgumentForModeration :one
 UPDATE app.arguments
 SET status = 'removed',
@@ -454,6 +711,75 @@ type RemoveArgumentForModerationRow struct {
 func (q *Queries) RemoveArgumentForModeration(ctx context.Context, id pgtype.UUID) (RemoveArgumentForModerationRow, error) {
 	row := q.db.QueryRow(ctx, removeArgumentForModeration, id)
 	var i RemoveArgumentForModerationRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
+const reopenArenaForAppeal = `-- name: ReopenArenaForAppeal :one
+
+UPDATE app.arenas
+SET status = 'published',
+    version = version + 1
+WHERE id = $1 AND status = 'closed'
+RETURNING id, status, version
+`
+
+type ReopenArenaForAppealRow struct {
+	ID      pgtype.UUID
+	Status  string
+	Version int32
+}
+
+// Reversal effects restoring sanctioned projections from the original
+// action record (P13-T06). Each statement is conditional: zero affected
+// rows aborts the whole outcome instead of recording a phantom restore.
+// The original action row is never edited or deleted.
+func (q *Queries) ReopenArenaForAppeal(ctx context.Context, id pgtype.UUID) (ReopenArenaForAppealRow, error) {
+	row := q.db.QueryRow(ctx, reopenArenaForAppeal, id)
+	var i ReopenArenaForAppealRow
+	err := row.Scan(&i.ID, &i.Status, &i.Version)
+	return i, err
+}
+
+const restoreArgumentAttributions = `-- name: RestoreArgumentAttributions :execrows
+UPDATE app.persuasion_attributions
+SET status = 'valid',
+    moderation_reason = $2,
+    moderated_by = $3,
+    moderated_at = now()
+WHERE argument_id = $1 AND status = 'invalid'
+`
+
+type RestoreArgumentAttributionsParams struct {
+	ArgumentID       pgtype.UUID
+	ModerationReason pgtype.Text
+	ModeratedBy      pgtype.UUID
+}
+
+func (q *Queries) RestoreArgumentAttributions(ctx context.Context, arg RestoreArgumentAttributionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, restoreArgumentAttributions, arg.ArgumentID, arg.ModerationReason, arg.ModeratedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const restoreArgumentForAppeal = `-- name: RestoreArgumentForAppeal :one
+UPDATE app.arguments
+SET status = 'published',
+    updated_at = now()
+WHERE id = $1 AND status = 'removed'
+RETURNING id, status
+`
+
+type RestoreArgumentForAppealRow struct {
+	ID     pgtype.UUID
+	Status string
+}
+
+func (q *Queries) RestoreArgumentForAppeal(ctx context.Context, id pgtype.UUID) (RestoreArgumentForAppealRow, error) {
+	row := q.db.QueryRow(ctx, restoreArgumentForAppeal, id)
+	var i RestoreArgumentForAppealRow
 	err := row.Scan(&i.ID, &i.Status)
 	return i, err
 }

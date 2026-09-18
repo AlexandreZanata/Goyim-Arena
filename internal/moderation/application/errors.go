@@ -58,4 +58,45 @@ var (
 	// ErrInvalidDecisionConfig indicates the decision use cases could not
 	// be built from the given dependencies.
 	ErrInvalidDecisionConfig = errors.New("application: moderation decision configuration is invalid")
+
+	// ErrActionNotFound indicates no action carries the identifier. It is
+	// distinct from an ineligible action so a forged identifier is never
+	// treated as a contestable sanction.
+	ErrActionNotFound = errors.New("application: moderation action was not found")
+
+	// ErrActionNotAppealable indicates the action sanctions nobody (for
+	// example no_action), so there is no affected owner to appeal it.
+	ErrActionNotAppealable = errors.New("application: moderation action cannot be appealed")
+
+	// ErrNotAppealOwner indicates the appellant does not own the sanctioned
+	// target. Only the affected user contests a sanction, never a third
+	// party.
+	ErrNotAppealOwner = errors.New("application: only the sanctioned owner may appeal")
+
+	// ErrAppealExpired indicates the sanction settled past the appeal
+	// window. Late appeals deny distinctly from duplicates.
+	ErrAppealExpired = errors.New("application: appeal window expired")
+
+	// ErrAppealDuplicate indicates the action already carries an appeal.
+	// Exactly one appeal contests one action.
+	ErrAppealDuplicate = errors.New("application: moderation action already carries an appeal")
+
+	// ErrAppealNotFound indicates no appeal carries the identifier.
+	ErrAppealNotFound = errors.New("application: moderation appeal was not found")
+
+	// ErrAppealAlreadyClaimed indicates a live review already owns the
+	// appeal. Concurrent reviewers serialize; only one claims.
+	ErrAppealAlreadyClaimed = errors.New("application: moderation appeal is already under review")
+
+	// ErrSameReviewer indicates the reviewer decided the original action.
+	// Reviews belong to a different reviewer when one is available.
+	ErrSameReviewer = errors.New("application: appeal reviewer must differ from the deciding moderator")
+
+	// ErrInvalidAppealTransition indicates the appeal lifecycle forbids the
+	// requested move.
+	ErrInvalidAppealTransition = errors.New("application: moderation appeal transition is invalid")
+
+	// ErrInvalidAppealConfig indicates the appeal use cases could not be
+	// built from the given dependencies.
+	ErrInvalidAppealConfig = errors.New("application: moderation appeal configuration is invalid")
 )

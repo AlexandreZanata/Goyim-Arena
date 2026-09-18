@@ -20,6 +20,7 @@ type Querier interface {
 	// statement; the CHECK (balance >= 0) guards the invariant even if a caller
 	// gets the plan wrong.
 	ApplyWalletDebit(ctx context.Context, arg ApplyWalletDebitParams) (AppWalletAccount, error)
+	ClaimModerationAppeal(ctx context.Context, id pgtype.UUID) (ClaimModerationAppealRow, error)
 	ClaimModerationCase(ctx context.Context, arg ClaimModerationCaseParams) (ClaimModerationCaseRow, error)
 	// CloseArena performs the published→closed transition requested by the
 	// creator under the optimistic version check. Reopening does not exist in
@@ -122,6 +123,7 @@ type Querier interface {
 	// CHECK (balance_free >= 0) guards the invariant even here.
 	CreditFreeBalance(ctx context.Context, arg CreditFreeBalanceParams) (AppWalletAccount, error)
 	CreditPurchasedBalance(ctx context.Context, arg CreditPurchasedBalanceParams) (AppWalletAccount, error)
+	DecideModerationAppeal(ctx context.Context, arg DecideModerationAppealParams) (DecideModerationAppealRow, error)
 	DecideModerationCase(ctx context.Context, arg DecideModerationCaseParams) (DecideModerationCaseRow, error)
 	DeleteArenaDraft(ctx context.Context, arg DeleteArenaDraftParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
@@ -220,6 +222,13 @@ type Querier interface {
 	// GetLastUsernameChangeAt returns the most recent username audit instant for
 	// the account, or NULL when the account has no history yet.
 	GetLastUsernameChangeAt(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error)
+	// Appeal reads and lifecycle (P13-T06). Exactly one appeal contests one
+	// action: the UNIQUE constraint refuses the second contest, and the
+	// adapter maps the violation to the duplicate sentinel instead of
+	// surfacing storage detail.
+	GetModerationActionForAppeal(ctx context.Context, id pgtype.UUID) (GetModerationActionForAppealRow, error)
+	GetModerationAppealByAction(ctx context.Context, actionID pgtype.UUID) (GetModerationAppealByActionRow, error)
+	GetModerationAppealByID(ctx context.Context, id pgtype.UUID) (GetModerationAppealByIDRow, error)
 	// Review claim and decision queries (P13-T04). Claims serialize on the
 	// row: one conditional update moves open (or expired-lease) cases under
 	// the claimant with a fresh lease. Decisions record one immutable action
@@ -272,6 +281,7 @@ type Querier interface {
 	// provider identifier is the idempotency anchor and the commercial facts are
 	// immutable once written. Only the human resolution may be appended later.
 	InsertBillingRefundIfAbsent(ctx context.Context, arg InsertBillingRefundIfAbsentParams) (AppBillingRefund, error)
+	InsertModerationAppeal(ctx context.Context, arg InsertModerationAppealParams) (InsertModerationAppealRow, error)
 	InsertReconciliationFinding(ctx context.Context, arg InsertReconciliationFindingParams) (AppBillingReconciliationFinding, error)
 	// Webhook event queries (P12-T05). The provider's unique event ID is the
 	// idempotency anchor: a replay resolves the existing row and never creates a
@@ -425,6 +435,7 @@ type Querier interface {
 	// optimistic version check inside the publication transaction, so the Arena
 	// row and the consumed Arena Pass commit together (P08-T04).
 	PublishArenaDraft(ctx context.Context, arg PublishArenaDraftParams) (AppArena, error)
+	ReactivateAccountForAppeal(ctx context.Context, id pgtype.UUID) (ReactivateAccountForAppealRow, error)
 	// RecordCheckoutIntentIfAbsent inserts the commercial decision exactly once per
 	// provider session, so a replay of the same operation resolves the stored
 	// intent. The lifecycle CHECK is what keeps the recorded state honest: an open
@@ -439,6 +450,11 @@ type Querier interface {
 	// restricted Arena under the optimistic version check; removed is terminal.
 	RemoveArena(ctx context.Context, arg RemoveArenaParams) (AppArena, error)
 	RemoveArgumentForModeration(ctx context.Context, id pgtype.UUID) (RemoveArgumentForModerationRow, error)
+	// Reversal effects restoring sanctioned projections from the original
+	// action record (P13-T06). Each statement is conditional: zero affected
+	// rows aborts the whole outcome instead of recording a phantom restore.
+	// The original action row is never edited or deleted.
+	ReopenArenaForAppeal(ctx context.Context, id pgtype.UUID) (ReopenArenaForAppealRow, error)
 	// ResolveAuthorByUsername resolves a public username to the author identity
 	// used by the reputation projection (P11-T06). Resolution is read-only over
 	// the profiles projection and matches the canonical normalized username,
@@ -446,6 +462,8 @@ type Querier interface {
 	// crosses the port, only the resolved identity does. A username that owns no
 	// profile returns no rows, which the adapter reports as ErrProfileNotFound.
 	ResolveAuthorByUsername(ctx context.Context, username string) (ResolveAuthorByUsernameRow, error)
+	RestoreArgumentAttributions(ctx context.Context, arg RestoreArgumentAttributionsParams) (int64, error)
+	RestoreArgumentForAppeal(ctx context.Context, id pgtype.UUID) (RestoreArgumentForAppealRow, error)
 	// RestoreAttribution reverses one invalidation on the same retained row,
 	// recording the restore decision: the row moves back to valid and the
 	// decision record is replaced by the newest one, never erased.

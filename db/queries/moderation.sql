@@ -94,6 +94,83 @@ SET status = 'suspended',
 WHERE id = $1 AND status = 'active'
 RETURNING id, status;
 
+-- Appeal reads and lifecycle (P13-T06). Exactly one appeal contests one
+-- action: the UNIQUE constraint refuses the second contest, and the
+-- adapter maps the violation to the duplicate sentinel instead of
+-- surfacing storage detail.
+
+-- name: GetModerationActionForAppeal :one
+SELECT a.id, a.case_id, a.action_type, a.actor_id, a.rule_applied, a.created_at,
+    c.target_type, c.target_arena_id, c.target_argument_id, c.target_account_id,
+    COALESCE(ar.creator_id, ag.author_id, ac.id) AS target_owner_id
+FROM app.moderation_actions a
+JOIN app.moderation_cases c ON c.id = a.case_id
+LEFT JOIN app.arenas ar ON ar.id = c.target_arena_id
+LEFT JOIN app.arguments ag ON ag.id = c.target_argument_id
+LEFT JOIN app.accounts ac ON ac.id = c.target_account_id
+WHERE a.id = $1;
+
+-- name: GetModerationAppealByAction :one
+SELECT id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at
+FROM app.moderation_appeals
+WHERE action_id = $1;
+
+-- name: GetModerationAppealByID :one
+SELECT id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at
+FROM app.moderation_appeals
+WHERE id = $1;
+
+-- name: InsertModerationAppeal :one
+INSERT INTO app.moderation_appeals (action_id, appellant_id, context)
+VALUES ($1, $2, $3)
+RETURNING id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at;
+
+-- name: ClaimModerationAppeal :one
+UPDATE app.moderation_appeals
+SET status = 'under_review'
+WHERE id = $1 AND status = 'open'
+RETURNING id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at;
+
+-- name: DecideModerationAppeal :one
+UPDATE app.moderation_appeals
+SET status = $2, reviewer_id = $3, decision_reason = $4, decided_at = $5
+WHERE id = $1 AND status = 'under_review'
+RETURNING id, action_id, appellant_id, status, reviewer_id, decision_reason, created_at, decided_at;
+
+-- Reversal effects restoring sanctioned projections from the original
+-- action record (P13-T06). Each statement is conditional: zero affected
+-- rows aborts the whole outcome instead of recording a phantom restore.
+-- The original action row is never edited or deleted.
+
+-- name: ReopenArenaForAppeal :one
+UPDATE app.arenas
+SET status = 'published',
+    version = version + 1
+WHERE id = $1 AND status = 'closed'
+RETURNING id, status, version;
+
+-- name: RestoreArgumentForAppeal :one
+UPDATE app.arguments
+SET status = 'published',
+    updated_at = now()
+WHERE id = $1 AND status = 'removed'
+RETURNING id, status;
+
+-- name: RestoreArgumentAttributions :execrows
+UPDATE app.persuasion_attributions
+SET status = 'valid',
+    moderation_reason = $2,
+    moderated_by = $3,
+    moderated_at = now()
+WHERE argument_id = $1 AND status = 'invalid';
+
+-- name: ReactivateAccountForAppeal :one
+UPDATE app.accounts
+SET status = 'active',
+    updated_at = now()
+WHERE id = $1 AND status = 'suspended'
+RETURNING id, status;
+
 -- Review claim and decision queries (P13-T04). Claims serialize on the
 -- row: one conditional update moves open (or expired-lease) cases under
 -- the claimant with a fresh lease. Decisions record one immutable action

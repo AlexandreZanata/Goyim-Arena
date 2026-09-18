@@ -22,6 +22,7 @@ const (
 	CodeInvalidJustification ErrorCode = "MODERATION_INVALID_JUSTIFICATION"
 	CodeInvalidExpiry        ErrorCode = "MODERATION_INVALID_EXPIRY"
 	CodeTargetActionMismatch ErrorCode = "MODERATION_TARGET_ACTION_MISMATCH"
+	CodeInvalidOutcome       ErrorCode = "MODERATION_INVALID_OUTCOME"
 )
 
 // DomainError represents an invariant or rule failure in the moderation domain.
@@ -59,4 +60,5 @@ var (
 	ErrInvalidJustification = DomainError{Code: CodeInvalidJustification, Message: "decision justification is blank or too long"}
 	ErrInvalidExpiry        = DomainError{Code: CodeInvalidExpiry, Message: "sanction expiry is required only for time-boxed measures and must be future"}
 	ErrTargetActionMismatch = DomainError{Code: CodeTargetActionMismatch, Message: "moderation action cannot sanction this target type"}
+	ErrInvalidOutcome       = DomainError{Code: CodeInvalidOutcome, Message: "appeal outcome is outside the supported vocabulary"}
 )
