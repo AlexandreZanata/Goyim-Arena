@@ -59,6 +59,12 @@ const (
 	CodeInvalidIdempotencyKey       ErrorCode = "BILLING_INVALID_IDEMPOTENCY_KEY"
 	CodeIdempotencyKeyTooLong       ErrorCode = "BILLING_IDEMPOTENCY_KEY_TOO_LONG"
 	CodeInvalidCheckoutIntentStatus ErrorCode = "BILLING_INVALID_CHECKOUT_INTENT_STATUS"
+
+	// Webhook errors (P12-T05): the verified inbound event from the provider.
+	CodeEmptyWebhookEventID     ErrorCode = "BILLING_EMPTY_WEBHOOK_EVENT_ID"
+	CodeInvalidWebhookEventID   ErrorCode = "BILLING_INVALID_WEBHOOK_EVENT_ID"
+	CodeEmptyWebhookEventType   ErrorCode = "BILLING_EMPTY_WEBHOOK_EVENT_TYPE"
+	CodeInvalidWebhookEventType ErrorCode = "BILLING_INVALID_WEBHOOK_EVENT_TYPE"
 )
 
 // DomainError represents an invariant or rule failure in the billing domain.
@@ -127,4 +133,9 @@ var (
 	ErrInvalidIdempotencyKey       = DomainError{Code: CodeInvalidIdempotencyKey, Message: "idempotency key contains unsupported characters"}
 	ErrIdempotencyKeyTooLong       = DomainError{Code: CodeIdempotencyKeyTooLong, Message: "idempotency key exceeds the maximum allowed length"}
 	ErrInvalidCheckoutIntentStatus = DomainError{Code: CodeInvalidCheckoutIntentStatus, Message: "checkout intent status is outside the local vocabulary"}
+
+	ErrEmptyWebhookEventID     = DomainError{Code: CodeEmptyWebhookEventID, Message: "webhook event identifier cannot be empty"}
+	ErrInvalidWebhookEventID   = DomainError{Code: CodeInvalidWebhookEventID, Message: "webhook event identifier is malformed"}
+	ErrEmptyWebhookEventType   = DomainError{Code: CodeEmptyWebhookEventType, Message: "webhook event type cannot be empty"}
+	ErrInvalidWebhookEventType = DomainError{Code: CodeInvalidWebhookEventType, Message: "webhook event type is outside the provider vocabulary"}
 )

@@ -22,12 +22,14 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/billing/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/billing/domain"
 	platformpg "github.com/AlexandreZanata/Goyim-Arena/internal/platform/postgres"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
 )
 
 // Repository implements the billing application ports using PostgreSQL.
 type Repository struct {
 	pool    *pgxpool.Pool
 	queries *platformpg.Queries
+	clock   ports.Clock
 }
 
 const pgUniqueViolation = "23505"

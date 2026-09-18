@@ -216,6 +216,18 @@ type Querier interface {
 	GetWalletAccountForUpdate(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
 	GetWalletFreeCycleAnchor(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error)
 	GetWalletOperationByIdempotencyKey(ctx context.Context, idempotencyKey string) (AppWalletOperation, error)
+	// GetWebhookEventByEventID resolves an existing event by its provider
+	// identifier. The event must exist: a conflict without a stored event is an
+	// integrity problem.
+	GetWebhookEventByEventID(ctx context.Context, stripeEventID string) (AppStripeEvent, error)
+	// Webhook event queries (P12-T05). The provider's unique event ID is the
+	// idempotency anchor: a replay resolves the existing row and never creates a
+	// second one. The processing lifecycle is enforced by CHECK constraints and
+	// the transition table in the stripe_events_protect_processing trigger.
+	// InsertWebhookEventIfAbsent persists the verified inbound event exactly once
+	// per provider event ID. On conflict (the unique stripe_event_id), it returns
+	// no row, which tells the adapter to resolve the existing event.
+	InsertWebhookEventIfAbsent(ctx context.Context, arg InsertWebhookEventIfAbsentParams) (AppStripeEvent, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
 	InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error
 	// InvalidateAttribution moves a valid attribution to invalid, recording the
@@ -389,6 +401,19 @@ type Querier interface {
 	UpdateProfileTimezone(ctx context.Context, arg UpdateProfileTimezoneParams) (AppProfile, error)
 	UpdateProfileUsername(ctx context.Context, arg UpdateProfileUsernameParams) (AppProfile, error)
 	UpdateSessionLastSeen(ctx context.Context, id pgtype.UUID) error
+	// UpdateWebhookEventStatus transitions the event to the requested status. The
+	// CHECK constraint stripe_events_status_transition enforces legal transitions,
+	// so an illegal transition is a database error.
+	UpdateWebhookEventStatus(ctx context.Context, arg UpdateWebhookEventStatusParams) (AppStripeEvent, error)
+	// UpdateWebhookEventStatusFailed transitions the event to the failed state
+	// with a bounded error reason. The event may be retried later.
+	UpdateWebhookEventStatusFailed(ctx context.Context, arg UpdateWebhookEventStatusFailedParams) (AppStripeEvent, error)
+	// UpdateWebhookEventStatusIgnored transitions the event to the ignored
+	// terminal state for event types that are acknowledged but not handled.
+	UpdateWebhookEventStatusIgnored(ctx context.Context, arg UpdateWebhookEventStatusIgnoredParams) (AppStripeEvent, error)
+	// UpdateWebhookEventStatusProcessed transitions the event to the processed
+	// terminal state and records the processing completion time.
+	UpdateWebhookEventStatusProcessed(ctx context.Context, arg UpdateWebhookEventStatusProcessedParams) (AppStripeEvent, error)
 	UpsertCommunicationPreferences(ctx context.Context, arg UpsertCommunicationPreferencesParams) (AppCommunicationPreference, error)
 	// WithdrawArgument moves a published argument out of the display under the
 	// author scope, recording the withdrawal instant once. Zero rows mean the

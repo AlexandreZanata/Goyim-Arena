@@ -149,3 +149,72 @@ INSERT INTO app.checkout_intents (
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (stripe_checkout_session_id) DO NOTHING
 RETURNING id, account_id, market, product_id, catalog_version, currency, amount_minor, livemode, status, stripe_checkout_session_id, created_at;
+
+-- Webhook event queries (P12-T05). The provider's unique event ID is the
+-- idempotency anchor: a replay resolves the existing row and never creates a
+-- second one. The processing lifecycle is enforced by CHECK constraints and
+-- the transition table in the stripe_events_protect_processing trigger.
+
+-- InsertWebhookEventIfAbsent persists the verified inbound event exactly once
+-- per provider event ID. On conflict (the unique stripe_event_id), it returns
+-- no row, which tells the adapter to resolve the existing event.
+-- name: InsertWebhookEventIfAbsent :one
+INSERT INTO app.stripe_events (
+    stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (stripe_event_id) DO NOTHING
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at;
+
+-- GetWebhookEventByEventID resolves an existing event by its provider
+-- identifier. The event must exist: a conflict without a stored event is an
+-- integrity problem.
+-- name: GetWebhookEventByEventID :one
+SELECT id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at
+FROM app.stripe_events
+WHERE stripe_event_id = $1;
+
+-- UpdateWebhookEventStatus transitions the event to the requested status. The
+-- CHECK constraint stripe_events_status_transition enforces legal transitions,
+-- so an illegal transition is a database error.
+-- name: UpdateWebhookEventStatus :one
+UPDATE app.stripe_events
+SET status = $2, attempts = attempts + 1
+WHERE stripe_event_id = $1
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at;
+
+-- UpdateWebhookEventStatusProcessed transitions the event to the processed
+-- terminal state and records the processing completion time.
+-- name: UpdateWebhookEventStatusProcessed :one
+UPDATE app.stripe_events
+SET status = $2, processed_at = $3, last_error = NULL
+WHERE stripe_event_id = $1
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at;
+
+-- UpdateWebhookEventStatusFailed transitions the event to the failed state
+-- with a bounded error reason. The event may be retried later.
+-- name: UpdateWebhookEventStatusFailed :one
+UPDATE app.stripe_events
+SET status = $2, last_error = $3
+WHERE stripe_event_id = $1
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at;
+
+-- UpdateWebhookEventStatusIgnored transitions the event to the ignored
+-- terminal state for event types that are acknowledged but not handled.
+-- name: UpdateWebhookEventStatusIgnored :one
+UPDATE app.stripe_events
+SET status = $2, processed_at = $3, last_error = NULL
+WHERE stripe_event_id = $1
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at;

@@ -272,6 +272,92 @@ func (q *Queries) GetStripeCustomer(ctx context.Context, accountID pgtype.UUID) 
 	return i, err
 }
 
+const getWebhookEventByEventID = `-- name: GetWebhookEventByEventID :one
+SELECT id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at
+FROM app.stripe_events
+WHERE stripe_event_id = $1
+`
+
+// GetWebhookEventByEventID resolves an existing event by its provider
+// identifier. The event must exist: a conflict without a stored event is an
+// integrity problem.
+func (q *Queries) GetWebhookEventByEventID(ctx context.Context, stripeEventID string) (AppStripeEvent, error) {
+	row := q.db.QueryRow(ctx, getWebhookEventByEventID, stripeEventID)
+	var i AppStripeEvent
+	err := row.Scan(
+		&i.ID,
+		&i.StripeEventID,
+		&i.EventType,
+		&i.Livemode,
+		&i.StripeCreatedAt,
+		&i.PayloadSha256,
+		&i.PayloadBytes,
+		&i.Status,
+		&i.Attempts,
+		&i.LastError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+	)
+	return i, err
+}
+
+const insertWebhookEventIfAbsent = `-- name: InsertWebhookEventIfAbsent :one
+
+INSERT INTO app.stripe_events (
+    stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (stripe_event_id) DO NOTHING
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at
+`
+
+type InsertWebhookEventIfAbsentParams struct {
+	StripeEventID   string
+	EventType       string
+	Livemode        bool
+	StripeCreatedAt pgtype.Timestamptz
+	PayloadSha256   string
+	PayloadBytes    int32
+}
+
+// Webhook event queries (P12-T05). The provider's unique event ID is the
+// idempotency anchor: a replay resolves the existing row and never creates a
+// second one. The processing lifecycle is enforced by CHECK constraints and
+// the transition table in the stripe_events_protect_processing trigger.
+// InsertWebhookEventIfAbsent persists the verified inbound event exactly once
+// per provider event ID. On conflict (the unique stripe_event_id), it returns
+// no row, which tells the adapter to resolve the existing event.
+func (q *Queries) InsertWebhookEventIfAbsent(ctx context.Context, arg InsertWebhookEventIfAbsentParams) (AppStripeEvent, error) {
+	row := q.db.QueryRow(ctx, insertWebhookEventIfAbsent,
+		arg.StripeEventID,
+		arg.EventType,
+		arg.Livemode,
+		arg.StripeCreatedAt,
+		arg.PayloadSha256,
+		arg.PayloadBytes,
+	)
+	var i AppStripeEvent
+	err := row.Scan(
+		&i.ID,
+		&i.StripeEventID,
+		&i.EventType,
+		&i.Livemode,
+		&i.StripeCreatedAt,
+		&i.PayloadSha256,
+		&i.PayloadBytes,
+		&i.Status,
+		&i.Attempts,
+		&i.LastError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+	)
+	return i, err
+}
+
 const isAccountEligibleForPurchase = `-- name: IsAccountEligibleForPurchase :one
 
 SELECT (status = 'active' AND email_verified_at IS NOT NULL) AS eligible
@@ -637,6 +723,154 @@ func (q *Queries) RecordStripeCustomerIfAbsent(ctx context.Context, arg RecordSt
 		&i.StripeCustomerID,
 		&i.Livemode,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateWebhookEventStatus = `-- name: UpdateWebhookEventStatus :one
+UPDATE app.stripe_events
+SET status = $2, attempts = attempts + 1
+WHERE stripe_event_id = $1
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at
+`
+
+type UpdateWebhookEventStatusParams struct {
+	StripeEventID string
+	Status        string
+}
+
+// UpdateWebhookEventStatus transitions the event to the requested status. The
+// CHECK constraint stripe_events_status_transition enforces legal transitions,
+// so an illegal transition is a database error.
+func (q *Queries) UpdateWebhookEventStatus(ctx context.Context, arg UpdateWebhookEventStatusParams) (AppStripeEvent, error) {
+	row := q.db.QueryRow(ctx, updateWebhookEventStatus, arg.StripeEventID, arg.Status)
+	var i AppStripeEvent
+	err := row.Scan(
+		&i.ID,
+		&i.StripeEventID,
+		&i.EventType,
+		&i.Livemode,
+		&i.StripeCreatedAt,
+		&i.PayloadSha256,
+		&i.PayloadBytes,
+		&i.Status,
+		&i.Attempts,
+		&i.LastError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+	)
+	return i, err
+}
+
+const updateWebhookEventStatusFailed = `-- name: UpdateWebhookEventStatusFailed :one
+UPDATE app.stripe_events
+SET status = $2, last_error = $3
+WHERE stripe_event_id = $1
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at
+`
+
+type UpdateWebhookEventStatusFailedParams struct {
+	StripeEventID string
+	Status        string
+	LastError     pgtype.Text
+}
+
+// UpdateWebhookEventStatusFailed transitions the event to the failed state
+// with a bounded error reason. The event may be retried later.
+func (q *Queries) UpdateWebhookEventStatusFailed(ctx context.Context, arg UpdateWebhookEventStatusFailedParams) (AppStripeEvent, error) {
+	row := q.db.QueryRow(ctx, updateWebhookEventStatusFailed, arg.StripeEventID, arg.Status, arg.LastError)
+	var i AppStripeEvent
+	err := row.Scan(
+		&i.ID,
+		&i.StripeEventID,
+		&i.EventType,
+		&i.Livemode,
+		&i.StripeCreatedAt,
+		&i.PayloadSha256,
+		&i.PayloadBytes,
+		&i.Status,
+		&i.Attempts,
+		&i.LastError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+	)
+	return i, err
+}
+
+const updateWebhookEventStatusIgnored = `-- name: UpdateWebhookEventStatusIgnored :one
+UPDATE app.stripe_events
+SET status = $2, processed_at = $3, last_error = NULL
+WHERE stripe_event_id = $1
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at
+`
+
+type UpdateWebhookEventStatusIgnoredParams struct {
+	StripeEventID string
+	Status        string
+	ProcessedAt   pgtype.Timestamptz
+}
+
+// UpdateWebhookEventStatusIgnored transitions the event to the ignored
+// terminal state for event types that are acknowledged but not handled.
+func (q *Queries) UpdateWebhookEventStatusIgnored(ctx context.Context, arg UpdateWebhookEventStatusIgnoredParams) (AppStripeEvent, error) {
+	row := q.db.QueryRow(ctx, updateWebhookEventStatusIgnored, arg.StripeEventID, arg.Status, arg.ProcessedAt)
+	var i AppStripeEvent
+	err := row.Scan(
+		&i.ID,
+		&i.StripeEventID,
+		&i.EventType,
+		&i.Livemode,
+		&i.StripeCreatedAt,
+		&i.PayloadSha256,
+		&i.PayloadBytes,
+		&i.Status,
+		&i.Attempts,
+		&i.LastError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+	)
+	return i, err
+}
+
+const updateWebhookEventStatusProcessed = `-- name: UpdateWebhookEventStatusProcessed :one
+UPDATE app.stripe_events
+SET status = $2, processed_at = $3, last_error = NULL
+WHERE stripe_event_id = $1
+RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
+    payload_sha256, payload_bytes, status, attempts, last_error,
+    received_at, processed_at
+`
+
+type UpdateWebhookEventStatusProcessedParams struct {
+	StripeEventID string
+	Status        string
+	ProcessedAt   pgtype.Timestamptz
+}
+
+// UpdateWebhookEventStatusProcessed transitions the event to the processed
+// terminal state and records the processing completion time.
+func (q *Queries) UpdateWebhookEventStatusProcessed(ctx context.Context, arg UpdateWebhookEventStatusProcessedParams) (AppStripeEvent, error) {
+	row := q.db.QueryRow(ctx, updateWebhookEventStatusProcessed, arg.StripeEventID, arg.Status, arg.ProcessedAt)
+	var i AppStripeEvent
+	err := row.Scan(
+		&i.ID,
+		&i.StripeEventID,
+		&i.EventType,
+		&i.Livemode,
+		&i.StripeCreatedAt,
+		&i.PayloadSha256,
+		&i.PayloadBytes,
+		&i.Status,
+		&i.Attempts,
+		&i.LastError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
 	)
 	return i, err
 }

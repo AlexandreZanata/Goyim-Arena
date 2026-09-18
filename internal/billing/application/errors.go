@@ -68,6 +68,27 @@ func IsRetryablePaymentGatewayError(err error) bool {
 	return errors.Is(err, ErrPaymentGatewayUnavailable) || errors.Is(err, ErrPaymentGatewayTimeout)
 }
 
+// Webhook error vocabulary (P12-T05).
+//
+// The messages never carry the payload, the signature or any personal data:
+// a refusal says what rule was broken, never the secret or the body.
+var (
+	// ErrWebhookPayloadTooLarge indicates the raw body exceeds the hard
+	// limit. It is rejected before signature verification, so an attacker
+	// cannot exhaust memory or CPU with an oversized payload.
+	ErrWebhookPayloadTooLarge = errors.New("application: webhook payload exceeds the size limit")
+
+	// ErrWebhookSignatureInvalid indicates the payload signature or
+	// timestamp verification failed. The payload must be rejected with
+	// HTTP 400 and must never be persisted.
+	ErrWebhookSignatureInvalid = errors.New("application: webhook signature is invalid")
+
+	// ErrWebhookPayloadMalformed indicates the event body could not be
+	// parsed into the expected provider structure. It may be corrupted or
+	// from a different version of the provider contract.
+	ErrWebhookPayloadMalformed = errors.New("application: webhook payload is malformed")
+)
+
 // Checkout error vocabulary (P12-T04).
 //
 // The messages never carry the email, the account identifier, the provider
