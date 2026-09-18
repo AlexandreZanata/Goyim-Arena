@@ -1,0 +1,13 @@
+{
+  "transparency": {
+    "document": {
+      "page_title": "Transparency — Goyim Arena",
+      "heading": "Platform transparency",
+      "period": "Period: {start} – {end} ({timezone})",
+      "updated": "Updated at {at} · methodology v{version}",
+      "methodology": "Aggregated metrics per period; counts below 5 are suppressed to reduce reidentification.",
+      "metric": "Metric",
+      "value": "Value"
+    }
+  }
+}

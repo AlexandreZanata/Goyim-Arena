@@ -648,6 +648,128 @@
         }
       }
     },
+    "/api/v1/public/transparency": {
+      "get": {
+        "operationId": "getTransparencyMetrics",
+        "summary": "Versioned platform metrics",
+        "description": "Returns the suppressed per-period platform metrics with methodology version, UTC bounds, timezone label and derivation instant. Bodies carry integer counts only: no email, no Stripe identifier, no IP and no account-level position ever serializes. Served with Cache-Control: public, max-age=3600 and a strong ETag.",
+        "tags": ["transparency"],
+        "parameters": [
+          {
+            "name": "period_start",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive window start (RFC 3339); defaults with period_end to the trailing thirty days.",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "period_end",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive window end (RFC 3339).",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "required": false,
+            "description": "IANA timezone label echoed by the document; derivation stays in UTC.",
+            "schema": { "type": "string", "default": "UTC" }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Versioned metrics document.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Public cache policy (public, max-age=3600).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/TransparencyMetrics" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "400": { "$ref": "#/components/responses/Validation" }
+        }
+      }
+    },
+    "/transparency": {
+      "get": {
+        "operationId": "getTransparencyDocument",
+        "summary": "Public transparency document (HTML)",
+        "description": "Renders the localized public HTML transparency document with the same suppressed metrics as the JSON API: stable codes with integer counts, methodology note, period, timezone and derivation instant. Served with Cache-Control: public, max-age=3600 and a strong ETag.",
+        "tags": ["transparency"],
+        "parameters": [
+          {
+            "name": "period_start",
+            "in": "query",
+            "required": false,
+            "description": "Inclusive window start (RFC 3339); defaults with period_end to the trailing thirty days.",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "period_end",
+            "in": "query",
+            "required": false,
+            "description": "Exclusive window end (RFC 3339).",
+            "schema": { "type": "string", "format": "date-time" }
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "required": false,
+            "description": "IANA timezone label echoed by the document; derivation stays in UTC.",
+            "schema": { "type": "string", "default": "UTC" }
+          },
+          {
+            "name": "locale",
+            "in": "query",
+            "required": false,
+            "description": "Interface locale (pt-BR or en-US); unknown values fall back to the default without reflection.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "description": "Validator returned by a previous read; a match answers 304 without a body.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Public transparency document.",
+            "headers": {
+              "ETag": { "description": "Strong validator of the exact response document; revalidate with If-None-Match.", "schema": { "type": "string" } },
+              "Cache-Control": { "description": "Public cache policy (public, max-age=3600).", "schema": { "type": "string" } }
+            },
+            "content": {
+              "text/html": {
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "304": { "description": "Not modified: the If-None-Match validator matches the current document." },
+          "400": {
+            "description": "Incoherent window or unknown timezone. The error document is not cacheable.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Problem" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/me/arenas/drafts": {
       "post": {
         "operationId": "createArenaDraft",
@@ -1914,6 +2036,51 @@
         "required": ["portal_url"],
         "properties": {
           "portal_url": { "type": "string" }
+        }
+      },
+      "TransparencyMetrics": {
+        "type": "object",
+        "description": "Versioned per-period platform metrics. Integer counts only: no email, no Stripe identifier, no IP and no account-level position ever serializes.",
+        "required": ["methodology_version", "period_start", "period_end", "timezone", "updated_at", "metrics"],
+        "properties": {
+          "methodology_version": { "type": "integer", "minimum": 1 },
+          "period_start": { "type": "string", "format": "date-time" },
+          "period_end": { "type": "string", "format": "date-time" },
+          "timezone": { "type": "string" },
+          "updated_at": { "type": "string", "format": "date-time" },
+          "metrics": { "$ref": "#/components/schemas/TransparencyMetricCounts" }
+        }
+      },
+      "TransparencyMetricCounts": {
+        "type": "object",
+        "description": "Suppressed integer counts keyed by stable snake_case codes.",
+        "required": ["eligible_accounts", "arenas_published", "arenas_closed", "arenas_restricted", "arenas_removed", "arguments_published", "arguments_withdrawn", "position_changes", "attributions_valid", "attributions_invalidated", "influenced_authors", "ink_free_granted", "ink_free_expired", "ink_free_consumed", "ink_purchased_granted", "ink_purchased_consumed", "ink_refunded", "ink_admin_adjusted", "passes_purchase_granted", "passes_member_granted", "passes_consumed", "reports_filed", "actions_recorded", "appeals_filed", "appeals_reversed"],
+        "properties": {
+          "eligible_accounts": { "type": "integer", "minimum": 0 },
+          "arenas_published": { "type": "integer", "minimum": 0 },
+          "arenas_closed": { "type": "integer", "minimum": 0 },
+          "arenas_restricted": { "type": "integer", "minimum": 0 },
+          "arenas_removed": { "type": "integer", "minimum": 0 },
+          "arguments_published": { "type": "integer", "minimum": 0 },
+          "arguments_withdrawn": { "type": "integer", "minimum": 0 },
+          "position_changes": { "type": "integer", "minimum": 0 },
+          "attributions_valid": { "type": "integer", "minimum": 0 },
+          "attributions_invalidated": { "type": "integer", "minimum": 0 },
+          "influenced_authors": { "type": "integer", "minimum": 0 },
+          "ink_free_granted": { "type": "integer", "minimum": 0 },
+          "ink_free_expired": { "type": "integer", "minimum": 0 },
+          "ink_free_consumed": { "type": "integer", "minimum": 0 },
+          "ink_purchased_granted": { "type": "integer", "minimum": 0 },
+          "ink_purchased_consumed": { "type": "integer", "minimum": 0 },
+          "ink_refunded": { "type": "integer", "minimum": 0 },
+          "ink_admin_adjusted": { "type": "integer", "minimum": 0 },
+          "passes_purchase_granted": { "type": "integer", "minimum": 0 },
+          "passes_member_granted": { "type": "integer", "minimum": 0 },
+          "passes_consumed": { "type": "integer", "minimum": 0 },
+          "reports_filed": { "type": "integer", "minimum": 0 },
+          "actions_recorded": { "type": "integer", "minimum": 0 },
+          "appeals_filed": { "type": "integer", "minimum": 0 },
+          "appeals_reversed": { "type": "integer", "minimum": 0 }
         }
       },
       "ModerationReportRequest": {

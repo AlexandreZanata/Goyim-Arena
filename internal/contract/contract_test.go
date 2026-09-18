@@ -20,6 +20,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/positions/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/profiles/adapters/http"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/transparency/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/adapters/http"
 )
 
@@ -107,6 +108,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 			continue
 		}
 		if route.Path == "/d/{slug}" {
+			continue
+		}
+		if route.Path == "/api/v1/public/transparency" || route.Path == "/transparency" {
 			continue
 		}
 		if strings.HasPrefix(route.Path, "/api/v1/me/arguments") || strings.HasPrefix(route.Path, "/api/v1/arguments") {
@@ -1008,6 +1012,69 @@ func TestContractModerationAPIStaysPrivate(t *testing.T) {
 		}
 		if strings.Contains(operation, "public, max-age") {
 			t.Errorf("%s must never be publicly cacheable", path)
+		}
+	}
+}
+
+func TestContractTransparencyStaysPublicAndPrivate(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	metrics := propertiesOf(t, document, "TransparencyMetricCounts")
+	wantCounts := []string{
+		"eligible_accounts",
+		"arenas_published", "arenas_closed", "arenas_restricted", "arenas_removed",
+		"arguments_published", "arguments_withdrawn",
+		"position_changes",
+		"attributions_valid", "attributions_invalidated", "influenced_authors",
+		"ink_free_granted", "ink_free_expired", "ink_free_consumed",
+		"ink_purchased_granted", "ink_purchased_consumed", "ink_refunded", "ink_admin_adjusted",
+		"passes_purchase_granted", "passes_member_granted", "passes_consumed",
+		"reports_filed", "actions_recorded", "appeals_filed", "appeals_reversed",
+	}
+	if len(metrics) != len(wantCounts) {
+		t.Fatalf("TransparencyMetricCounts declares %d properties, want exactly %d", len(metrics), len(wantCounts))
+	}
+	for _, property := range wantCounts {
+		if _, ok := metrics[property]; !ok {
+			t.Errorf("TransparencyMetricCounts is missing %q", property)
+		}
+	}
+	for _, name := range []string{"TransparencyMetrics", "TransparencyMetricCounts"} {
+		for property := range propertiesOf(t, document, name) {
+			lowered := strings.ToLower(property)
+			// Aggregate family nouns (accounts, positions, authors) name
+			// counts, never identities: the forbidden set targets
+			// identifiers, secrets and per-account markers.
+			for _, marker := range []string{"email", "stripe", "cus_", "ip", "attributor", "token", "password", "session"} {
+				if strings.Contains(lowered, marker) {
+					t.Errorf("SECURITY VIOLATION: %s declares forbidden property %q", name, property)
+				}
+			}
+		}
+	}
+
+	for path, method := range map[string]string{
+		"/api/v1/public/transparency": "get",
+		"/transparency":               "get",
+	} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		operation := string(operations[method])
+		if strings.Contains(operation, `"SessionCookie"`) {
+			t.Errorf("%s must stay public", path)
+		}
+		if !strings.Contains(operation, "public, max-age=3600") {
+			t.Errorf("%s must document the public cache policy", path)
+		}
+		if !strings.Contains(operation, `"ETag"`) || !strings.Contains(operation, `"304"`) {
+			t.Errorf("%s must document ETag revalidation", path)
+		}
+		if strings.Contains(operation, "no-store") {
+			t.Errorf("%s must be cacheable, never no-store", path)
 		}
 	}
 }

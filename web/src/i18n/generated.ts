@@ -29,6 +29,15 @@ export const messageKeys = {
     "errors.validation.detail",
     "errors.validation.title",
   ] as const,
+  transparency: [
+    "transparency.document.heading",
+    "transparency.document.methodology",
+    "transparency.document.metric",
+    "transparency.document.page_title",
+    "transparency.document.period",
+    "transparency.document.updated",
+    "transparency.document.value",
+  ] as const,
 } as const;
 
 /** Every message key across namespaces. */
@@ -55,6 +64,13 @@ export type MessageKey =
   | "errors.unauthorized.title"
   | "errors.validation.detail"
   | "errors.validation.title"
+  | "transparency.document.heading"
+  | "transparency.document.methodology"
+  | "transparency.document.metric"
+  | "transparency.document.page_title"
+  | "transparency.document.period"
+  | "transparency.document.updated"
+  | "transparency.document.value"
 ;
 
 /** Named placeholders per message key. */
@@ -81,6 +97,13 @@ export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = 
   "errors.unauthorized.title": [],
   "errors.validation.detail": [],
   "errors.validation.title": [],
+  "transparency.document.heading": [],
+  "transparency.document.methodology": [],
+  "transparency.document.metric": [],
+  "transparency.document.page_title": [],
+  "transparency.document.period": ["end", "start", "timezone"],
+  "transparency.document.updated": ["at", "version"],
+  "transparency.document.value": [],
 });
 
 /** Localized messages per locale per key. */
@@ -108,6 +131,13 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "errors.unauthorized.title": "Authentication is required",
     "errors.validation.detail": "Check the submitted data and try again.",
     "errors.validation.title": "The request is invalid",
+    "transparency.document.heading": "Platform transparency",
+    "transparency.document.methodology": "Aggregated metrics per period; counts below 5 are suppressed to reduce reidentification.",
+    "transparency.document.metric": "Metric",
+    "transparency.document.page_title": "Transparency — Goyim Arena",
+    "transparency.document.period": "Period: {start} – {end} ({timezone})",
+    "transparency.document.updated": "Updated at {at} · methodology v{version}",
+    "transparency.document.value": "Value",
   }),
   "pt-BR": Object.freeze({
     "arenas.document.gone.detail": "Esta Arena foi removida pela moderação e não está mais disponível.",
@@ -132,5 +162,12 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "errors.unauthorized.title": "Autenticação é necessária",
     "errors.validation.detail": "Verifique os dados enviados e tente novamente.",
     "errors.validation.title": "A requisição é inválida",
+    "transparency.document.heading": "Transparência da plataforma",
+    "transparency.document.methodology": "Métricas agregadas por período; contagens abaixo de 5 são omitidas para reduzir reidentificação.",
+    "transparency.document.metric": "Métrica",
+    "transparency.document.page_title": "Transparência — Goyim Arena",
+    "transparency.document.period": "Período: {start} – {end} ({timezone})",
+    "transparency.document.updated": "Atualizado em {at} · metodologia v{version}",
+    "transparency.document.value": "Valor",
   }),
 });
