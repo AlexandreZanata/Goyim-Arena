@@ -44,6 +44,9 @@ type Querier interface {
 	// target left the sanctionable state concurrently, and the adapter rolls
 	// the whole decision back instead of recording a phantom sanction.
 	CloseArenaForModeration(ctx context.Context, id pgtype.UUID) (CloseArenaForModerationRow, error)
+	// A lease holder finishes its job. A stale holder (lease already recovered
+	// and re-leased) matches nothing and cannot overwrite the new outcome.
+	CompleteJob(ctx context.Context, arg CompleteJobParams) (AppJob, error)
 	// ConfirmInitialPosition inserts the initial projection of one account in
 	// one Arena. The primary key (arena_id, account_id) resolves concurrent
 	// confirmations: the loser inserts nothing and re-reads the winner (P09-T03).
@@ -65,6 +68,7 @@ type Querier interface {
 	// review invalidation) stay out of the official totals. The result carries
 	// counts only — account identifiers never leave the database (P09-T05).
 	CountEligiblePositionsByArena(ctx context.Context, arenaID pgtype.UUID) (CountEligiblePositionsByArenaRow, error)
+	CountJobsByState(ctx context.Context) ([]CountJobsByStateRow, error)
 	CountRecentModerationReportsByReporter(ctx context.Context, arg CountRecentModerationReportsByReporterParams) (int64, error)
 	// CountRetainedAuditEvents counts the administrative trail kept as
 	// evidence. The trail is append-only for every role, so the retention
@@ -197,6 +201,11 @@ type Querier interface {
 	// token of the account.
 	DeleteDeletedAccountVerificationTokens(ctx context.Context, accountID pgtype.UUID) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	// Durable job queue (P15-T01). Enqueue is idempotent by caller-chosen key;
+	// claim is a single statement that locks one due row with SKIP LOCKED, so
+	// many workers never claim the same job; complete and fail are lease-guarded;
+	// release recovers leases whose holder died without reporting back.
+	EnqueueJob(ctx context.Context, arg EnqueueJobParams) (AppJob, error)
 	// EnsureWalletAccount materializes the balance projection row for an
 	// account; a pre-existing row is left untouched, including its balances.
 	EnsureWalletAccount(ctx context.Context, accountID pgtype.UUID) error
@@ -211,6 +220,10 @@ type Querier interface {
 	// or revive a fresh one; the partial unique index only covers active
 	// records. Expiring is idempotent: repeated runs match nothing.
 	ExpirePersonalExports(ctx context.Context, arg ExpirePersonalExportsParams) (int64, error)
+	// Record a redacted failure. The attempt was consumed at lease time, so the
+	// budget check here decides between requeueing at retry_at and the terminal
+	// dead state: a poison job leaves the queue instead of blocking it.
+	FailJob(ctx context.Context, arg FailJobParams) (AppJob, error)
 	FinishReconciliationRun(ctx context.Context, arg FinishReconciliationRunParams) (AppBillingReconciliationRun, error)
 	GetAccountByEmail(ctx context.Context, lower string) (AppAccount, error)
 	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
@@ -318,6 +331,8 @@ type Querier interface {
 	// Health metadata and connectivity queries for the PostgreSQL platform adapter.
 	// GetHealthMetadata retrieves the latest applied migration metadata from app.schema_metadata.
 	GetHealthMetadata(ctx context.Context) (GetHealthMetadataRow, error)
+	GetJob(ctx context.Context, id pgtype.UUID) (AppJob, error)
+	GetJobByIdempotencyKey(ctx context.Context, idempotencyKey string) (AppJob, error)
 	// GetLastUsernameChangeAt returns the most recent username audit instant for
 	// the account, or NULL when the account has no history yet.
 	GetLastUsernameChangeAt(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error)
@@ -448,6 +463,10 @@ type Querier interface {
 	// identifier can never be mistaken for a legitimate buyer. A missing row means
 	// the account does not exist at all.
 	IsAccountEligibleForPurchase(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
+	// Claim exactly one job that is either queued and due or leased and expired.
+	// FOR UPDATE SKIP LOCKED lets concurrent workers take different rows without
+	// queueing behind each other and without ever taking the same row twice.
+	LeaseJob(ctx context.Context, arg LeaseJobParams) (AppJob, error)
 	// Data retention statements (P14-T07, docs/PRIVACY.md §1/§5,
 	// REQ-PRIV-01). One schedule per governed class decides the action; these
 	// statements execute it and count what happened.
@@ -691,6 +710,9 @@ type Querier interface {
 	// resolves the stored mapping, so the account is never charged through two
 	// different provider customers.
 	RecordStripeCustomerIfAbsent(ctx context.Context, arg RecordStripeCustomerIfAbsentParams) (RecordStripeCustomerIfAbsentRow, error)
+	// Recovery sweep: return every job whose lease expired to the queue. The
+	// count tells the scheduler how much work was reclaimed.
+	ReleaseExpiredLeases(ctx context.Context, now pgtype.Timestamptz) (int64, error)
 	// RemoveArena applies the moderation removal to a published, closed or
 	// restricted Arena under the optimistic version check; removed is terminal.
 	RemoveArena(ctx context.Context, arg RemoveArenaParams) (AppArena, error)
