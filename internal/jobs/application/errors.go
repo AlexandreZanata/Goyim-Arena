@@ -53,6 +53,11 @@ var (
 	// ErrUnknownHandler indicates no handler exists for the workload at all.
 	ErrUnknownHandler = errors.New("application: no handler for job type")
 
+	// ErrInvalidSchedule indicates a maintenance schedule is incoherent: an
+	// unknown workload, a missing payload version, an unknown cadence or a
+	// recovery window outside its bounds.
+	ErrInvalidSchedule = errors.New("application: maintenance schedule is invalid")
+
 	// ErrUnsupportedHandlerVersion indicates the workload has handlers but not
 	// for the payload version carried by the job: the deployment must be rolled
 	// forward instead of guessing what the payload means.
