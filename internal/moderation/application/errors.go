@@ -24,4 +24,17 @@ var (
 	// ErrInvalidAuthorizerConfig indicates the authorizer could not be built
 	// from the given dependencies.
 	ErrInvalidAuthorizerConfig = errors.New("application: moderation authorizer configuration is invalid")
+
+	// ErrTargetNotFound indicates the contested target does not exist. It
+	// is distinct from a removed target so a forged identifier is never
+	// treated as moderated content.
+	ErrTargetNotFound = errors.New("application: report target was not found")
+
+	// ErrTargetRemoved indicates the contested target is already gone
+	// (removed or withdrawn). There is nothing left to moderate.
+	ErrTargetRemoved = errors.New("application: report target is already removed")
+
+	// ErrInvalidReportConfig indicates the report use case could not be
+	// built from the given dependencies.
+	ErrInvalidReportConfig = errors.New("application: moderation report configuration is invalid")
 )

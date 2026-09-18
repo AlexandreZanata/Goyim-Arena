@@ -14,6 +14,10 @@ const (
 	CodeStepUpRequired     ErrorCode = "MODERATION_STEP_UP_REQUIRED"
 	CodeRoleRevoked        ErrorCode = "MODERATION_ROLE_REVOKED"
 	CodeInvalidSessionAge  ErrorCode = "MODERATION_INVALID_SESSION_AGE"
+	CodeInvalidTargetType  ErrorCode = "MODERATION_INVALID_TARGET_TYPE"
+	CodeInvalidReason      ErrorCode = "MODERATION_INVALID_REASON"
+	CodeInvalidContext     ErrorCode = "MODERATION_INVALID_CONTEXT"
+	CodeEmptyTargetID      ErrorCode = "MODERATION_EMPTY_TARGET_ID"
 )
 
 // DomainError represents an invariant or rule failure in the moderation domain.
@@ -43,4 +47,8 @@ var (
 	ErrStepUpRequired     = DomainError{Code: CodeStepUpRequired, Message: "sensitive action requires recent authentication"}
 	ErrRoleRevoked        = DomainError{Code: CodeRoleRevoked, Message: "administrative assignment is revoked"}
 	ErrInvalidSessionAge  = DomainError{Code: CodeInvalidSessionAge, Message: "session age is incoherent"}
+	ErrInvalidTargetType  = DomainError{Code: CodeInvalidTargetType, Message: "report target type is unrecognized"}
+	ErrInvalidReason      = DomainError{Code: CodeInvalidReason, Message: "report reason is unrecognized"}
+	ErrInvalidContext     = DomainError{Code: CodeInvalidContext, Message: "report context is too long or blank"}
+	ErrEmptyTargetID      = DomainError{Code: CodeEmptyTargetID, Message: "report target identifier cannot be empty"}
 )

@@ -40,6 +40,7 @@ type Querier interface {
 	// review invalidation) stay out of the official totals. The result carries
 	// counts only — account identifiers never leave the database (P09-T05).
 	CountEligiblePositionsByArena(ctx context.Context, arenaID pgtype.UUID) (CountEligiblePositionsByArenaRow, error)
+	CountRecentModerationReportsByReporter(ctx context.Context, arg CountRecentModerationReportsByReporterParams) (int64, error)
 	// Identity and authentication queries for the PostgreSQL platform adapter.
 	CreateAccount(ctx context.Context, arg CreateAccountParams) (AppAccount, error)
 	// Arena draft queries for the PostgreSQL platform adapter.
@@ -71,6 +72,12 @@ type Querier interface {
 	CreateAttribution(ctx context.Context, arg CreateAttributionParams) (pgtype.UUID, error)
 	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
+	// Structured report queries for the PostgreSQL platform adapter (P13-T03).
+	//
+	// Reports are restricted evidence: inserts carry reporter, target, reason
+	// and bounded context; reads serve deduplication and the rate signal only.
+	// No query mutates a target: volume never removes content automatically.
+	CreateModerationReport(ctx context.Context, arg CreateModerationReportParams) (AppModerationReport, error)
 	CreatePasswordCredential(ctx context.Context, arg CreatePasswordCredentialParams) error
 	CreatePasswordResetToken(ctx context.Context, arg CreatePasswordResetTokenParams) (AppPasswordResetToken, error)
 	// CreatePositionChange appends one change to the immutable history chain.
@@ -118,6 +125,7 @@ type Querier interface {
 	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
 	// Customer correlation lookup (P12-T08).
 	GetAccountByStripeCustomerID(ctx context.Context, stripeCustomerID string) (GetAccountByStripeCustomerIDRow, error)
+	GetAccountModerationTarget(ctx context.Context, id pgtype.UUID) (GetAccountModerationTargetRow, error)
 	// GetAccountProfile retrieves account profile data without ever reading or exposing password credentials.
 	GetAccountProfile(ctx context.Context, id pgtype.UUID) (AppAccount, error)
 	GetActiveEmailVerificationToken(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
@@ -132,6 +140,11 @@ type Querier interface {
 	GetAdminRoleByAccount(ctx context.Context, accountID pgtype.UUID) (AppAdminRole, error)
 	GetArenaByID(ctx context.Context, id pgtype.UUID) (AppArena, error)
 	GetArenaForCreator(ctx context.Context, arg GetArenaForCreatorParams) (AppArena, error)
+	// Target resolution for report filing (P13-T03). Each read returns the
+	// owner and the lifecycle needed to distinguish unknown targets from
+	// removed ones. Drafts stay reportable (self-report path); removed and
+	// withdrawn targets deny.
+	GetArenaModerationTarget(ctx context.Context, id pgtype.UUID) (GetArenaModerationTargetRow, error)
 	GetArenaPassConsumptionByArena(ctx context.Context, arenaID pgtype.UUID) (AppArenaPassConsumption, error)
 	GetArenaPassLot(ctx context.Context, id pgtype.UUID) (AppArenaPassLot, error)
 	GetArenaPassLotByGrant(ctx context.Context, arg GetArenaPassLotByGrantParams) (AppArenaPassLot, error)
@@ -165,6 +178,7 @@ type Querier interface {
 	// GetArgumentForAuthor returns one argument scoped to its author. A foreign
 	// argument is deliberately indistinguishable from a missing one (P10-T06).
 	GetArgumentForAuthor(ctx context.Context, arg GetArgumentForAuthorParams) (GetArgumentForAuthorRow, error)
+	GetArgumentModerationTarget(ctx context.Context, id pgtype.UUID) (GetArgumentModerationTargetRow, error)
 	// GetAttributionForModeration loads one attribution with its current
 	// validity and its latest moderation decision and locks it FOR UPDATE, so
 	// concurrent decisions on the same row serialize instead of overwriting
@@ -190,6 +204,7 @@ type Querier interface {
 	// the append-only ledger: the source of truth for the cached projection
 	// (P06-T05, REQ-WAL-01).
 	GetDerivedWalletBalance(ctx context.Context, accountID pgtype.UUID) (GetDerivedWalletBalanceRow, error)
+	GetDuplicateModerationReport(ctx context.Context, arg GetDuplicateModerationReportParams) (AppModerationReport, error)
 	GetEmailVerificationTokenByHash(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
 	// Health metadata and connectivity queries for the PostgreSQL platform adapter.
 	// GetHealthMetadata retrieves the latest applied migration metadata from app.schema_metadata.
