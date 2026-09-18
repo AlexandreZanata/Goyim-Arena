@@ -271,6 +271,13 @@ type Querier interface {
 	// The subscription mirror persists the provider state and anchors per-period
 	// Member entitlement grants (30,000 INK and 1 expiring Arena Pass).
 	GetSubscriptionByStripeID(ctx context.Context, stripeSubscriptionID string) (AppSubscription, error)
+	// Privacy-safe platform metrics derived per period (P14-T02,
+	// docs/TRANSPARENCY.md §2). Every column is an integer count rebuilt from
+	// source rows: no email, no Stripe identifier, no IP and no account-level
+	// position is ever selected. Lifecycle states (arena statuses) are current
+	// snapshots; everything else counts rows created inside the half-open
+	// window [$1, $2). Amounts sum exact bigint ledger deltas, never floats.
+	GetTransparencyMetrics(ctx context.Context, arg GetTransparencyMetricsParams) (GetTransparencyMetricsRow, error)
 	GetWalletAccount(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
 	// GetWalletAccountForUpdate locks the balance projection row of an account
 	// for the duration of the transaction, serializing concurrent debits so no

@@ -1,0 +1,71 @@
+-- Privacy-safe platform metrics derived per period (P14-T02,
+-- docs/TRANSPARENCY.md §2). Every column is an integer count rebuilt from
+-- source rows: no email, no Stripe identifier, no IP and no account-level
+-- position is ever selected. Lifecycle states (arena statuses) are current
+-- snapshots; everything else counts rows created inside the half-open
+-- window [$1, $2). Amounts sum exact bigint ledger deltas, never floats.
+
+-- name: GetTransparencyMetrics :one
+SELECT
+    (SELECT count(*)::bigint FROM app.accounts AS accounts
+        WHERE accounts.status = 'active' AND accounts.email_verified_at IS NOT NULL)::bigint AS eligible_accounts,
+    (SELECT count(*)::bigint FROM app.arenas AS arenas
+        WHERE arenas.published_at >= $1 AND published_at < $2)::bigint AS arenas_published,
+    (SELECT count(*)::bigint FROM app.arenas AS arenas WHERE arenas.status = 'closed')::bigint AS arenas_closed,
+    (SELECT count(*)::bigint FROM app.arenas AS arenas WHERE arenas.status = 'restricted')::bigint AS arenas_restricted,
+    (SELECT count(*)::bigint FROM app.arenas AS arenas WHERE arenas.status = 'removed')::bigint AS arenas_removed,
+    (SELECT count(*)::bigint FROM app.arguments AS arguments
+        WHERE arguments.created_at >= $1 AND created_at < $2 AND arguments.status = 'published')::bigint AS arguments_published,
+    (SELECT count(*)::bigint FROM app.arguments AS arguments
+        WHERE arguments.withdrawn_at >= $1 AND withdrawn_at < $2)::bigint AS arguments_withdrawn,
+    (SELECT count(*)::bigint FROM app.position_changes AS changes
+        WHERE changes.changed_at >= $1 AND changed_at < $2)::bigint AS position_changes,
+    (SELECT count(*)::bigint FROM app.persuasion_attributions AS attributions
+        WHERE attributions.created_at >= $1 AND created_at < $2 AND attributions.status = 'valid')::bigint AS attributions_valid,
+    (SELECT count(*)::bigint FROM app.persuasion_attributions AS attributions
+        WHERE attributions.invalidated_at >= $1 AND invalidated_at < $2)::bigint AS attributions_invalidated,
+    (SELECT count(DISTINCT a.author_id)::bigint FROM app.arguments a
+        JOIN app.persuasion_attributions t ON t.argument_id = a.id
+        WHERE t.status = 'valid' AND t.created_at >= $1 AND t.created_at < $2)::bigint AS influenced_authors,
+    (SELECT COALESCE(sum(t.amount), 0)::bigint FROM app.wallet_transactions t
+        JOIN app.wallet_operations o ON o.id = t.operation_id
+        WHERE o.operation_type = 'credit_free' AND t.bucket = 'FREE_INK'
+          AND t.created_at >= $1 AND t.created_at < $2)::bigint AS ink_free_granted,
+    (SELECT COALESCE(sum(-t.amount), 0)::bigint FROM app.wallet_transactions t
+        JOIN app.wallet_operations o ON o.id = t.operation_id
+        WHERE o.operation_type = 'expire_free' AND t.bucket = 'FREE_INK'
+          AND t.created_at >= $1 AND t.created_at < $2)::bigint AS ink_free_expired,
+    (SELECT COALESCE(sum(-t.amount), 0)::bigint FROM app.wallet_transactions t
+        JOIN app.wallet_operations o ON o.id = t.operation_id
+        WHERE o.operation_type = 'debit_argument' AND t.bucket = 'FREE_INK'
+          AND t.created_at >= $1 AND t.created_at < $2)::bigint AS ink_free_consumed,
+    (SELECT COALESCE(sum(t.amount), 0)::bigint FROM app.wallet_transactions t
+        JOIN app.wallet_operations o ON o.id = t.operation_id
+        WHERE o.operation_type = 'credit_purchase' AND t.bucket = 'PURCHASED_INK'
+          AND t.created_at >= $1 AND t.created_at < $2)::bigint AS ink_purchased_granted,
+    (SELECT COALESCE(sum(-t.amount), 0)::bigint FROM app.wallet_transactions t
+        JOIN app.wallet_operations o ON o.id = t.operation_id
+        WHERE o.operation_type = 'debit_argument' AND t.bucket = 'PURCHASED_INK'
+          AND t.created_at >= $1 AND t.created_at < $2)::bigint AS ink_purchased_consumed,
+    (SELECT COALESCE(sum(-t.amount), 0)::bigint FROM app.wallet_transactions t
+        JOIN app.wallet_operations o ON o.id = t.operation_id
+        WHERE o.operation_type = 'debit_refund' AND t.bucket = 'PURCHASED_INK'
+          AND t.created_at >= $1 AND t.created_at < $2)::bigint AS ink_refunded,
+    (SELECT COALESCE(sum(abs(t.amount)), 0)::bigint FROM app.wallet_transactions t
+        JOIN app.wallet_operations o ON o.id = t.operation_id
+        WHERE o.operation_type IN ('credit_admin', 'debit_admin')
+          AND t.created_at >= $1 AND t.created_at < $2)::bigint AS ink_admin_adjusted,
+    (SELECT COALESCE(sum(quantity), 0)::bigint FROM app.arena_pass_lots AS lots
+        WHERE lots.origin = 'PURCHASE' AND lots.created_at >= $1 AND lots.created_at < $2)::bigint AS passes_purchase_granted,
+    (SELECT COALESCE(sum(quantity), 0)::bigint FROM app.arena_pass_lots AS lots
+        WHERE lots.origin = 'MEMBER' AND lots.created_at >= $1 AND lots.created_at < $2)::bigint AS passes_member_granted,
+    (SELECT count(*)::bigint FROM app.arena_pass_consumptions AS consumptions
+        WHERE consumptions.consumed_at >= $1 AND consumed_at < $2)::bigint AS passes_consumed,
+    (SELECT count(*)::bigint FROM app.moderation_reports AS reports
+        WHERE reports.created_at >= $1 AND created_at < $2)::bigint AS reports_filed,
+    (SELECT count(*)::bigint FROM app.moderation_actions AS actions
+        WHERE actions.created_at >= $1 AND created_at < $2)::bigint AS actions_recorded,
+    (SELECT count(*)::bigint FROM app.moderation_appeals AS appeals
+        WHERE appeals.created_at >= $1 AND created_at < $2)::bigint AS appeals_filed,
+    (SELECT count(*)::bigint FROM app.moderation_appeals AS appeals
+        WHERE appeals.decided_at >= $1 AND decided_at < $2 AND appeals.status = 'reversed')::bigint AS appeals_reversed;
