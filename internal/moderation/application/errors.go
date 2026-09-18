@@ -37,4 +37,25 @@ var (
 	// ErrInvalidReportConfig indicates the report use case could not be
 	// built from the given dependencies.
 	ErrInvalidReportConfig = errors.New("application: moderation report configuration is invalid")
+
+	// ErrCaseNotFound indicates no case carries the identifier. It is
+	// distinct from a wrong-state case so a forged identifier is never
+	// treated as a triage failure.
+	ErrCaseNotFound = errors.New("application: moderation case was not found")
+
+	// ErrCaseAlreadyClaimed indicates a live lease already owns the review.
+	// The caller must wait for expiry or route elsewhere, never steal.
+	ErrCaseAlreadyClaimed = errors.New("application: moderation case is already claimed under a live lease")
+
+	// ErrLeaseExpired indicates the claimant's lease lapsed before the
+	// decision was recorded. Reclaim first, then decide.
+	ErrLeaseExpired = errors.New("application: moderation claim lease expired")
+
+	// ErrInvalidCaseTransition indicates the case lifecycle forbids the
+	// requested move (for example deciding an open case twice).
+	ErrInvalidCaseTransition = errors.New("application: moderation case transition is invalid")
+
+	// ErrInvalidDecisionConfig indicates the decision use cases could not
+	// be built from the given dependencies.
+	ErrInvalidDecisionConfig = errors.New("application: moderation decision configuration is invalid")
 )

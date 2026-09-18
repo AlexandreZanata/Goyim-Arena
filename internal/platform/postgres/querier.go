@@ -20,6 +20,7 @@ type Querier interface {
 	// statement; the CHECK (balance >= 0) guards the invariant even if a caller
 	// gets the plan wrong.
 	ApplyWalletDebit(ctx context.Context, arg ApplyWalletDebitParams) (AppWalletAccount, error)
+	ClaimModerationCase(ctx context.Context, arg ClaimModerationCaseParams) (ClaimModerationCaseRow, error)
 	// CloseArena performs the published→closed transition requested by the
 	// creator under the optimistic version check. Reopening does not exist in
 	// the MVP (P08-T05).
@@ -72,6 +73,7 @@ type Querier interface {
 	CreateAttribution(ctx context.Context, arg CreateAttributionParams) (pgtype.UUID, error)
 	CreateCommunicationPreferenceHistoryEntry(ctx context.Context, arg CreateCommunicationPreferenceHistoryEntryParams) error
 	CreateEmailVerificationToken(ctx context.Context, arg CreateEmailVerificationTokenParams) (AppEmailVerificationToken, error)
+	CreateModerationAction(ctx context.Context, arg CreateModerationActionParams) (AppModerationAction, error)
 	// Structured report queries for the PostgreSQL platform adapter (P13-T03).
 	//
 	// Reports are restricted evidence: inserts carry reporter, target, reason
@@ -115,6 +117,7 @@ type Querier interface {
 	// CHECK (balance_free >= 0) guards the invariant even here.
 	CreditFreeBalance(ctx context.Context, arg CreditFreeBalanceParams) (AppWalletAccount, error)
 	CreditPurchasedBalance(ctx context.Context, arg CreditPurchasedBalanceParams) (AppWalletAccount, error)
+	DecideModerationCase(ctx context.Context, arg DecideModerationCaseParams) (DecideModerationCaseRow, error)
 	DeleteArenaDraft(ctx context.Context, arg DeleteArenaDraftParams) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
 	// EnsureWalletAccount materializes the balance projection row for an
@@ -212,6 +215,12 @@ type Querier interface {
 	// GetLastUsernameChangeAt returns the most recent username audit instant for
 	// the account, or NULL when the account has no history yet.
 	GetLastUsernameChangeAt(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error)
+	// Review claim and decision queries (P13-T04). Claims serialize on the
+	// row: one conditional update moves open (or expired-lease) cases under
+	// the claimant with a fresh lease. Decisions record one immutable action
+	// and move the case to decided while clearing the claim, atomically in
+	// the adapter transaction.
+	GetModerationCaseByID(ctx context.Context, id pgtype.UUID) (GetModerationCaseByIDRow, error)
 	// GetParentArgument returns one argument together with its derived depth
 	// (0 for a top-level argument). Replies walk the chain through the
 	// recursive CTE, so depth is never denormalized; the depth guard bounds a

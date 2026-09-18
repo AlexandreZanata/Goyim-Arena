@@ -178,22 +178,47 @@ func TestModerationCaseLifecycleTransitions(t *testing.T) {
 		{from: "under_review", to: "decided"},
 		{from: "decided", to: "closed"},
 	}
+	// Reviews carry a bounded claim lease (migration 00024): driving a case
+	// to under_review always sets the claim triple, and deciding clears it.
+	claimCase := func(t *testing.T, caseID pgtype.UUID) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE app.moderation_cases
+			SET status = 'under_review', claimed_by = $2, claimed_at = now(), lease_expires_at = now() + interval '15 minutes', updated_at = now()
+			WHERE id = $1`, caseID, creator.ID); err != nil {
+			t.Fatalf("claim case: %v", err)
+		}
+	}
+	decideCase := func(t *testing.T, caseID pgtype.UUID) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `UPDATE app.moderation_cases
+			SET status = 'decided', claimed_by = NULL, claimed_at = NULL, lease_expires_at = NULL, updated_at = now()
+			WHERE id = $1`, caseID); err != nil {
+			t.Fatalf("decide case: %v", err)
+		}
+	}
 	for i, transition := range legal {
 		caseID := mustModerationCase(t, ctx, pool, "arena", arena, pgtype.UUID{}, pgtype.UUID{})
 		if transition.from != "open" {
 			steps := map[string][]string{"under_review": {"under_review"}, "decided": {"under_review", "decided"}}[transition.from]
 			for _, step := range steps {
-				if _, err := pool.Exec(ctx, `UPDATE app.moderation_cases SET status = $2, updated_at = now() WHERE id = $1`, caseID, step); err != nil {
-					t.Fatalf("drive case %d to %s: %v", i, step, err)
+				if step == "under_review" {
+					claimCase(t, caseID)
+				} else {
+					decideCase(t, caseID)
 				}
 			}
 		}
-		closedAt := any(nil)
-		if transition.to == "closed" {
-			closedAt = time.Now().UTC()
-		}
-		if _, err := pool.Exec(ctx, `UPDATE app.moderation_cases SET status = $2, closed_at = $3, updated_at = now() WHERE id = $1`, caseID, transition.to, closedAt); err != nil {
-			t.Fatalf("legal transition %s -> %s rejected: %v", transition.from, transition.to, err)
+		switch transition.to {
+		case "under_review":
+			claimCase(t, caseID)
+		case "decided":
+			decideCase(t, caseID)
+		case "closed":
+			if _, err := pool.Exec(ctx, `UPDATE app.moderation_cases SET status = 'closed', closed_at = $2, updated_at = now() WHERE id = $1`, caseID, time.Now().UTC()); err != nil {
+				t.Fatalf("legal transition %s -> %s rejected: %v", transition.from, transition.to, err)
+			}
+		default:
+			t.Fatalf("case %d has an unexpected target state %q", i, transition.to)
 		}
 	}
 
@@ -211,12 +236,10 @@ func TestModerationCaseLifecycleTransitions(t *testing.T) {
 		if transition.from != "open" {
 			steps := map[string][]string{"under_review": {"under_review"}, "decided": {"under_review", "decided"}, "closed": {"under_review", "decided"}}[transition.from]
 			for _, step := range steps {
-				closedAt := any(nil)
-				if step == "closed" {
-					closedAt = time.Now().UTC()
-				}
-				if _, err := pool.Exec(ctx, `UPDATE app.moderation_cases SET status = $2, closed_at = $3, updated_at = now() WHERE id = $1`, caseID, step, closedAt); err != nil {
-					t.Fatalf("drive case to %s: %v", step, err)
+				if step == "under_review" {
+					claimCase(t, caseID)
+				} else {
+					decideCase(t, caseID)
 				}
 			}
 			if transition.from == "closed" {
@@ -231,7 +254,9 @@ func TestModerationCaseLifecycleTransitions(t *testing.T) {
 
 	// Closed coherence: closed requires closed_at and vice versa.
 	openCase := mustModerationCase(t, ctx, pool, "arena", arena, pgtype.UUID{}, pgtype.UUID{})
-	_, err := pool.Exec(ctx, `UPDATE app.moderation_cases SET status = 'under_review', closed_at = now() WHERE id = $1`, openCase)
+	_, err := pool.Exec(ctx, `UPDATE app.moderation_cases
+		SET status = 'under_review', claimed_by = $2, claimed_at = now(), lease_expires_at = now() + interval '15 minutes', closed_at = now()
+		WHERE id = $1`, openCase, creator.ID)
 	assertPgCode(t, err, "23514")
 }
 

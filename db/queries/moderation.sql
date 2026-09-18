@@ -58,3 +58,44 @@ WHERE id = $1;
 SELECT id, status
 FROM app.accounts
 WHERE id = $1;
+
+-- Review claim and decision queries (P13-T04). Claims serialize on the
+-- row: one conditional update moves open (or expired-lease) cases under
+-- the claimant with a fresh lease. Decisions record one immutable action
+-- and move the case to decided while clearing the claim, atomically in
+-- the adapter transaction.
+
+-- name: GetModerationCaseByID :one
+SELECT c.id, c.target_type, c.target_arena_id, c.target_argument_id, c.target_account_id,
+    c.status, c.claimed_by, c.lease_expires_at,
+    COALESCE(ar.creator_id, ag.author_id, ac.id) AS target_owner_id
+FROM app.moderation_cases c
+LEFT JOIN app.arenas ar ON ar.id = c.target_arena_id
+LEFT JOIN app.arguments ag ON ag.id = c.target_argument_id
+LEFT JOIN app.accounts ac ON ac.id = c.target_account_id
+WHERE c.id = $1;
+
+-- name: ClaimModerationCase :one
+UPDATE app.moderation_cases
+SET status = 'under_review', claimed_by = $2, claimed_at = $3, lease_expires_at = $4, updated_at = now()
+WHERE id = $1
+  AND (
+    (status = 'open' AND claimed_by IS NULL)
+    OR (status = 'under_review' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $5)
+  )
+RETURNING id, target_type, target_arena_id, target_argument_id, target_account_id,
+    status, claimed_by, lease_expires_at;
+
+-- name: DecideModerationCase :one
+UPDATE app.moderation_cases
+SET status = 'decided', claimed_by = NULL, claimed_at = NULL, lease_expires_at = NULL, updated_at = now()
+WHERE id = $1
+  AND status = 'under_review'
+  AND claimed_by = $2
+  AND lease_expires_at IS NOT NULL AND lease_expires_at > $3
+RETURNING id, target_type, target_arena_id, target_argument_id, target_account_id, status;
+
+-- name: CreateModerationAction :one
+INSERT INTO app.moderation_actions (case_id, action_type, actor_id, rule_applied, justification, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, case_id, action_type, actor_id, rule_applied, justification, expires_at, created_at;

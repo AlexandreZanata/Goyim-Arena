@@ -292,6 +292,12 @@ type AppModerationCase struct {
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
 	ClosedAt  pgtype.Timestamptz
+	// Reviewing moderator holding the case; NULL unless the case is under review
+	ClaimedBy pgtype.UUID
+	// Instant the claim was taken; moves with claimed_by
+	ClaimedAt pgtype.Timestamptz
+	// Bounded claim lease: a live lease serializes concurrent claims, an expired lease may be reclaimed by another moderator
+	LeaseExpiresAt pgtype.Timestamptz
 }
 
 // Restricted report evidence: reporter, structured reason and optional context; never part of a public projection

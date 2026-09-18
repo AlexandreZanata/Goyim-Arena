@@ -11,6 +11,59 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimModerationCase = `-- name: ClaimModerationCase :one
+UPDATE app.moderation_cases
+SET status = 'under_review', claimed_by = $2, claimed_at = $3, lease_expires_at = $4, updated_at = now()
+WHERE id = $1
+  AND (
+    (status = 'open' AND claimed_by IS NULL)
+    OR (status = 'under_review' AND lease_expires_at IS NOT NULL AND lease_expires_at <= $5)
+  )
+RETURNING id, target_type, target_arena_id, target_argument_id, target_account_id,
+    status, claimed_by, lease_expires_at
+`
+
+type ClaimModerationCaseParams struct {
+	ID               pgtype.UUID
+	ClaimedBy        pgtype.UUID
+	ClaimedAt        pgtype.Timestamptz
+	LeaseExpiresAt   pgtype.Timestamptz
+	LeaseExpiresAt_2 pgtype.Timestamptz
+}
+
+type ClaimModerationCaseRow struct {
+	ID               pgtype.UUID
+	TargetType       string
+	TargetArenaID    pgtype.UUID
+	TargetArgumentID pgtype.UUID
+	TargetAccountID  pgtype.UUID
+	Status           string
+	ClaimedBy        pgtype.UUID
+	LeaseExpiresAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ClaimModerationCase(ctx context.Context, arg ClaimModerationCaseParams) (ClaimModerationCaseRow, error) {
+	row := q.db.QueryRow(ctx, claimModerationCase,
+		arg.ID,
+		arg.ClaimedBy,
+		arg.ClaimedAt,
+		arg.LeaseExpiresAt,
+		arg.LeaseExpiresAt_2,
+	)
+	var i ClaimModerationCaseRow
+	err := row.Scan(
+		&i.ID,
+		&i.TargetType,
+		&i.TargetArenaID,
+		&i.TargetArgumentID,
+		&i.TargetAccountID,
+		&i.Status,
+		&i.ClaimedBy,
+		&i.LeaseExpiresAt,
+	)
+	return i, err
+}
+
 const countRecentModerationReportsByReporter = `-- name: CountRecentModerationReportsByReporter :one
 SELECT count(*)::bigint AS recent_reports
 FROM app.moderation_reports
@@ -28,6 +81,44 @@ func (q *Queries) CountRecentModerationReportsByReporter(ctx context.Context, ar
 	var recent_reports int64
 	err := row.Scan(&recent_reports)
 	return recent_reports, err
+}
+
+const createModerationAction = `-- name: CreateModerationAction :one
+INSERT INTO app.moderation_actions (case_id, action_type, actor_id, rule_applied, justification, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, case_id, action_type, actor_id, rule_applied, justification, expires_at, created_at
+`
+
+type CreateModerationActionParams struct {
+	CaseID        pgtype.UUID
+	ActionType    string
+	ActorID       pgtype.UUID
+	RuleApplied   string
+	Justification string
+	ExpiresAt     pgtype.Timestamptz
+}
+
+func (q *Queries) CreateModerationAction(ctx context.Context, arg CreateModerationActionParams) (AppModerationAction, error) {
+	row := q.db.QueryRow(ctx, createModerationAction,
+		arg.CaseID,
+		arg.ActionType,
+		arg.ActorID,
+		arg.RuleApplied,
+		arg.Justification,
+		arg.ExpiresAt,
+	)
+	var i AppModerationAction
+	err := row.Scan(
+		&i.ID,
+		&i.CaseID,
+		&i.ActionType,
+		&i.ActorID,
+		&i.RuleApplied,
+		&i.Justification,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const createModerationReport = `-- name: CreateModerationReport :one
@@ -73,6 +164,45 @@ func (q *Queries) CreateModerationReport(ctx context.Context, arg CreateModerati
 		&i.Reason,
 		&i.Context,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const decideModerationCase = `-- name: DecideModerationCase :one
+UPDATE app.moderation_cases
+SET status = 'decided', claimed_by = NULL, claimed_at = NULL, lease_expires_at = NULL, updated_at = now()
+WHERE id = $1
+  AND status = 'under_review'
+  AND claimed_by = $2
+  AND lease_expires_at IS NOT NULL AND lease_expires_at > $3
+RETURNING id, target_type, target_arena_id, target_argument_id, target_account_id, status
+`
+
+type DecideModerationCaseParams struct {
+	ID             pgtype.UUID
+	ClaimedBy      pgtype.UUID
+	LeaseExpiresAt pgtype.Timestamptz
+}
+
+type DecideModerationCaseRow struct {
+	ID               pgtype.UUID
+	TargetType       string
+	TargetArenaID    pgtype.UUID
+	TargetArgumentID pgtype.UUID
+	TargetAccountID  pgtype.UUID
+	Status           string
+}
+
+func (q *Queries) DecideModerationCase(ctx context.Context, arg DecideModerationCaseParams) (DecideModerationCaseRow, error) {
+	row := q.db.QueryRow(ctx, decideModerationCase, arg.ID, arg.ClaimedBy, arg.LeaseExpiresAt)
+	var i DecideModerationCaseRow
+	err := row.Scan(
+		&i.ID,
+		&i.TargetType,
+		&i.TargetArenaID,
+		&i.TargetArgumentID,
+		&i.TargetAccountID,
+		&i.Status,
 	)
 	return i, err
 }
@@ -208,6 +338,52 @@ func (q *Queries) GetDuplicateModerationReport(ctx context.Context, arg GetDupli
 		&i.Reason,
 		&i.Context,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getModerationCaseByID = `-- name: GetModerationCaseByID :one
+
+SELECT c.id, c.target_type, c.target_arena_id, c.target_argument_id, c.target_account_id,
+    c.status, c.claimed_by, c.lease_expires_at,
+    COALESCE(ar.creator_id, ag.author_id, ac.id) AS target_owner_id
+FROM app.moderation_cases c
+LEFT JOIN app.arenas ar ON ar.id = c.target_arena_id
+LEFT JOIN app.arguments ag ON ag.id = c.target_argument_id
+LEFT JOIN app.accounts ac ON ac.id = c.target_account_id
+WHERE c.id = $1
+`
+
+type GetModerationCaseByIDRow struct {
+	ID               pgtype.UUID
+	TargetType       string
+	TargetArenaID    pgtype.UUID
+	TargetArgumentID pgtype.UUID
+	TargetAccountID  pgtype.UUID
+	Status           string
+	ClaimedBy        pgtype.UUID
+	LeaseExpiresAt   pgtype.Timestamptz
+	TargetOwnerID    pgtype.UUID
+}
+
+// Review claim and decision queries (P13-T04). Claims serialize on the
+// row: one conditional update moves open (or expired-lease) cases under
+// the claimant with a fresh lease. Decisions record one immutable action
+// and move the case to decided while clearing the claim, atomically in
+// the adapter transaction.
+func (q *Queries) GetModerationCaseByID(ctx context.Context, id pgtype.UUID) (GetModerationCaseByIDRow, error) {
+	row := q.db.QueryRow(ctx, getModerationCaseByID, id)
+	var i GetModerationCaseByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.TargetType,
+		&i.TargetArenaID,
+		&i.TargetArgumentID,
+		&i.TargetAccountID,
+		&i.Status,
+		&i.ClaimedBy,
+		&i.LeaseExpiresAt,
+		&i.TargetOwnerID,
 	)
 	return i, err
 }
