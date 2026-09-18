@@ -8,6 +8,7 @@ package application
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/moderation/domain"
@@ -229,6 +230,12 @@ func (uc *DecideCaseUseCase) Execute(ctx context.Context, cmd DecideCaseCommand)
 		SessionAge:  cmd.SessionAge,
 	}); err != nil {
 		return nil, err
+	}
+
+	// The action must fit the target: an admin can suspend profiles but
+	// never close an argument, whatever the role allows.
+	if !domain.SanctionAllowed(stored.Target, action) {
+		return nil, fmt.Errorf("%w: %s cannot sanction %s", domain.ErrTargetActionMismatch, action, stored.Target)
 	}
 
 	now := uc.clock.Now()

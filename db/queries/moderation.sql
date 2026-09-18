@@ -59,6 +59,41 @@ SELECT id, status
 FROM app.accounts
 WHERE id = $1;
 
+-- Sanction effects applied in the same transaction as the audit event
+-- (P13-T05). Each statement is conditional: zero affected rows means the
+-- target left the sanctionable state concurrently, and the adapter rolls
+-- the whole decision back instead of recording a phantom sanction.
+
+-- name: CloseArenaForModeration :one
+UPDATE app.arenas
+SET status = 'closed',
+    version = version + 1
+WHERE id = $1 AND status = 'published'
+RETURNING id, status, version;
+
+-- name: RemoveArgumentForModeration :one
+UPDATE app.arguments
+SET status = 'removed',
+    updated_at = now()
+WHERE id = $1 AND status IN ('published', 'withdrawn')
+RETURNING id, status;
+
+-- name: InvalidateArgumentAttributions :execrows
+UPDATE app.persuasion_attributions
+SET status = 'invalid',
+    invalidated_at = now(),
+    moderation_reason = $2,
+    moderated_by = $3,
+    moderated_at = now()
+WHERE argument_id = $1 AND status = 'valid';
+
+-- name: SuspendAccountForModeration :one
+UPDATE app.accounts
+SET status = 'suspended',
+    updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING id, status;
+
 -- Review claim and decision queries (P13-T04). Claims serialize on the
 -- row: one conditional update moves open (or expired-lease) cases under
 -- the claimant with a fresh lease. Decisions record one immutable action

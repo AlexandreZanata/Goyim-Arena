@@ -21,6 +21,7 @@ const (
 	CodeInvalidRule          ErrorCode = "MODERATION_INVALID_RULE"
 	CodeInvalidJustification ErrorCode = "MODERATION_INVALID_JUSTIFICATION"
 	CodeInvalidExpiry        ErrorCode = "MODERATION_INVALID_EXPIRY"
+	CodeTargetActionMismatch ErrorCode = "MODERATION_TARGET_ACTION_MISMATCH"
 )
 
 // DomainError represents an invariant or rule failure in the moderation domain.
@@ -57,4 +58,5 @@ var (
 	ErrInvalidRule          = DomainError{Code: CodeInvalidRule, Message: "applied rule reference is blank or too long"}
 	ErrInvalidJustification = DomainError{Code: CodeInvalidJustification, Message: "decision justification is blank or too long"}
 	ErrInvalidExpiry        = DomainError{Code: CodeInvalidExpiry, Message: "sanction expiry is required only for time-boxed measures and must be future"}
+	ErrTargetActionMismatch = DomainError{Code: CodeTargetActionMismatch, Message: "moderation action cannot sanction this target type"}
 )

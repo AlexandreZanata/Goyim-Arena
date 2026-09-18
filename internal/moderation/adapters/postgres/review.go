@@ -116,6 +116,16 @@ func (r *Repository) DecideCase(ctx context.Context, request application.DecideC
 		return nil, application.ErrLeaseExpired
 	}
 
+	// Defense in depth: the use case already checked the sanction matrix,
+	// but a direct caller must face the same rule.
+	caseTarget, err := domain.ParseTargetType(current.TargetType)
+	if err != nil {
+		return nil, fmt.Errorf("stored case target is invalid: %w", err)
+	}
+	if !domain.SanctionAllowed(caseTarget, request.Action) {
+		return nil, fmt.Errorf("%w: %s cannot sanction %s", domain.ErrTargetActionMismatch, request.Action, caseTarget)
+	}
+
 	action, err := qtx.CreateModerationAction(ctx, platformpg.CreateModerationActionParams{
 		CaseID:        id,
 		ActionType:    request.Action.String(),
@@ -126,6 +136,13 @@ func (r *Repository) DecideCase(ctx context.Context, request application.DecideC
 	})
 	if err != nil {
 		return nil, fmt.Errorf("record moderation action: %w", err)
+	}
+
+	// The sanction effect joins the same transaction as the audit event:
+	// either the projection moves and the action is recorded, or nothing
+	// persists. Record-only actions skip this step explicitly.
+	if err := applySanctionEffect(ctx, qtx, current, request, actor); err != nil {
+		return nil, err
 	}
 
 	if _, err := qtx.DecideModerationCase(ctx, platformpg.DecideModerationCaseParams{
@@ -217,6 +234,52 @@ func uuidEquals(a, b pgtype.UUID) bool {
 		return false
 	}
 	return a.Bytes == b.Bytes
+}
+
+// applySanctionEffect moves the sanctioned projection inside the decision
+// transaction. It covers exactly the mutating actions of
+// domain.Action.MutatesProjection; every other action is recorded only, as
+// documented on the sanction matrix. A target that left the sanctionable
+// state concurrently fails the conditional statement, which aborts the
+// whole decision instead of recording a phantom sanction.
+func applySanctionEffect(ctx context.Context, qtx *platformpg.Queries, current platformpg.GetModerationCaseByIDRow, request application.DecideCaseRequest, actor pgtype.UUID) error {
+	switch request.Action {
+	case domain.ActionArenaClose:
+		if _, err := qtx.CloseArenaForModeration(ctx, current.TargetArenaID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("apply arena close: %w", application.ErrInvalidCaseTransition)
+			}
+			return fmt.Errorf("apply arena close: %w", err)
+		}
+		return nil
+	case domain.ActionArgumentRemove:
+		if _, err := qtx.RemoveArgumentForModeration(ctx, current.TargetArgumentID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("apply argument remove: %w", application.ErrInvalidCaseTransition)
+			}
+			return fmt.Errorf("apply argument remove: %w", err)
+		}
+		return nil
+	case domain.ActionAttributionInvalidate:
+		if _, err := qtx.InvalidateArgumentAttributions(ctx, platformpg.InvalidateArgumentAttributionsParams{
+			ArgumentID:       current.TargetArgumentID,
+			ModerationReason: pgtype.Text{String: request.Rule, Valid: true},
+			ModeratedBy:      actor,
+		}); err != nil {
+			return fmt.Errorf("apply attribution invalidate: %w", err)
+		}
+		return nil
+	case domain.ActionSuspension, domain.ActionBan:
+		if _, err := qtx.SuspendAccountForModeration(ctx, current.TargetAccountID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("apply account suspension: %w", application.ErrInvalidCaseTransition)
+			}
+			return fmt.Errorf("apply account suspension: %w", err)
+		}
+		return nil
+	default:
+		return nil
+	}
 }
 
 func timestamptz(instant *time.Time) pgtype.Timestamptz {

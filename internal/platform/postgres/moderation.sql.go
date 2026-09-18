@@ -64,6 +64,32 @@ func (q *Queries) ClaimModerationCase(ctx context.Context, arg ClaimModerationCa
 	return i, err
 }
 
+const closeArenaForModeration = `-- name: CloseArenaForModeration :one
+
+UPDATE app.arenas
+SET status = 'closed',
+    version = version + 1
+WHERE id = $1 AND status = 'published'
+RETURNING id, status, version
+`
+
+type CloseArenaForModerationRow struct {
+	ID      pgtype.UUID
+	Status  string
+	Version int32
+}
+
+// Sanction effects applied in the same transaction as the audit event
+// (P13-T05). Each statement is conditional: zero affected rows means the
+// target left the sanctionable state concurrently, and the adapter rolls
+// the whole decision back instead of recording a phantom sanction.
+func (q *Queries) CloseArenaForModeration(ctx context.Context, id pgtype.UUID) (CloseArenaForModerationRow, error) {
+	row := q.db.QueryRow(ctx, closeArenaForModeration, id)
+	var i CloseArenaForModerationRow
+	err := row.Scan(&i.ID, &i.Status, &i.Version)
+	return i, err
+}
+
 const countRecentModerationReportsByReporter = `-- name: CountRecentModerationReportsByReporter :one
 SELECT count(*)::bigint AS recent_reports
 FROM app.moderation_reports
@@ -385,5 +411,69 @@ func (q *Queries) GetModerationCaseByID(ctx context.Context, id pgtype.UUID) (Ge
 		&i.LeaseExpiresAt,
 		&i.TargetOwnerID,
 	)
+	return i, err
+}
+
+const invalidateArgumentAttributions = `-- name: InvalidateArgumentAttributions :execrows
+UPDATE app.persuasion_attributions
+SET status = 'invalid',
+    invalidated_at = now(),
+    moderation_reason = $2,
+    moderated_by = $3,
+    moderated_at = now()
+WHERE argument_id = $1 AND status = 'valid'
+`
+
+type InvalidateArgumentAttributionsParams struct {
+	ArgumentID       pgtype.UUID
+	ModerationReason pgtype.Text
+	ModeratedBy      pgtype.UUID
+}
+
+func (q *Queries) InvalidateArgumentAttributions(ctx context.Context, arg InvalidateArgumentAttributionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, invalidateArgumentAttributions, arg.ArgumentID, arg.ModerationReason, arg.ModeratedBy)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const removeArgumentForModeration = `-- name: RemoveArgumentForModeration :one
+UPDATE app.arguments
+SET status = 'removed',
+    updated_at = now()
+WHERE id = $1 AND status IN ('published', 'withdrawn')
+RETURNING id, status
+`
+
+type RemoveArgumentForModerationRow struct {
+	ID     pgtype.UUID
+	Status string
+}
+
+func (q *Queries) RemoveArgumentForModeration(ctx context.Context, id pgtype.UUID) (RemoveArgumentForModerationRow, error) {
+	row := q.db.QueryRow(ctx, removeArgumentForModeration, id)
+	var i RemoveArgumentForModerationRow
+	err := row.Scan(&i.ID, &i.Status)
+	return i, err
+}
+
+const suspendAccountForModeration = `-- name: SuspendAccountForModeration :one
+UPDATE app.accounts
+SET status = 'suspended',
+    updated_at = now()
+WHERE id = $1 AND status = 'active'
+RETURNING id, status
+`
+
+type SuspendAccountForModerationRow struct {
+	ID     pgtype.UUID
+	Status string
+}
+
+func (q *Queries) SuspendAccountForModeration(ctx context.Context, id pgtype.UUID) (SuspendAccountForModerationRow, error) {
+	row := q.db.QueryRow(ctx, suspendAccountForModeration, id)
+	var i SuspendAccountForModerationRow
+	err := row.Scan(&i.ID, &i.Status)
 	return i, err
 }

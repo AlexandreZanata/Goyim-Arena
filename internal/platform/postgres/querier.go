@@ -25,6 +25,11 @@ type Querier interface {
 	// creator under the optimistic version check. Reopening does not exist in
 	// the MVP (P08-T05).
 	CloseArena(ctx context.Context, arg CloseArenaParams) (AppArena, error)
+	// Sanction effects applied in the same transaction as the audit event
+	// (P13-T05). Each statement is conditional: zero affected rows means the
+	// target left the sanctionable state concurrently, and the adapter rolls
+	// the whole decision back instead of recording a phantom sanction.
+	CloseArenaForModeration(ctx context.Context, id pgtype.UUID) (CloseArenaForModerationRow, error)
 	// ConfirmInitialPosition inserts the initial projection of one account in
 	// one Arena. The primary key (arena_id, account_id) resolves concurrent
 	// confirmations: the loser inserts nothing and re-reads the winner (P09-T03).
@@ -278,6 +283,7 @@ type Querier interface {
 	InsertWebhookEventIfAbsent(ctx context.Context, arg InsertWebhookEventIfAbsentParams) (AppStripeEvent, error)
 	InvalidateActiveEmailVerificationTokens(ctx context.Context, accountID pgtype.UUID) error
 	InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error
+	InvalidateArgumentAttributions(ctx context.Context, arg InvalidateArgumentAttributionsParams) (int64, error)
 	// InvalidateAttribution moves a valid attribution to invalid, recording the
 	// actor, the mandatory reason and the instant on the retained row; nothing
 	// is deleted. The status guard loses the race instead of overwriting a
@@ -432,6 +438,7 @@ type Querier interface {
 	// RemoveArena applies the moderation removal to a published, closed or
 	// restricted Arena under the optimistic version check; removed is terminal.
 	RemoveArena(ctx context.Context, arg RemoveArenaParams) (AppArena, error)
+	RemoveArgumentForModeration(ctx context.Context, id pgtype.UUID) (RemoveArgumentForModerationRow, error)
 	// ResolveAuthorByUsername resolves a public username to the author identity
 	// used by the reputation projection (P11-T06). Resolution is read-only over
 	// the profiles projection and matches the canonical normalized username,
@@ -449,6 +456,7 @@ type Querier interface {
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
 	RevokeSession(ctx context.Context, tokenHash []byte) error
 	SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAccount, error)
+	SuspendAccountForModeration(ctx context.Context, id pgtype.UUID) (SuspendAccountForModerationRow, error)
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
 	UpdateAccountStatus(ctx context.Context, arg UpdateAccountStatusParams) (AppAccount, error)
 	// UpdateArenaDraft replaces the mutable draft fields under an optimistic

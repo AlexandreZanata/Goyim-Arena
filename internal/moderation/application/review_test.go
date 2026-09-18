@@ -288,3 +288,79 @@ func TestDecideConflictDeclared(t *testing.T) {
 		t.Fatalf("decides = %d, want 0 (conflict records nothing)", cases.decides)
 	}
 }
+
+func TestDecideTargetActionMismatchDenies(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)
+	lease := now.Add(time.Minute)
+
+	// An admin may ban, but never an argument: the target matrix denies
+	// without touching persistence.
+	adminRoles := &fakeRoles{assignments: map[domain.AccountID]*application.RoleAssignment{
+		reviewModerator: {AccountID: reviewModerator, Role: domain.RoleAdmin},
+	}}
+	adminAuthorizer, err := application.NewAuthorizer(adminRoles, &fakeClock{})
+	if err != nil {
+		t.Fatalf("NewAuthorizer: %v", err)
+	}
+	cases := newFakeCases()
+	cases.records["case-review-1"] = &application.CaseRecord{
+		ID:             "case-review-1",
+		Target:         domain.TargetArgument,
+		TargetID:       "018f6b2a-0000-7000-8000-000000000071",
+		TargetOwner:    reviewOwner,
+		Status:         application.CaseUnderReview,
+		ClaimedBy:      reviewModerator,
+		LeaseExpiresAt: &lease,
+	}
+	adminUC, err := application.NewDecideCaseUseCase(application.ReviewDependencies{
+		Cases:      cases,
+		Authorizer: adminAuthorizer,
+		Clock:      &fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("NewDecideCaseUseCase: %v", err)
+	}
+	_, err = adminUC.Execute(context.Background(), application.DecideCaseCommand{
+		CaseID: "case-review-1", Actor: string(reviewModerator),
+		Action: "ban", Rule: "MOD-10:ban", Justification: "Ban on an argument",
+	})
+	if !errors.Is(err, domain.ErrTargetActionMismatch) {
+		t.Fatalf("error = %v, want ErrTargetActionMismatch", err)
+	}
+	if cases.decides != 0 {
+		t.Fatalf("decides = %d, want 0 (mismatch records nothing)", cases.decides)
+	}
+
+	// A suspension without a future expiry denies before any write, even
+	// when role and target both allow it.
+	expiryCases := newFakeCases()
+	expiryCases.records["case-review-1"] = &application.CaseRecord{
+		ID:             "case-review-1",
+		Target:         domain.TargetProfile,
+		TargetID:       string(reviewOwner),
+		TargetOwner:    reviewOwner,
+		Status:         application.CaseUnderReview,
+		ClaimedBy:      reviewModerator,
+		LeaseExpiresAt: &lease,
+	}
+	expiryUC, err := application.NewDecideCaseUseCase(application.ReviewDependencies{
+		Cases:      expiryCases,
+		Authorizer: adminAuthorizer,
+		Clock:      &fakeClock{now: now},
+	})
+	if err != nil {
+		t.Fatalf("NewDecideCaseUseCase: %v", err)
+	}
+	_, err = expiryUC.Execute(context.Background(), application.DecideCaseCommand{
+		CaseID: "case-review-1", Actor: string(reviewModerator),
+		Action: "suspension", Rule: "MOD-10:suspension", Justification: "Suspension without expiry",
+	})
+	if !errors.Is(err, domain.ErrInvalidExpiry) {
+		t.Fatalf("error = %v, want ErrInvalidExpiry", err)
+	}
+	if len(expiryCases.records) != 1 || expiryCases.decides != 0 {
+		t.Fatalf("decides = %d, want 0 (expiry failure records nothing)", expiryCases.decides)
+	}
+}
