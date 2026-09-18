@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httplimits"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/requestid"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/securityheaders"
@@ -252,23 +253,28 @@ func writeStatus(status string) http.Handler {
 }
 
 // NewMux composes the platform router from the route registry (routes.go):
-// request ID correlation around the health routes registered with explicit
-// method patterns, so wrong methods answer 405 automatically, under the
-// browser security policy of the environment. Registration failures
-// (duplicate or malformed registry entries) return an error instead of
-// panicking at boot.
+// the request bound around the health routes registered with explicit method
+// patterns, so wrong methods answer 405 automatically, under request ID
+// correlation, locale negotiation and the browser security policy of the
+// environment. Registration failures (duplicate or malformed registry
+// entries) return an error instead of panicking at boot.
 //
-// The policy is the outermost layer on purpose: it has to cover responses
-// that never reach a module handler — 404 on an unknown path, 405 on a wrong
-// method, readiness failures, and anything written by an adapter before it
-// can be trusted.
+// The order of the layers is part of the contract, not an accident:
+//
+//   - the security policy is outermost, so it covers responses that never
+//     reach a module handler — 404 on an unknown path, 405 on a wrong method,
+//     readiness failures, and every refusal written by the layers below;
+//   - the request bound sits inside correlation and locale, because a refusal
+//     is a problem document: it has to carry the request id and be titled in
+//     the negotiated interface locale;
+//   - the bound sits outside the mux, so a route cannot be served without it.
 func NewMux(ids ports.IDGenerator, locales *locale.Resolver, security securityheaders.Config, readyCheckers ...ReadyChecker) (http.Handler, error) {
 	mux := http.NewServeMux()
 	if err := RegisterAll(mux, RegisteredRoutes(), readyCheckers...); err != nil {
 		return nil, err
 	}
 
-	var handler http.Handler = mux
+	handler := httplimits.Middleware(httplimits.Default, mux)
 	if locales != nil {
 		handler = locale.SetHandler(locales, handler)
 	}
