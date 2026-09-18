@@ -118,3 +118,53 @@ SELECT state, count(*)::bigint AS total
 FROM app.jobs
 GROUP BY state
 ORDER BY state;
+
+-- name: GetQueueHealth :one
+-- Operational health of the queue (P15-T06). One pass over the table: the
+-- counts an operator reads and the instants the lag is measured from. It
+-- selects no payload column, so the surface cannot leak one.
+SELECT
+    count(*) FILTER (WHERE state = 'queued')::bigint AS queued,
+    count(*) FILTER (WHERE state = 'leased')::bigint AS leased,
+    count(*) FILTER (WHERE state = 'succeeded')::bigint AS succeeded,
+    count(*) FILTER (WHERE state = 'dead')::bigint AS dead,
+    count(*) FILTER (
+        WHERE state = 'queued' AND available_at <= sqlc.arg(now)::timestamptz
+    )::bigint AS due_now,
+    min(available_at) FILTER (
+        WHERE state = 'queued' AND available_at <= sqlc.arg(now)::timestamptz
+    )::timestamptz AS oldest_due_at,
+    min(updated_at) FILTER (WHERE state = 'dead')::timestamptz AS oldest_dead_at,
+    max(updated_at) FILTER (WHERE state = 'dead')::timestamptz AS newest_dead_at
+FROM app.jobs;
+
+-- name: ListDeadJobs :many
+-- The dead rows an operator can act on, oldest first. The payload column is
+-- deliberately absent from the projection: what the job carried is not part
+-- of the operational surface.
+SELECT id, type, version, state, attempts, max_attempts,
+       last_error_code, last_error_detail, available_at, updated_at
+FROM app.jobs
+WHERE state = 'dead'
+ORDER BY updated_at ASC, id ASC
+LIMIT sqlc.arg(row_limit)::integer;
+
+-- name: RetryDeadJob :one
+-- An authorized operator returns one dead row to the queue (P15-T06). The
+-- attempt budget is renewed because the operator is asserting the cause is
+-- fixed: without that, a job whose budget is spent would be leased and
+-- immediately recorded dead again. Only lifecycle columns change, which is
+-- what the provenance trigger allows.
+UPDATE app.jobs AS j
+SET state = 'queued',
+    attempts = 0,
+    available_at = sqlc.arg(now)::timestamptz,
+    lease_owner = NULL,
+    leased_until = NULL,
+    last_error_code = NULL,
+    last_error_detail = NULL,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE j.id = sqlc.arg(id)::uuid
+  AND j.state = 'dead'
+RETURNING j.id, j.type, j.version, j.state, j.attempts, j.max_attempts,
+          j.available_at, j.updated_at;

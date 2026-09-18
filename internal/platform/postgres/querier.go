@@ -391,6 +391,10 @@ type Querier interface {
 	// It never selects email, credentials, internal financial identifiers or
 	// administrative flags, and deliberately omits account_id.
 	GetPublicProfileByUsername(ctx context.Context, usernameNormalized string) (GetPublicProfileByUsernameRow, error)
+	// Operational health of the queue (P15-T06). One pass over the table: the
+	// counts an operator reads and the instants the lag is measured from. It
+	// selects no payload column, so the surface cannot leak one.
+	GetQueueHealth(ctx context.Context, now pgtype.Timestamptz) (GetQueueHealthRow, error)
 	// GetRetentionRunForClassAt resolves the recorded run of one class and
 	// instant, so a replay reports what the ledger holds instead of inventing a
 	// second outcome.
@@ -575,6 +579,10 @@ type Querier interface {
 	// deterministically so runs are reproducible.
 	ListCheckoutIntentsForReconciliation(ctx context.Context, arg ListCheckoutIntentsForReconciliationParams) ([]ListCheckoutIntentsForReconciliationRow, error)
 	ListCommunicationPreferenceHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppCommunicationPreferenceHistory, error)
+	// The dead rows an operator can act on, oldest first. The payload column is
+	// deliberately absent from the projection: what the job carried is not part
+	// of the operational surface.
+	ListDeadJobs(ctx context.Context, rowLimit int32) ([]ListDeadJobsRow, error)
 	// ListDueDeletionRequests returns active requests whose cooldown elapsed,
 	// oldest first, so the workflow can execute them.
 	ListDueDeletionRequests(ctx context.Context, dueBefore pgtype.Timestamptz) ([]ListDueDeletionRequestsRow, error)
@@ -743,6 +751,12 @@ type Querier interface {
 	// RestrictArena applies the moderation restriction to a published or closed
 	// Arena under the optimistic version check (P08-T05).
 	RestrictArena(ctx context.Context, arg RestrictArenaParams) (AppArena, error)
+	// An authorized operator returns one dead row to the queue (P15-T06). The
+	// attempt budget is renewed because the operator is asserting the cause is
+	// fixed: without that, a job whose budget is spent would be leased and
+	// immediately recorded dead again. Only lifecycle columns change, which is
+	// what the provenance trigger allows.
+	RetryDeadJob(ctx context.Context, arg RetryDeadJobParams) (RetryDeadJobRow, error)
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
 	// RevokeDeletedAccountAdminRoles revokes any active administrative role of
 	// the deleted account. The assignment row is retained as restricted audit

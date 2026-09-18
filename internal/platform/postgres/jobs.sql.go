@@ -281,6 +281,53 @@ func (q *Queries) GetJobByIdempotencyKey(ctx context.Context, idempotencyKey str
 	return i, err
 }
 
+const getQueueHealth = `-- name: GetQueueHealth :one
+SELECT
+    count(*) FILTER (WHERE state = 'queued')::bigint AS queued,
+    count(*) FILTER (WHERE state = 'leased')::bigint AS leased,
+    count(*) FILTER (WHERE state = 'succeeded')::bigint AS succeeded,
+    count(*) FILTER (WHERE state = 'dead')::bigint AS dead,
+    count(*) FILTER (
+        WHERE state = 'queued' AND available_at <= $1::timestamptz
+    )::bigint AS due_now,
+    min(available_at) FILTER (
+        WHERE state = 'queued' AND available_at <= $1::timestamptz
+    )::timestamptz AS oldest_due_at,
+    min(updated_at) FILTER (WHERE state = 'dead')::timestamptz AS oldest_dead_at,
+    max(updated_at) FILTER (WHERE state = 'dead')::timestamptz AS newest_dead_at
+FROM app.jobs
+`
+
+type GetQueueHealthRow struct {
+	Queued       int64
+	Leased       int64
+	Succeeded    int64
+	Dead         int64
+	DueNow       int64
+	OldestDueAt  pgtype.Timestamptz
+	OldestDeadAt pgtype.Timestamptz
+	NewestDeadAt pgtype.Timestamptz
+}
+
+// Operational health of the queue (P15-T06). One pass over the table: the
+// counts an operator reads and the instants the lag is measured from. It
+// selects no payload column, so the surface cannot leak one.
+func (q *Queries) GetQueueHealth(ctx context.Context, now pgtype.Timestamptz) (GetQueueHealthRow, error) {
+	row := q.db.QueryRow(ctx, getQueueHealth, now)
+	var i GetQueueHealthRow
+	err := row.Scan(
+		&i.Queued,
+		&i.Leased,
+		&i.Succeeded,
+		&i.Dead,
+		&i.DueNow,
+		&i.OldestDueAt,
+		&i.OldestDeadAt,
+		&i.NewestDeadAt,
+	)
+	return i, err
+}
+
 const leaseJob = `-- name: LeaseJob :one
 WITH claimable AS (
     SELECT id
@@ -337,6 +384,62 @@ func (q *Queries) LeaseJob(ctx context.Context, arg LeaseJobParams) (AppJob, err
 	return i, err
 }
 
+const listDeadJobs = `-- name: ListDeadJobs :many
+SELECT id, type, version, state, attempts, max_attempts,
+       last_error_code, last_error_detail, available_at, updated_at
+FROM app.jobs
+WHERE state = 'dead'
+ORDER BY updated_at ASC, id ASC
+LIMIT $1::integer
+`
+
+type ListDeadJobsRow struct {
+	ID              pgtype.UUID
+	Type            string
+	Version         int32
+	State           string
+	Attempts        int32
+	MaxAttempts     int32
+	LastErrorCode   pgtype.Text
+	LastErrorDetail pgtype.Text
+	AvailableAt     pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
+// The dead rows an operator can act on, oldest first. The payload column is
+// deliberately absent from the projection: what the job carried is not part
+// of the operational surface.
+func (q *Queries) ListDeadJobs(ctx context.Context, rowLimit int32) ([]ListDeadJobsRow, error) {
+	rows, err := q.db.Query(ctx, listDeadJobs, rowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDeadJobsRow{}
+	for rows.Next() {
+		var i ListDeadJobsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Type,
+			&i.Version,
+			&i.State,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.LastErrorCode,
+			&i.LastErrorDetail,
+			&i.AvailableAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const releaseExpiredLeases = `-- name: ReleaseExpiredLeases :execrows
 UPDATE app.jobs
 SET state = 'queued',
@@ -355,4 +458,57 @@ func (q *Queries) ReleaseExpiredLeases(ctx context.Context, now pgtype.Timestamp
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const retryDeadJob = `-- name: RetryDeadJob :one
+UPDATE app.jobs AS j
+SET state = 'queued',
+    attempts = 0,
+    available_at = $1::timestamptz,
+    lease_owner = NULL,
+    leased_until = NULL,
+    last_error_code = NULL,
+    last_error_detail = NULL,
+    updated_at = $1::timestamptz
+WHERE j.id = $2::uuid
+  AND j.state = 'dead'
+RETURNING j.id, j.type, j.version, j.state, j.attempts, j.max_attempts,
+          j.available_at, j.updated_at
+`
+
+type RetryDeadJobParams struct {
+	Now pgtype.Timestamptz
+	ID  pgtype.UUID
+}
+
+type RetryDeadJobRow struct {
+	ID          pgtype.UUID
+	Type        string
+	Version     int32
+	State       string
+	Attempts    int32
+	MaxAttempts int32
+	AvailableAt pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+// An authorized operator returns one dead row to the queue (P15-T06). The
+// attempt budget is renewed because the operator is asserting the cause is
+// fixed: without that, a job whose budget is spent would be leased and
+// immediately recorded dead again. Only lifecycle columns change, which is
+// what the provenance trigger allows.
+func (q *Queries) RetryDeadJob(ctx context.Context, arg RetryDeadJobParams) (RetryDeadJobRow, error) {
+	row := q.db.QueryRow(ctx, retryDeadJob, arg.Now, arg.ID)
+	var i RetryDeadJobRow
+	err := row.Scan(
+		&i.ID,
+		&i.Type,
+		&i.Version,
+		&i.State,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.AvailableAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
