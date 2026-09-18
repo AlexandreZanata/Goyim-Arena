@@ -103,11 +103,68 @@ type AppArgumentSource struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+// Divergences found between the local state and the provider; recorded so they are reviewed instead of silently corrected
+type AppBillingReconciliationFinding struct {
+	ID    pgtype.UUID
+	RunID pgtype.UUID
+	// Account the divergence concerns; NULL when the object exists only on the provider side
+	AccountID pgtype.UUID
+	Kind      string
+	// Private reference of the diverging object (local identifier or provider identifier); never part of a public projection, export or log
+	Reference  string
+	Details    pgtype.Text
+	ObservedAt pgtype.Timestamptz
+	ResolvedAt pgtype.Timestamptz
+	// Justification written when the finding is resolved; the rest of the record is immutable
+	Resolution pgtype.Text
+}
+
+// Reconciliation windows already inspected, with the outcome the job reported; job-level execution bookkeeping belongs to the jobs module
+type AppBillingReconciliationRun struct {
+	ID       pgtype.UUID
+	Livemode bool
+	// Inclusive start of the inspected window (half-open with window_end)
+	WindowStart    pgtype.Timestamptz
+	WindowEnd      pgtype.Timestamptz
+	Status         string
+	ScannedObjects int32
+	FindingsCount  int32
+	StartedAt      pgtype.Timestamptz
+	FinishedAt     pgtype.Timestamptz
+}
+
 // Editorial Arena categories; seeded by migrations, display names resolve through the versioned i18n catalogs
 type AppCategory struct {
 	Slug         string
 	DisplayOrder int32
 	CreatedAt    pgtype.Timestamptz
+}
+
+// Server-authoritative checkout intents: the local record of the commercial decision and its provider correlation; only a verified webhook settles one
+type AppCheckoutIntent struct {
+	ID        pgtype.UUID
+	AccountID pgtype.UUID
+	// Commercial region resolved by the server (never inferred from IP) with the currency it charges
+	Market string
+	// Versioned catalog product (lower snake case), the same vocabulary as the billing domain
+	ProductID string
+	// Catalog version that was in force when the price was resolved, so an old purchase stays explainable after a price change
+	CatalogVersion int32
+	Currency       string
+	// Exact price in minor units of the currency, as resolved from the catalog; never provided by the browser
+	AmountMinor int64
+	Livemode    bool
+	Status      string
+	// Private Stripe checkout session identifier (cs_...); its prefix is pinned to livemode
+	StripeCheckoutSessionID pgtype.Text
+	// Private Stripe payment intent identifier (pi_...), kept for refund and dispute correlation
+	StripePaymentIntentID pgtype.Text
+	CreatedAt             pgtype.Timestamptz
+	UpdatedAt             pgtype.Timestamptz
+	// Instant the provider confirmed the payment; success pages never set it
+	PaidAt pgtype.Timestamptz
+	// Instant the intent closed without payment (expired or failed)
+	ClosedAt pgtype.Timestamptz
 }
 
 // Explicit communication opt-ins per account; marketing defaults to false and is never opted in implicitly
@@ -235,6 +292,64 @@ type AppSession struct {
 	RevokedAt  pgtype.Timestamptz
 	IpAddress  pgtype.Text
 	UserAgent  pgtype.Text
+}
+
+// Mapping between a local account and its Stripe customer; the provider identifier is private and never leaves the billing module
+type AppStripeCustomer struct {
+	AccountID pgtype.UUID
+	// Private Stripe customer identifier (cus_...); shape checked, never part of a public projection, export or log
+	StripeCustomerID string
+	// Stripe mode the customer belongs to; pinned so test and live objects can never be mixed for one account
+	Livemode  bool
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
+// Verified Stripe webhook events: the unique provider event id makes redelivery harmless, and the raw payload is never persisted
+type AppStripeEvent struct {
+	ID pgtype.UUID
+	// Unique provider event identifier (evt_...); the idempotency anchor of the webhook (REQ-BIL-03, THR-STRIPE-03)
+	StripeEventID string
+	EventType     string
+	Livemode      bool
+	// Provider creation instant of the event, kept so out-of-order deliveries can be reasoned about
+	StripeCreatedAt pgtype.Timestamptz
+	// SHA-256 of the exact raw body: evidence of integrity and duplication without storing the payload (which may carry personal data)
+	PayloadSha256 string
+	// Size in bytes of the exact raw body that was verified
+	PayloadBytes int32
+	Status       string
+	// Number of times the event was claimed for processing; retries reuse this row instead of inserting a new one
+	Attempts int32
+	// Bounded reason of the latest failure; exists only while status is failed and is cleared on retry
+	LastError   pgtype.Text
+	ReceivedAt  pgtype.Timestamptz
+	ProcessedAt pgtype.Timestamptz
+}
+
+// Mirror of the provider subscription state; the entitlement franchises of a period are granted from this state and never from a browser visit
+type AppSubscription struct {
+	ID                   pgtype.UUID
+	AccountID            pgtype.UUID
+	StripeSubscriptionID string
+	// Provider status vocabulary; canceled and incomplete_expired are terminal and can never revive
+	Status         string
+	Livemode       bool
+	Market         string
+	ProductID      string
+	CatalogVersion int32
+	// Private Stripe price in use by the subscription; compared against the versioned catalog by reconciliation
+	StripePriceID string
+	// Start of the billed period, the anchor of the per-period Member franchise
+	CurrentPeriodStart pgtype.Timestamptz
+	// End of the billed period; a period-bound pass expires here and the franchise does not accumulate
+	CurrentPeriodEnd pgtype.Timestamptz
+	// Provider cancellation scheduled for the end of the period; benefits last until then
+	CancelAtPeriodEnd bool
+	// Instant the provider registered the cancellation, when it reports one
+	CanceledAt pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
 }
 
 // Audit trail of every username set or changed by an account (P05-T02 requires auditable history)
