@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -23,10 +24,14 @@ type ProcessWebhookDependencies struct {
 	// Events persists event ID idempotency and processing lifecycle.
 	Events WebhookEventRepository
 	// Settler handles the settlement of checkout intents after verified
-	// payment. It is optional: when nil, checkout.session.completed events
-	// are acknowledged but not settled (the composition root injects it
+	// payment for INK products. It is optional: when nil, checkout.session.completed
+	// events are acknowledged but not settled (the composition root injects it
 	// when the settle use case is available).
 	Settler *SettleCheckoutUseCase
+	// PassSettler handles the settlement of checkout intents after verified
+	// payment for Arena Pass products. It is optional: when nil, ARENA_PASS
+	// checkout.session.completed events are acknowledged but not settled.
+	PassSettler *SettleArenaPassUseCase
 	// Clock supplies the instants of the local record.
 	Clock Clock
 }
@@ -58,10 +63,11 @@ type ProcessWebhookCommand struct {
 // checkout.session.completed event is the only path that settles an intent,
 // and only a verified webhook settles one (THR-STRIPE-02).
 type ProcessWebhookUseCase struct {
-	verifier WebhookPayloadVerifier
-	events   WebhookEventRepository
-	settler  *SettleCheckoutUseCase
-	clock    Clock
+	verifier    WebhookPayloadVerifier
+	events      WebhookEventRepository
+	settler     *SettleCheckoutUseCase
+	passSettler *SettleArenaPassUseCase
+	clock       Clock
 }
 
 // NewProcessWebhookUseCase builds the use case, refusing incomplete
@@ -77,10 +83,11 @@ func NewProcessWebhookUseCase(deps ProcessWebhookDependencies) (*ProcessWebhookU
 		return nil, fmt.Errorf("%w: a clock is required", ErrInvalidCheckoutConfig)
 	}
 	return &ProcessWebhookUseCase{
-		verifier: deps.Verifier,
-		events:   deps.Events,
-		settler:  deps.Settler,
-		clock:    deps.Clock,
+		verifier:    deps.Verifier,
+		events:      deps.Events,
+		settler:     deps.Settler,
+		passSettler: deps.PassSettler,
+		clock:       deps.Clock,
 	}, nil
 }
 
@@ -183,13 +190,35 @@ func (uc *ProcessWebhookUseCase) handleCheckoutSessionCompleted(ctx context.Cont
 			ErrWebhookPayloadMalformed, session.PaymentStatus)
 	}
 
-	// Settle the checkout intent if the settler is available.
+	// Try the INK settler first. If it fails with the wrong grant kind,
+	// try the pass settler.
 	if uc.settler != nil {
 		_, err := uc.settler.Execute(ctx, SettleCheckoutCommand{
 			SessionID: sessionID,
 		})
 		if err != nil {
+			// If the error is about wrong grant kind, try the pass settler.
+			if errors.Is(err, ErrSettleCheckoutWrongGrantKind) && uc.passSettler != nil {
+				_, passErr := uc.passSettler.Execute(ctx, SettleCheckoutCommand{
+					SessionID: sessionID,
+				})
+				if passErr != nil {
+					return fmt.Errorf("settle arena pass: %w", passErr)
+				}
+				return nil
+			}
 			return fmt.Errorf("settle checkout: %w", err)
+		}
+		return nil
+	}
+
+	// If no INK settler, try the pass settler directly.
+	if uc.passSettler != nil {
+		_, err := uc.passSettler.Execute(ctx, SettleCheckoutCommand{
+			SessionID: sessionID,
+		})
+		if err != nil {
+			return fmt.Errorf("settle arena pass: %w", err)
 		}
 	}
 
