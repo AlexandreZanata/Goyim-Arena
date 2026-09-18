@@ -115,6 +115,21 @@ func (r *Repository) RecordStripeCustomer(ctx context.Context, request applicati
 	return record, nil
 }
 
+// AccountIDByStripeCustomer resolves the account ID from the stored
+// provider customer mapping. It returns ErrPurchaserNotFound when no
+// mapping carries the customer identifier.
+func (r *Repository) AccountIDByStripeCustomer(ctx context.Context, customerID domain.StripeCustomerID) (domain.AccountID, error) {
+	row, err := r.queries.GetAccountByStripeCustomerID(ctx, customerID.String())
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", application.ErrPurchaserNotFound
+		}
+		return "", fmt.Errorf("load account by stripe customer: %w", err)
+	}
+
+	return domain.AccountID(uuidToString(row.AccountID)), nil
+}
+
 // RecordCheckoutIntent stores the server-resolved commercial decision exactly
 // once per provider session. A replay resolves the stored intent, and a session
 // already recorded for a different account is refused instead of disclosed.

@@ -227,3 +227,54 @@ WHERE stripe_event_id = $1
 RETURNING id, stripe_event_id, event_type, livemode, stripe_created_at,
     payload_sha256, payload_bytes, status, attempts, last_error,
     received_at, processed_at;
+
+-- Customer correlation lookup (P12-T08).
+-- name: GetAccountByStripeCustomerID :one
+SELECT account_id, stripe_customer_id, livemode, created_at
+FROM app.stripe_customers
+WHERE stripe_customer_id = $1;
+
+-- Subscription lifecycle queries (P12-T08).
+-- The subscription mirror persists the provider state and anchors per-period
+-- Member entitlement grants (30,000 INK and 1 expiring Arena Pass).
+
+-- name: GetSubscriptionByStripeID :one
+SELECT id, account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at,
+    created_at, updated_at
+FROM app.subscriptions
+WHERE stripe_subscription_id = $1;
+
+-- name: UpsertSubscription :one
+INSERT INTO app.subscriptions (
+    account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+ON CONFLICT (stripe_subscription_id) DO UPDATE
+SET status = EXCLUDED.status,
+    market = EXCLUDED.market,
+    product_id = EXCLUDED.product_id,
+    catalog_version = EXCLUDED.catalog_version,
+    stripe_price_id = EXCLUDED.stripe_price_id,
+    current_period_start = EXCLUDED.current_period_start,
+    current_period_end = EXCLUDED.current_period_end,
+    cancel_at_period_end = EXCLUDED.cancel_at_period_end,
+    canceled_at = EXCLUDED.canceled_at,
+    updated_at = now()
+RETURNING id, account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at,
+    created_at, updated_at;
+
+-- name: GetActiveSubscriptionByAccount :one
+SELECT id, account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at,
+    created_at, updated_at
+FROM app.subscriptions
+WHERE account_id = $1
+  AND status IN ('active', 'trialing')
+ORDER BY created_at DESC
+LIMIT 1;

@@ -34,6 +34,21 @@ func (f *fakeInker) CreditPurchasedInk(_ context.Context, request application.In
 	return &application.InkerCreditResult{Replayed: false}, nil
 }
 
+func (f *fakeInker) CreditMemberInk(_ context.Context, request application.InkerCreditRequest) (*application.InkerCreditResult, error) {
+	f.credits = append(f.credits, request)
+	if f.next < len(f.errors) {
+		err := f.errors[f.next]
+		f.next++
+		return nil, err
+	}
+	if f.next < len(f.results) {
+		result := f.results[f.next]
+		f.next++
+		return &result, nil
+	}
+	return &application.InkerCreditResult{Replayed: false}, nil
+}
+
 // fakeSettleCheckoutIntents is an in-memory implementation of the checkout
 // intent repository for settle tests.
 type fakeSettleCheckoutIntents struct {

@@ -524,3 +524,39 @@ func TestCatalogRefusesIncoherentLists(t *testing.T) {
 		t.Errorf("empty catalog = version %d, %d products", empty.Version(), len(empty.Products()))
 	}
 }
+
+func TestCatalog_ProductByPriceID(t *testing.T) {
+	t.Parallel()
+
+	member := mustProduct(t, domain.MarketBrazil, "member_monthly", 1990, domain.CurrencyBRL, domain.NewMemberGrant(), "price_1QbrMember")
+	ink := mustProduct(t, domain.MarketBrazil, "ink_10000", 990, domain.CurrencyBRL, mustINKGrant(t, 10000), "price_1QbrInk")
+
+	cat, err := domain.NewCatalog(1, []domain.Product{member, ink})
+	if err != nil {
+		t.Fatalf("NewCatalog: %v", err)
+	}
+
+	// 1. Resolve existing member price ID
+	prod, err := cat.ProductByPriceID(domain.StripePriceID("price_1QbrMember"))
+	if err != nil {
+		t.Fatalf("ProductByPriceID(price_1QbrMember): %v", err)
+	}
+	if prod.ID().String() != "member_monthly" {
+		t.Errorf("product ID = %q, want member_monthly", prod.ID())
+	}
+	if prod.Grant().Kind() != domain.GrantKindMember {
+		t.Errorf("grant kind = %v, want MEMBER", prod.Grant().Kind())
+	}
+
+	// 2. Empty price ID returns ErrInvalidStripePriceID
+	_, err = cat.ProductByPriceID(domain.StripePriceID(""))
+	if !errors.Is(err, domain.ErrInvalidStripePriceID) {
+		t.Errorf("empty price ID error = %v, want ErrInvalidStripePriceID", err)
+	}
+
+	// 3. Unknown price ID returns ErrUnknownProduct
+	_, err = cat.ProductByPriceID(domain.StripePriceID("price_unknown999"))
+	if !errors.Is(err, domain.ErrUnknownProduct) {
+		t.Errorf("unknown price ID error = %v, want ErrUnknownProduct", err)
+	}
+}

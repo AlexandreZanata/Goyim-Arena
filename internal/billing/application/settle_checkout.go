@@ -15,6 +15,11 @@ type Inker interface {
 	// account's PURCHASED_INK bucket. The same idempotency key returns the
 	// original credit without duplicating the transaction.
 	CreditPurchasedInk(ctx context.Context, request InkerCreditRequest) (*InkerCreditResult, error)
+
+	// CreditMemberInk grants the specified amount of INK to the account's
+	// FREE_INK bucket under the credit_member operation (P12-T08). The same
+	// idempotency key returns the original credit without duplicating.
+	CreditMemberInk(ctx context.Context, request InkerCreditRequest) (*InkerCreditResult, error)
 }
 
 // InkerCreditRequest is the billing-typed request for an INK credit.

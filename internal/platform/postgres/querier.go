@@ -111,11 +111,14 @@ type Querier interface {
 	EnsureWalletAccount(ctx context.Context, accountID pgtype.UUID) error
 	GetAccountByEmail(ctx context.Context, lower string) (AppAccount, error)
 	GetAccountByID(ctx context.Context, id pgtype.UUID) (AppAccount, error)
+	// Customer correlation lookup (P12-T08).
+	GetAccountByStripeCustomerID(ctx context.Context, stripeCustomerID string) (GetAccountByStripeCustomerIDRow, error)
 	// GetAccountProfile retrieves account profile data without ever reading or exposing password credentials.
 	GetAccountProfile(ctx context.Context, id pgtype.UUID) (AppAccount, error)
 	GetActiveEmailVerificationToken(ctx context.Context, tokenHash []byte) (AppEmailVerificationToken, error)
 	GetActivePasswordResetToken(ctx context.Context, tokenHash []byte) (AppPasswordResetToken, error)
 	GetActiveSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
+	GetActiveSubscriptionByAccount(ctx context.Context, accountID pgtype.UUID) (AppSubscription, error)
 	GetArenaByID(ctx context.Context, id pgtype.UUID) (AppArena, error)
 	GetArenaForCreator(ctx context.Context, arg GetArenaForCreatorParams) (AppArena, error)
 	GetArenaPassConsumptionByArena(ctx context.Context, arenaID pgtype.UUID) (AppArenaPassConsumption, error)
@@ -209,6 +212,10 @@ type Querier interface {
 	GetPublicProfileByUsername(ctx context.Context, usernameNormalized string) (GetPublicProfileByUsernameRow, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
 	GetStripeCustomer(ctx context.Context, accountID pgtype.UUID) (GetStripeCustomerRow, error)
+	// Subscription lifecycle queries (P12-T08).
+	// The subscription mirror persists the provider state and anchors per-period
+	// Member entitlement grants (30,000 INK and 1 expiring Arena Pass).
+	GetSubscriptionByStripeID(ctx context.Context, stripeSubscriptionID string) (AppSubscription, error)
 	GetWalletAccount(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
 	// GetWalletAccountForUpdate locks the balance projection row of an account
 	// for the duration of the transaction, serializing concurrent debits so no
@@ -420,6 +427,7 @@ type Querier interface {
 	// terminal state and records the processing completion time.
 	UpdateWebhookEventStatusProcessed(ctx context.Context, arg UpdateWebhookEventStatusProcessedParams) (AppStripeEvent, error)
 	UpsertCommunicationPreferences(ctx context.Context, arg UpsertCommunicationPreferencesParams) (AppCommunicationPreference, error)
+	UpsertSubscription(ctx context.Context, arg UpsertSubscriptionParams) (AppSubscription, error)
 	// WithdrawArgument moves a published argument out of the display under the
 	// author scope, recording the withdrawal instant once. Zero rows mean the
 	// status moved concurrently: the caller re-reads and resolves (P10-T06).

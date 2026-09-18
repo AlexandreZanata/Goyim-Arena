@@ -94,6 +94,11 @@ type StripeCustomerRepository interface {
 	// it, so a retried request never leaves the account charged through two
 	// different provider customers.
 	RecordStripeCustomer(ctx context.Context, request RecordStripeCustomerRequest) (*StripeCustomerRecord, error)
+
+	// AccountIDByStripeCustomer resolves the account ID from the stored
+	// provider customer mapping. It returns ErrPurchaserNotFound when no
+	// mapping carries the customer identifier.
+	AccountIDByStripeCustomer(ctx context.Context, customerID domain.StripeCustomerID) (domain.AccountID, error)
 }
 
 // RecordCheckoutIntentRequest is the commercial decision to persist, already
@@ -156,4 +161,56 @@ type CheckoutIntentRepository interface {
 	// state and records the settlement instant. It is a no-op when the
 	// intent is already paid (a replay of the same webhook event).
 	MarkCheckoutIntentPaid(ctx context.Context, sessionID domain.StripeCheckoutSessionID) error
+}
+
+// SubscriptionRecord is one stored subscription mirror as read back from
+// persistence.
+type SubscriptionRecord struct {
+	ID                   string
+	AccountID            domain.AccountID
+	StripeSubscriptionID domain.StripeSubscriptionID
+	Status               domain.SubscriptionStatus
+	Livemode             bool
+	Market               domain.Market
+	ProductID            domain.ProductID
+	CatalogVersion       int
+	StripePriceID        domain.StripePriceID
+	CurrentPeriodStart   *time.Time
+	CurrentPeriodEnd     *time.Time
+	CancelAtPeriodEnd    bool
+	CanceledAt           *time.Time
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+// UpsertSubscriptionRequest holds the parameters to insert or update a
+// subscription mirror.
+type UpsertSubscriptionRequest struct {
+	AccountID            domain.AccountID
+	StripeSubscriptionID domain.StripeSubscriptionID
+	Status               domain.SubscriptionStatus
+	Livemode             bool
+	Market               domain.Market
+	ProductID            domain.ProductID
+	CatalogVersion       int
+	StripePriceID        domain.StripePriceID
+	CurrentPeriodStart   *time.Time
+	CurrentPeriodEnd     *time.Time
+	CancelAtPeriodEnd    bool
+	CanceledAt           *time.Time
+}
+
+// SubscriptionRepository persists subscription mirrors with idempotency anchored
+// on the provider subscription identifier (unique by schema constraint).
+type SubscriptionRepository interface {
+	// GetSubscriptionByStripeID resolves a subscription by its provider
+	// identifier. It returns nil, nil when no subscription exists yet.
+	GetSubscriptionByStripeID(ctx context.Context, subID domain.StripeSubscriptionID) (*SubscriptionRecord, error)
+
+	// UpsertSubscription inserts or updates the subscription mirror.
+	UpsertSubscription(ctx context.Context, request UpsertSubscriptionRequest) (*SubscriptionRecord, error)
+
+	// GetActiveSubscriptionByAccount returns the most recent active or
+	// trialing subscription for an account, or nil if none exists.
+	GetActiveSubscriptionByAccount(ctx context.Context, accountID domain.AccountID) (*SubscriptionRecord, error)
 }

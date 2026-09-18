@@ -61,6 +61,18 @@ func (r *fakeStripeCustomers) RecordStripeCustomer(_ context.Context, request ap
 	return &record, nil
 }
 
+func (r *fakeStripeCustomers) AccountIDByStripeCustomer(_ context.Context, customerID domain.StripeCustomerID) (domain.AccountID, error) {
+	if r.loadErr != nil {
+		return "", r.loadErr
+	}
+	for _, rec := range r.stored {
+		if rec.CustomerID == customerID {
+			return rec.AccountID, nil
+		}
+	}
+	return "", application.ErrPurchaserNotFound
+}
+
 // fakeCheckoutIntents models the intent table: one row per provider session,
 // a replay resolving the stored row (replayed=true) and nothing else written.
 type fakeCheckoutIntents struct {

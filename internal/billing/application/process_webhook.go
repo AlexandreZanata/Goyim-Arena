@@ -32,6 +32,10 @@ type ProcessWebhookDependencies struct {
 	// payment for Arena Pass products. It is optional: when nil, ARENA_PASS
 	// checkout.session.completed events are acknowledged but not settled.
 	PassSettler *SettleArenaPassUseCase
+	// MemberSettler handles subscription lifecycle events and grants Member
+	// entitlements (P12-T08). It is optional: when nil, subscription events
+	// are acknowledged but not settled.
+	MemberSettler *ApplyMemberEntitlementsUseCase
 	// Clock supplies the instants of the local record.
 	Clock Clock
 }
@@ -63,11 +67,12 @@ type ProcessWebhookCommand struct {
 // checkout.session.completed event is the only path that settles an intent,
 // and only a verified webhook settles one (THR-STRIPE-02).
 type ProcessWebhookUseCase struct {
-	verifier    WebhookPayloadVerifier
-	events      WebhookEventRepository
-	settler     *SettleCheckoutUseCase
-	passSettler *SettleArenaPassUseCase
-	clock       Clock
+	verifier      WebhookPayloadVerifier
+	events        WebhookEventRepository
+	settler       *SettleCheckoutUseCase
+	passSettler   *SettleArenaPassUseCase
+	memberSettler *ApplyMemberEntitlementsUseCase
+	clock         Clock
 }
 
 // NewProcessWebhookUseCase builds the use case, refusing incomplete
@@ -83,11 +88,12 @@ func NewProcessWebhookUseCase(deps ProcessWebhookDependencies) (*ProcessWebhookU
 		return nil, fmt.Errorf("%w: a clock is required", ErrInvalidCheckoutConfig)
 	}
 	return &ProcessWebhookUseCase{
-		verifier:    deps.Verifier,
-		events:      deps.Events,
-		settler:     deps.Settler,
-		passSettler: deps.PassSettler,
-		clock:       deps.Clock,
+		verifier:      deps.Verifier,
+		events:        deps.Events,
+		settler:       deps.Settler,
+		passSettler:   deps.PassSettler,
+		memberSettler: deps.MemberSettler,
+		clock:         deps.Clock,
 	}, nil
 }
 
@@ -235,12 +241,21 @@ func (uc *ProcessWebhookUseCase) handleCheckoutSessionExpired(_ context.Context,
 	return nil
 }
 
-// handleSubscriptionEvent processes subscription lifecycle events. The
-// implementation depends on the subscription repository and the Member
-// entitlement logic (T08).
-func (uc *ProcessWebhookUseCase) handleSubscriptionEvent(_ context.Context, _ []byte, _ domain.WebhookEventType) error {
-	// TODO(P12-T08): update subscription state, grant/revoke Member
-	// benefits.
+// handleSubscriptionEvent processes subscription lifecycle events (P12-T08).
+func (uc *ProcessWebhookUseCase) handleSubscriptionEvent(ctx context.Context, rawBody []byte, _ domain.WebhookEventType) error {
+	if uc.memberSettler == nil {
+		return nil
+	}
+
+	cmd, err := parseSubscriptionFromEvent(rawBody)
+	if err != nil {
+		return fmt.Errorf("parse subscription event: %w", err)
+	}
+
+	if _, err := uc.memberSettler.Execute(ctx, cmd); err != nil {
+		return fmt.Errorf("apply member entitlements: %w", err)
+	}
+
 	return nil
 }
 
@@ -455,4 +470,128 @@ func parseCheckoutSessionFromEvent(rawBody []byte) (domain.StripeCheckoutSession
 		Status:        status,
 		PaymentStatus: paymentStatus,
 	}, nil
+}
+
+// parseSubscriptionFromEvent extracts the subscription data from the
+// event body (data.object).
+func parseSubscriptionFromEvent(rawBody []byte) (ApplyMemberEntitlementsCommand, error) {
+	body := string(rawBody)
+
+	// Top-level livemode
+	livemode, _ := extractJSONBool(body, "livemode")
+
+	// Extract the nested object from "data": {"object": {...}}.
+	dataIdx := strings.Index(body, "\"data\"")
+	if dataIdx < 0 {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("data field not found")
+	}
+	objectIdx := strings.Index(body[dataIdx:], "\"object\"")
+	if objectIdx < 0 {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("object field not found in data")
+	}
+	nestedBody := body[dataIdx+objectIdx:]
+
+	// Extract subscription ID
+	subIDStr, err := extractJSONString(nestedBody, "id")
+	if err != nil {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("extract subscription id: %w", err)
+	}
+	subID, err := domain.ParseStripeSubscriptionID(subIDStr)
+	if err != nil {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("parse subscription id: %w", err)
+	}
+
+	// Extract customer ID
+	customerIDStr, err := extractJSONString(nestedBody, "customer")
+	if err != nil {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("extract customer id: %w", err)
+	}
+	customerID, err := domain.ParseStripeCustomerID(customerIDStr)
+	if err != nil {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("parse customer id: %w", err)
+	}
+
+	// Extract status
+	statusStr, err := extractJSONString(nestedBody, "status")
+	if err != nil {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("extract status: %w", err)
+	}
+	status, err := domain.ParseSubscriptionStatus(statusStr)
+	if err != nil {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("parse status: %w", err)
+	}
+
+	// Extract price ID
+	priceIDStr, err := extractPriceIDFromSubscriptionJSON(nestedBody)
+	if err != nil {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("extract price id: %w", err)
+	}
+	priceID, err := domain.ParseStripePriceID(priceIDStr)
+	if err != nil {
+		return ApplyMemberEntitlementsCommand{}, fmt.Errorf("parse price id: %w", err)
+	}
+
+	// Extract periods
+	var currentPeriodStart, currentPeriodEnd *time.Time
+	startInt, err := extractJSONInt64(nestedBody, "current_period_start")
+	if err == nil && startInt > 0 {
+		t := time.Unix(startInt, 0).UTC()
+		currentPeriodStart = &t
+	}
+	endInt, err := extractJSONInt64(nestedBody, "current_period_end")
+	if err == nil && endInt > 0 {
+		t := time.Unix(endInt, 0).UTC()
+		currentPeriodEnd = &t
+	}
+
+	// Extract cancel_at_period_end
+	cancelAtPeriodEnd, _ := extractJSONBool(nestedBody, "cancel_at_period_end")
+
+	// Extract canceled_at
+	var canceledAt *time.Time
+	canceledAtInt, err := extractJSONInt64(nestedBody, "canceled_at")
+	if err == nil && canceledAtInt > 0 {
+		t := time.Unix(canceledAtInt, 0).UTC()
+		canceledAt = &t
+	}
+
+	return ApplyMemberEntitlementsCommand{
+		StripeSubscriptionID: subID,
+		CustomerID:           customerID,
+		Status:               status,
+		PriceID:              priceID,
+		CurrentPeriodStart:   currentPeriodStart,
+		CurrentPeriodEnd:     currentPeriodEnd,
+		CancelAtPeriodEnd:    cancelAtPeriodEnd,
+		CanceledAt:           canceledAt,
+		Livemode:             livemode,
+	}, nil
+}
+
+// extractPriceIDFromSubscriptionJSON locates the Stripe price ID inside a
+// subscription JSON object.
+func extractPriceIDFromSubscriptionJSON(body string) (string, error) {
+	// 1. Direct "price": "price_..."
+	if id, err := extractJSONString(body, "price"); err == nil && strings.HasPrefix(id, "price_") {
+		return id, nil
+	}
+	// 2. Object "price": { "id": "price_..." }
+	priceIdx := strings.Index(body, "\"price\"")
+	if priceIdx >= 0 {
+		if id, err := extractJSONString(body[priceIdx:], "id"); err == nil && strings.HasPrefix(id, "price_") {
+			return id, nil
+		}
+	}
+	// 3. Direct "plan": "price_..."
+	if id, err := extractJSONString(body, "plan"); err == nil && strings.HasPrefix(id, "price_") {
+		return id, nil
+	}
+	// 4. Object "plan": { "id": "price_..." }
+	planIdx := strings.Index(body, "\"plan\"")
+	if planIdx >= 0 {
+		if id, err := extractJSONString(body[planIdx:], "id"); err == nil && strings.HasPrefix(id, "price_") {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("price id not found in subscription object")
 }

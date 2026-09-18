@@ -516,3 +516,103 @@ func TestProcessWebhookSuccessPageNeverGrantsBenefit(t *testing.T) {
 		t.Errorf("status = %s, want failed (no benefit granted)", record.Status)
 	}
 }
+
+func TestProcessWebhookAppliesMemberEntitlements(t *testing.T) {
+	t.Parallel()
+
+	repo := newFakeWebhookEventRepository()
+	catalog := testMemberCatalog(t)
+	subs := newFakeSubscriptionRepository()
+	customers := newFakeCustomerDirectory()
+	customers.mapping["cus_user99"] = domain.AccountID("usr_account_99")
+	passLots := &fakeMemberPassLots{}
+	inker := &fakeMemberInker{}
+	clock := &fakeClock{now: time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)}
+
+	memberSettler, err := application.NewApplyMemberEntitlementsUseCase(application.MemberEntitlementsDependencies{
+		Catalog:       catalog,
+		Subscriptions: subs,
+		Customers:     customers,
+		PassLots:      passLots,
+		Inker:         inker,
+		Clock:         clock,
+	})
+	if err != nil {
+		t.Fatalf("NewApplyMemberEntitlementsUseCase: %v", err)
+	}
+
+	useCase, err := application.NewProcessWebhookUseCase(application.ProcessWebhookDependencies{
+		Verifier:      &fakeWebhookVerifier{verifyResult: nil},
+		Events:        repo,
+		MemberSettler: memberSettler,
+		Clock:         clock,
+	})
+	if err != nil {
+		t.Fatalf("NewProcessWebhookUseCase error = %v", err)
+	}
+
+	subBody := []byte(`{
+		"id": "evt_subcreated1",
+		"type": "customer.subscription.created",
+		"livemode": false,
+		"created": 1789740000,
+		"data": {
+			"object": {
+				"id": "sub_member99",
+				"customer": "cus_user99",
+				"status": "active",
+				"current_period_start": 1789740000,
+				"current_period_end": 1792418400,
+				"cancel_at_period_end": false,
+				"items": {
+					"data": [
+						{
+							"id": "si_123",
+							"price": {
+								"id": "price_1QbrMember"
+							}
+						}
+					]
+				}
+			}
+		}
+	}`)
+
+	if err := useCase.Execute(context.Background(), application.ProcessWebhookCommand{
+		RawBody:         subBody,
+		SignatureHeader: "t=123,v1=valid",
+		TimestampHeader: strconv.FormatInt(time.Now().Unix(), 10),
+	}); err != nil {
+		t.Fatalf("Execute subscription webhook error = %v", err)
+	}
+
+	eventRec := repo.events["evt_subcreated1"]
+	if eventRec == nil || eventRec.Status != application.WebhookEventProcessed {
+		t.Fatalf("expected event processed, got %+v", eventRec)
+	}
+
+	// Verify subscription recorded
+	subRec := subs.subs["sub_member99"]
+	if subRec == nil {
+		t.Fatal("expected subscription recorded in repository")
+	}
+	if subRec.Status != domain.SubscriptionActive {
+		t.Errorf("subscription status = %v, want active", subRec.Status)
+	}
+
+	// Verify pass granted
+	if len(passLots.grants) != 1 {
+		t.Fatalf("expected 1 pass granted, got %d", len(passLots.grants))
+	}
+	if passLots.grants[0].Origin != domain.OriginMember || passLots.grants[0].Quantity.Int32() != 1 {
+		t.Errorf("pass grant = %+v, want 1 member pass", passLots.grants[0])
+	}
+
+	// Verify INK granted: exactly 30k
+	if len(inker.credits) != 1 {
+		t.Fatalf("expected 1 ink credit, got %d", len(inker.credits))
+	}
+	if inker.credits[0].Amount != 30000 {
+		t.Errorf("ink credit amount = %d, want 30000", inker.credits[0].Amount)
+	}
+}

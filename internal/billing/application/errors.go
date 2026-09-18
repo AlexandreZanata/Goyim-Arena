@@ -132,4 +132,14 @@ var (
 	// something other than INK. This settle use case handles only INK
 	// purchases; Arena Pass and Member grants are handled by T07 and T08.
 	ErrSettleCheckoutWrongGrantKind = errors.New("application: product does not grant INK")
+
+	// Member entitlement error vocabulary (P12-T08).
+
+	// ErrMemberWrongGrantKind indicates the product resolved by the price ID
+	// is not a Member subscription product.
+	ErrMemberWrongGrantKind = errors.New("application: product does not grant Member entitlement")
+
+	// ErrInvalidMemberConfig indicates the member entitlements use case could
+	// not be built from the given configuration.
+	ErrInvalidMemberConfig = errors.New("application: member entitlements configuration is invalid")
 )

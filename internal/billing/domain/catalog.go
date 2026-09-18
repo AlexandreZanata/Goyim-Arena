@@ -317,6 +317,21 @@ func (c *Catalog) Product(market Market, id ProductID) (Product, error) {
 	return product, nil
 }
 
+// ProductByPriceID resolves the product configured with the given Stripe price ID.
+// An empty price ID is rejected; a price ID not present in the catalog returns
+// ErrUnknownProduct.
+func (c *Catalog) ProductByPriceID(priceID StripePriceID) (Product, error) {
+	if priceID.IsZero() {
+		return Product{}, ErrInvalidStripePriceID
+	}
+	for _, product := range c.products {
+		if product.priceID == priceID {
+			return product, nil
+		}
+	}
+	return Product{}, ErrUnknownProduct
+}
+
 // find locates one entry without applying the priced requirement.
 func (c *Catalog) find(market Market, id ProductID) (Product, bool) {
 	for _, product := range c.products {

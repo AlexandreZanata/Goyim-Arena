@@ -137,6 +137,67 @@ func (q *Queries) CreateArenaPassLotIfAbsent(ctx context.Context, arg CreateAren
 	return i, err
 }
 
+const getAccountByStripeCustomerID = `-- name: GetAccountByStripeCustomerID :one
+SELECT account_id, stripe_customer_id, livemode, created_at
+FROM app.stripe_customers
+WHERE stripe_customer_id = $1
+`
+
+type GetAccountByStripeCustomerIDRow struct {
+	AccountID        pgtype.UUID
+	StripeCustomerID string
+	Livemode         bool
+	CreatedAt        pgtype.Timestamptz
+}
+
+// Customer correlation lookup (P12-T08).
+func (q *Queries) GetAccountByStripeCustomerID(ctx context.Context, stripeCustomerID string) (GetAccountByStripeCustomerIDRow, error) {
+	row := q.db.QueryRow(ctx, getAccountByStripeCustomerID, stripeCustomerID)
+	var i GetAccountByStripeCustomerIDRow
+	err := row.Scan(
+		&i.AccountID,
+		&i.StripeCustomerID,
+		&i.Livemode,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getActiveSubscriptionByAccount = `-- name: GetActiveSubscriptionByAccount :one
+SELECT id, account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at,
+    created_at, updated_at
+FROM app.subscriptions
+WHERE account_id = $1
+  AND status IN ('active', 'trialing')
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetActiveSubscriptionByAccount(ctx context.Context, accountID pgtype.UUID) (AppSubscription, error) {
+	row := q.db.QueryRow(ctx, getActiveSubscriptionByAccount, accountID)
+	var i AppSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.StripeSubscriptionID,
+		&i.Status,
+		&i.Livemode,
+		&i.Market,
+		&i.ProductID,
+		&i.CatalogVersion,
+		&i.StripePriceID,
+		&i.CurrentPeriodStart,
+		&i.CurrentPeriodEnd,
+		&i.CancelAtPeriodEnd,
+		&i.CanceledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getArenaPassConsumptionByArena = `-- name: GetArenaPassConsumptionByArena :one
 SELECT id, lot_id, arena_id, consumed_at
 FROM app.arena_pass_consumptions
@@ -268,6 +329,42 @@ func (q *Queries) GetStripeCustomer(ctx context.Context, accountID pgtype.UUID) 
 		&i.StripeCustomerID,
 		&i.Livemode,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getSubscriptionByStripeID = `-- name: GetSubscriptionByStripeID :one
+
+SELECT id, account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at,
+    created_at, updated_at
+FROM app.subscriptions
+WHERE stripe_subscription_id = $1
+`
+
+// Subscription lifecycle queries (P12-T08).
+// The subscription mirror persists the provider state and anchors per-period
+// Member entitlement grants (30,000 INK and 1 expiring Arena Pass).
+func (q *Queries) GetSubscriptionByStripeID(ctx context.Context, stripeSubscriptionID string) (AppSubscription, error) {
+	row := q.db.QueryRow(ctx, getSubscriptionByStripeID, stripeSubscriptionID)
+	var i AppSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.StripeSubscriptionID,
+		&i.Status,
+		&i.Livemode,
+		&i.Market,
+		&i.ProductID,
+		&i.CatalogVersion,
+		&i.StripePriceID,
+		&i.CurrentPeriodStart,
+		&i.CurrentPeriodEnd,
+		&i.CancelAtPeriodEnd,
+		&i.CanceledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -886,6 +983,80 @@ func (q *Queries) UpdateWebhookEventStatusProcessed(ctx context.Context, arg Upd
 		&i.LastError,
 		&i.ReceivedAt,
 		&i.ProcessedAt,
+	)
+	return i, err
+}
+
+const upsertSubscription = `-- name: UpsertSubscription :one
+INSERT INTO app.subscriptions (
+    account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+ON CONFLICT (stripe_subscription_id) DO UPDATE
+SET status = EXCLUDED.status,
+    market = EXCLUDED.market,
+    product_id = EXCLUDED.product_id,
+    catalog_version = EXCLUDED.catalog_version,
+    stripe_price_id = EXCLUDED.stripe_price_id,
+    current_period_start = EXCLUDED.current_period_start,
+    current_period_end = EXCLUDED.current_period_end,
+    cancel_at_period_end = EXCLUDED.cancel_at_period_end,
+    canceled_at = EXCLUDED.canceled_at,
+    updated_at = now()
+RETURNING id, account_id, stripe_subscription_id, status, livemode,
+    market, product_id, catalog_version, stripe_price_id,
+    current_period_start, current_period_end, cancel_at_period_end, canceled_at,
+    created_at, updated_at
+`
+
+type UpsertSubscriptionParams struct {
+	AccountID            pgtype.UUID
+	StripeSubscriptionID string
+	Status               string
+	Livemode             bool
+	Market               string
+	ProductID            string
+	CatalogVersion       int32
+	StripePriceID        string
+	CurrentPeriodStart   pgtype.Timestamptz
+	CurrentPeriodEnd     pgtype.Timestamptz
+	CancelAtPeriodEnd    bool
+	CanceledAt           pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertSubscription(ctx context.Context, arg UpsertSubscriptionParams) (AppSubscription, error) {
+	row := q.db.QueryRow(ctx, upsertSubscription,
+		arg.AccountID,
+		arg.StripeSubscriptionID,
+		arg.Status,
+		arg.Livemode,
+		arg.Market,
+		arg.ProductID,
+		arg.CatalogVersion,
+		arg.StripePriceID,
+		arg.CurrentPeriodStart,
+		arg.CurrentPeriodEnd,
+		arg.CancelAtPeriodEnd,
+		arg.CanceledAt,
+	)
+	var i AppSubscription
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.StripeSubscriptionID,
+		&i.Status,
+		&i.Livemode,
+		&i.Market,
+		&i.ProductID,
+		&i.CatalogVersion,
+		&i.StripePriceID,
+		&i.CurrentPeriodStart,
+		&i.CurrentPeriodEnd,
+		&i.CancelAtPeriodEnd,
+		&i.CanceledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
