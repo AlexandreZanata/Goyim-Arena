@@ -13,6 +13,16 @@ export const messageKeys = {
     "arenas.document.status.published",
     "arenas.document.status.restricted",
   ] as const,
+  email: [
+    "email.greeting",
+    "email.password_reset.code_label",
+    "email.password_reset.lead",
+    "email.password_reset.subject",
+    "email.signature",
+    "email.verification.code_label",
+    "email.verification.lead",
+    "email.verification.subject",
+  ] as const,
   errors: [
     "errors.conflict.detail",
     "errors.conflict.title",
@@ -50,6 +60,14 @@ export type MessageKey =
   | "arenas.document.status.closed"
   | "arenas.document.status.published"
   | "arenas.document.status.restricted"
+  | "email.greeting"
+  | "email.password_reset.code_label"
+  | "email.password_reset.lead"
+  | "email.password_reset.subject"
+  | "email.signature"
+  | "email.verification.code_label"
+  | "email.verification.lead"
+  | "email.verification.subject"
   | "errors.conflict.detail"
   | "errors.conflict.title"
   | "errors.forbidden.detail"
@@ -83,6 +101,14 @@ export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = 
   "arenas.document.status.closed": [],
   "arenas.document.status.published": [],
   "arenas.document.status.restricted": [],
+  "email.greeting": [],
+  "email.password_reset.code_label": [],
+  "email.password_reset.lead": [],
+  "email.password_reset.subject": [],
+  "email.signature": [],
+  "email.verification.code_label": [],
+  "email.verification.lead": [],
+  "email.verification.subject": [],
   "errors.conflict.detail": [],
   "errors.conflict.title": [],
   "errors.forbidden.detail": [],
@@ -117,6 +143,14 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "arenas.document.status.closed": "Closed",
     "arenas.document.status.published": "Published",
     "arenas.document.status.restricted": "Restricted",
+    "email.greeting": "Hi,",
+    "email.password_reset.code_label": "Reset code",
+    "email.password_reset.lead": "Use the code below to reset your password. If you did not request this, ignore this message.",
+    "email.password_reset.subject": "Reset your Goyim Arena password",
+    "email.signature": "The Goyim Arena team",
+    "email.verification.code_label": "Verification code",
+    "email.verification.lead": "Use the code below to confirm your email. If you did not request this, ignore this message.",
+    "email.verification.subject": "Confirm your email at Goyim Arena",
     "errors.conflict.detail": "The resource changed; reload and try again.",
     "errors.conflict.title": "The request conflicts with the current state",
     "errors.forbidden.detail": "This action is not available for your account.",
@@ -148,6 +182,14 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "arenas.document.status.closed": "Fechada",
     "arenas.document.status.published": "Publicada",
     "arenas.document.status.restricted": "Restrita",
+    "email.greeting": "Olá,",
+    "email.password_reset.code_label": "Código de redefinição",
+    "email.password_reset.lead": "Use o código abaixo para redefinir sua senha. Se você não pediu isso, ignore esta mensagem.",
+    "email.password_reset.subject": "Redefinição de senha do Goyim Arena",
+    "email.signature": "Equipe Goyim Arena",
+    "email.verification.code_label": "Código de verificação",
+    "email.verification.lead": "Use o código abaixo para confirmar seu email. Se você não pediu isso, ignore esta mensagem.",
+    "email.verification.subject": "Confirme seu email no Goyim Arena",
     "errors.conflict.detail": "O recurso mudou; recarregue e tente novamente.",
     "errors.conflict.title": "A requisição conflita com o estado atual",
     "errors.forbidden.detail": "Esta ação não está disponível para a sua conta.",
