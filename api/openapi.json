@@ -466,6 +466,188 @@
         }
       }
     },
+    "/api/v1/me/moderation/reports": {
+      "post": {
+        "operationId": "fileModerationReport",
+        "summary": "File a structured content report",
+        "description": "Contests an Arena, argument or profile with a closed reason vocabulary and optional bounded context. Reports are restricted evidence and never remove content by themselves. Served with Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["moderation"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ModerationReportRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Report filed.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModerationReport" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/me/moderation/appeals": {
+      "post": {
+        "operationId": "fileModerationAppeal",
+        "summary": "Appeal a sanction",
+        "description": "Contests one eligible sanction for the sanctioned owner inside the appeal window. Exactly one appeal contests one action. Served with Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["moderation"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ModerationAppealRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Appeal filed.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModerationAppeal" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/moderation/cases": {
+      "get": {
+        "operationId": "listModerationCases",
+        "summary": "Triage case queue",
+        "description": "Returns one cursor page of case routing for active moderators: target, lifecycle, priority and claim holder. Restricted evidence never serializes. Served with Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["moderation"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Lifecycle filter: open, under_review, decided or closed; empty lists every lifecycle.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "Opaque server-signed cursor returned as next_cursor by the previous page.",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size (1..100); defaults to 20.",
+            "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "One triage queue page.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModerationCasePage" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/api/v1/moderation/cases/{id}/claim": {
+      "post": {
+        "operationId": "claimModerationCase",
+        "summary": "Claim a case under lease",
+        "description": "Moves an open case (or an expired lease) under the calling moderator with a fresh bounded lease. Served with Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["moderation"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Case identifier.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Case claimed.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModerationClaim" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/moderation/cases/{id}/decisions": {
+      "post": {
+        "operationId": "decideModerationCase",
+        "summary": "Record a case decision",
+        "description": "Records one explicit sanction with rule, justification and optional expiry, applying the projection effect in the same transaction as the audit event. The moderator's measure travels untouched. Served with Cache-Control: private, no-store (THR-CACHE-01).",
+        "tags": ["moderation"],
+        "security": [{ "SessionCookie": [] }],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "Case identifier.",
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ModerationDecisionRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Decision recorded.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ModerationDecision" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
     "/api/v1/me/arenas/drafts": {
       "post": {
         "operationId": "createArenaDraft",
@@ -1732,6 +1914,101 @@
         "required": ["portal_url"],
         "properties": {
           "portal_url": { "type": "string" }
+        }
+      },
+      "ModerationReportRequest": {
+        "type": "object",
+        "description": "Structured content report. Reason is a closed vocabulary; context is optional bounded text.",
+        "required": ["target_type", "target_id", "reason"],
+        "properties": {
+          "target_type": { "type": "string", "enum": ["arena", "argument", "profile"] },
+          "target_id": { "type": "string" },
+          "reason": { "type": "string", "enum": ["violence", "doxxing", "harassment", "sexual", "fraud", "spam", "illegal", "evasion", "multiaccount", "malware", "other"] },
+          "context": { "type": "string", "maxLength": 2000 }
+        }
+      },
+      "ModerationReport": {
+        "type": "object",
+        "description": "Filed report identity with dedup and rate signals. Reporter context never serializes.",
+        "required": ["report_id", "replayed", "rate_limited", "reports_in_window"],
+        "properties": {
+          "report_id": { "type": "string" },
+          "replayed": { "type": "boolean" },
+          "rate_limited": { "type": "boolean" },
+          "reports_in_window": { "type": "integer", "minimum": 0 }
+        }
+      },
+      "ModerationAppealRequest": {
+        "type": "object",
+        "description": "Sanction appeal with appellant context.",
+        "required": ["action_id", "context"],
+        "properties": {
+          "action_id": { "type": "string" },
+          "context": { "type": "string", "maxLength": 2000 }
+        }
+      },
+      "ModerationAppeal": {
+        "type": "object",
+        "description": "Filed appeal identity. Appellant context never serializes.",
+        "required": ["appeal_id", "action_id", "replayed"],
+        "properties": {
+          "appeal_id": { "type": "string" },
+          "action_id": { "type": "string" },
+          "replayed": { "type": "boolean" }
+        }
+      },
+      "ModerationCase": {
+        "type": "object",
+        "description": "Triage routing entry: target, lifecycle, priority and claim holder. Restricted evidence never serializes.",
+        "required": ["case_id", "target_type", "target_id", "status", "priority", "created_at"],
+        "properties": {
+          "case_id": { "type": "string" },
+          "target_type": { "type": "string", "enum": ["arena", "argument", "profile"] },
+          "target_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["open", "under_review", "decided", "closed"] },
+          "priority": { "type": "string", "enum": ["low", "normal", "high", "urgent"] },
+          "created_at": { "type": "string", "format": "date-time" },
+          "claimed_by": { "type": "string" }
+        }
+      },
+      "ModerationCasePage": {
+        "type": "object",
+        "description": "Cursor page of the triage queue.",
+        "required": ["items", "next_cursor"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/ModerationCase" } },
+          "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
+        }
+      },
+      "ModerationClaim": {
+        "type": "object",
+        "description": "Claimed review routing.",
+        "required": ["case_id", "status", "claimed_by"],
+        "properties": {
+          "case_id": { "type": "string" },
+          "status": { "type": "string" },
+          "claimed_by": { "type": "string" }
+        }
+      },
+      "ModerationDecisionRequest": {
+        "type": "object",
+        "description": "Explicit sanction with rule, justification and optional expiry. Severity is never derived.",
+        "required": ["action", "rule", "justification"],
+        "properties": {
+          "action": { "type": "string", "enum": ["no_action", "warning", "link_hide", "interaction_limit", "argument_remove", "arena_close", "attribution_invalidate", "position_invalidate", "suspension", "ban", "preserve_legal"] },
+          "rule": { "type": "string", "maxLength": 200 },
+          "justification": { "type": "string", "maxLength": 2000 },
+          "expires_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ModerationDecision": {
+        "type": "object",
+        "description": "Recorded sanction identity. The justification never serializes.",
+        "required": ["action_id", "case_id", "action"],
+        "properties": {
+          "action_id": { "type": "string" },
+          "case_id": { "type": "string" },
+          "action": { "type": "string" }
         }
       },
       "ArenaDraftRequest": {

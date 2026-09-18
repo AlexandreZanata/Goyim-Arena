@@ -612,6 +612,23 @@ func (q *Queries) GetModerationCaseByID(ctx context.Context, id pgtype.UUID) (Ge
 	return i, err
 }
 
+const getSessionCreatedAt = `-- name: GetSessionCreatedAt :one
+
+SELECT created_at
+FROM app.sessions
+WHERE id = $1
+`
+
+// Session freshness for step-up evaluation (P13-T07). The age counts from
+// session creation as of the caller's instant; unknown sessions deny
+// distinctly instead of being treated as fresh.
+func (q *Queries) GetSessionCreatedAt(ctx context.Context, id pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getSessionCreatedAt, id)
+	var created_at pgtype.Timestamptz
+	err := row.Scan(&created_at)
+	return created_at, err
+}
+
 const insertModerationAppeal = `-- name: InsertModerationAppeal :one
 INSERT INTO app.moderation_appeals (action_id, appellant_id, context)
 VALUES ($1, $2, $3)
@@ -673,6 +690,80 @@ func (q *Queries) InvalidateArgumentAttributions(ctx context.Context, arg Invali
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const listModerationCasesPage = `-- name: ListModerationCasesPage :many
+
+SELECT id, target_type, target_arena_id, target_argument_id, target_account_id,
+    status, priority, created_at, claimed_by
+FROM app.moderation_cases
+WHERE ($1::text = '' OR status = $1::text)
+  AND (
+      $2::timestamptz IS NULL
+      OR (created_at, id) < ($2::timestamptz, $3::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+`
+
+type ListModerationCasesPageParams struct {
+	Status         string
+	AfterCreatedAt pgtype.Timestamptz
+	AfterID        pgtype.UUID
+	PageLimit      int32
+}
+
+type ListModerationCasesPageRow struct {
+	ID               pgtype.UUID
+	TargetType       string
+	TargetArenaID    pgtype.UUID
+	TargetArgumentID pgtype.UUID
+	TargetAccountID  pgtype.UUID
+	Status           string
+	Priority         string
+	CreatedAt        pgtype.Timestamptz
+	ClaimedBy        pgtype.UUID
+}
+
+// Triage queue reads (P13-T07). One keyset-paginated page of case routing,
+// newest first: target, lifecycle, priority, claim holder and instants.
+// Restricted evidence (reporter context, justifications, appeal contexts)
+// is never selected here. NULL after_* parameters select the first page;
+// the (created_at, id) tuple comparison never duplicates or skips rows. An
+// empty status filter lists every lifecycle.
+func (q *Queries) ListModerationCasesPage(ctx context.Context, arg ListModerationCasesPageParams) ([]ListModerationCasesPageRow, error) {
+	rows, err := q.db.Query(ctx, listModerationCasesPage,
+		arg.Status,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListModerationCasesPageRow{}
+	for rows.Next() {
+		var i ListModerationCasesPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TargetType,
+			&i.TargetArenaID,
+			&i.TargetArgumentID,
+			&i.TargetAccountID,
+			&i.Status,
+			&i.Priority,
+			&i.CreatedAt,
+			&i.ClaimedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const reactivateAccountForAppeal = `-- name: ReactivateAccountForAppeal :one

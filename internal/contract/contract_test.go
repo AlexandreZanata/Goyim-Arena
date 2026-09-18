@@ -15,6 +15,7 @@ import (
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/moderation/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/persuasion/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/positions/adapters/http"
@@ -97,6 +98,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 			continue
 		}
 		if route.Path == "/api/v1/me/billing/checkout" || route.Path == "/api/v1/me/billing/subscription" || route.Path == "/api/v1/me/billing/portal" {
+			continue
+		}
+		if route.Path == "/api/v1/me/moderation/reports" || route.Path == "/api/v1/me/moderation/appeals" || route.Path == "/api/v1/moderation/cases" || route.Path == "/api/v1/moderation/cases/{id}/claim" || route.Path == "/api/v1/moderation/cases/{id}/decisions" {
 			continue
 		}
 		if strings.HasPrefix(route.Path, "/api/v1/me/arenas") || route.Path == "/api/v1/arenas" || strings.HasPrefix(route.Path, "/api/v1/arenas/") {
@@ -922,6 +926,74 @@ func TestContractBillingPrivateAPIStaysPrivate(t *testing.T) {
 		"/api/v1/me/billing/checkout":     "post",
 		"/api/v1/me/billing/subscription": "get",
 		"/api/v1/me/billing/portal":       "post",
+	} {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		operation := string(operations[method])
+		if !strings.Contains(operation, `"SessionCookie"`) {
+			t.Errorf("%s must require the SessionCookie scheme", path)
+		}
+		if !strings.Contains(operation, "private, no-store") {
+			t.Errorf("%s must document the private cache policy", path)
+		}
+		if strings.Contains(operation, "public, max-age") {
+			t.Errorf("%s must never be publicly cacheable", path)
+		}
+	}
+}
+
+func TestContractModerationAPIStaysPrivate(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	expected := map[string][]string{
+		"ModerationReportRequest":   {"target_type", "target_id", "reason", "context"},
+		"ModerationReport":          {"report_id", "replayed", "rate_limited", "reports_in_window"},
+		"ModerationAppealRequest":   {"action_id", "context"},
+		"ModerationAppeal":          {"appeal_id", "action_id", "replayed"},
+		"ModerationCase":            {"case_id", "target_type", "target_id", "status", "priority", "created_at", "claimed_by"},
+		"ModerationCasePage":        {"items", "next_cursor"},
+		"ModerationClaim":           {"case_id", "status", "claimed_by"},
+		"ModerationDecisionRequest": {"action", "rule", "justification", "expires_at"},
+		"ModerationDecision":        {"action_id", "case_id", "action"},
+	}
+	// Responses (everything except the two request shapes) must never
+	// carry restricted evidence: reporter context, justifications, appeal
+	// contexts, reporter identities or emails.
+	responseForbidden := []string{
+		"context", "justification", "reporter", "reason", "email",
+		"decision_reason", "rule_applied", "actor",
+	}
+
+	for name, expectedProperties := range expected {
+		properties := propertiesOf(t, document, name)
+		for _, property := range expectedProperties {
+			if _, ok := properties[property]; !ok {
+				t.Errorf("%s is missing allowed property %q", name, property)
+			}
+		}
+		if strings.HasSuffix(name, "Request") {
+			continue
+		}
+		for property := range properties {
+			lowered := strings.ToLower(property)
+			for _, marker := range responseForbidden {
+				if strings.Contains(lowered, marker) {
+					t.Errorf("SECURITY VIOLATION: response schema %s declares forbidden property %q", name, property)
+				}
+			}
+		}
+	}
+
+	for path, method := range map[string]string{
+		"/api/v1/me/moderation/reports":           "post",
+		"/api/v1/me/moderation/appeals":           "post",
+		"/api/v1/moderation/cases":                "get",
+		"/api/v1/moderation/cases/{id}/claim":     "post",
+		"/api/v1/moderation/cases/{id}/decisions": "post",
 	} {
 		operations, ok := document.Paths[path]
 		if !ok {

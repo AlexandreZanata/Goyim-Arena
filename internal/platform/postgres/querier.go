@@ -261,6 +261,10 @@ type Querier interface {
 	// administrative flags, and deliberately omits account_id.
 	GetPublicProfileByUsername(ctx context.Context, usernameNormalized string) (GetPublicProfileByUsernameRow, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
+	// Session freshness for step-up evaluation (P13-T07). The age counts from
+	// session creation as of the caller's instant; unknown sessions deny
+	// distinctly instead of being treated as fresh.
+	GetSessionCreatedAt(ctx context.Context, id pgtype.UUID) (pgtype.Timestamptz, error)
 	GetStripeCustomer(ctx context.Context, accountID pgtype.UUID) (GetStripeCustomerRow, error)
 	// Subscription lifecycle queries (P12-T08).
 	// The subscription mirror persists the provider state and anchors per-period
@@ -398,6 +402,13 @@ type Querier interface {
 	// Expiration is never written back: the predicate is evaluated at read time,
 	// so the sweep is a pure derivation and repeated runs are identical (P07-T04).
 	ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredArenaPassLotsParams) ([]AppArenaPassLot, error)
+	// Triage queue reads (P13-T07). One keyset-paginated page of case routing,
+	// newest first: target, lifecycle, priority, claim holder and instants.
+	// Restricted evidence (reporter context, justifications, appeal contexts)
+	// is never selected here. NULL after_* parameters select the first page;
+	// the (created_at, id) tuple comparison never duplicates or skips rows. An
+	// empty status filter lists every lifecycle.
+	ListModerationCasesPage(ctx context.Context, arg ListModerationCasesPageParams) ([]ListModerationCasesPageRow, error)
 	// ListPositionChanges returns the private change history of one account in
 	// one Arena, newest first; the chain order is the version (P09-T06).
 	ListPositionChanges(ctx context.Context, arg ListPositionChangesParams) ([]AppPositionChange, error)

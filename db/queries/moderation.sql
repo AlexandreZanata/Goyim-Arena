@@ -171,6 +171,34 @@ SET status = 'active',
 WHERE id = $1 AND status = 'suspended'
 RETURNING id, status;
 
+-- Triage queue reads (P13-T07). One keyset-paginated page of case routing,
+-- newest first: target, lifecycle, priority, claim holder and instants.
+-- Restricted evidence (reporter context, justifications, appeal contexts)
+-- is never selected here. NULL after_* parameters select the first page;
+-- the (created_at, id) tuple comparison never duplicates or skips rows. An
+-- empty status filter lists every lifecycle.
+
+-- name: ListModerationCasesPage :many
+SELECT id, target_type, target_arena_id, target_argument_id, target_account_id,
+    status, priority, created_at, claimed_by
+FROM app.moderation_cases
+WHERE (sqlc.arg(status)::text = '' OR status = sqlc.arg(status)::text)
+  AND (
+      sqlc.arg(after_created_at)::timestamptz IS NULL
+      OR (created_at, id) < (sqlc.arg(after_created_at)::timestamptz, sqlc.arg(after_id)::uuid)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- Session freshness for step-up evaluation (P13-T07). The age counts from
+-- session creation as of the caller's instant; unknown sessions deny
+-- distinctly instead of being treated as fresh.
+
+-- name: GetSessionCreatedAt :one
+SELECT created_at
+FROM app.sessions
+WHERE id = $1;
+
 -- Review claim and decision queries (P13-T04). Claims serialize on the
 -- row: one conditional update moves open (or expired-lease) cases under
 -- the claimant with a fresh lease. Decisions record one immutable action

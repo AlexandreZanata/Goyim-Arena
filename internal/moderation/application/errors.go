@@ -99,4 +99,25 @@ var (
 	// ErrInvalidAppealConfig indicates the appeal use cases could not be
 	// built from the given dependencies.
 	ErrInvalidAppealConfig = errors.New("application: moderation appeal configuration is invalid")
+
+	// ErrInvalidCursor indicates a malformed, forged or version-mismatched
+	// queue cursor. Unknown values are never reflected back to callers.
+	ErrInvalidCursor = errors.New("application: moderation queue cursor is invalid")
+
+	// ErrWeakQueueCursorSecret indicates the configured cursor signing
+	// secret is shorter than the 256-bit minimum.
+	ErrWeakQueueCursorSecret = errors.New("application: moderation queue cursor secret must be at least 32 bytes")
+
+	// ErrInvalidQueueFilter indicates the requested queue status filter is
+	// outside the case lifecycle vocabulary.
+	ErrInvalidQueueFilter = errors.New("application: moderation queue status filter is invalid")
+
+	// ErrInvalidQueueConfig indicates the queue use case could not be built
+	// from the given dependencies.
+	ErrInvalidQueueConfig = errors.New("application: moderation queue configuration is invalid")
+
+	// ErrUnknownSession indicates the session carrying the request is
+	// unknown to the session store. Step-up freshness cannot be evaluated
+	// without it.
+	ErrUnknownSession = errors.New("application: session is unknown")
 )
