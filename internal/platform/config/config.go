@@ -14,6 +14,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -35,6 +36,8 @@ type Config struct {
 	dbAcquireTimeout  time.Duration
 	billingMarkets    []BillingMarket
 	billingPrices     []BillingPrice
+	billingSuccessURL string
+	billingCancelURL  string
 	stripeSecretKey   Secret
 	stripeTimeout     time.Duration
 }
@@ -160,6 +163,8 @@ func Load(environ []string) (Config, error) {
 		"ARENA_DB_ACQUIRE_TIMEOUT":    true,
 		billingMarketsVariable:        true,
 		billingPriceIDsVariable:       true,
+		billingSuccessURLVariable:     true,
+		billingCancelURLVariable:      true,
 		stripeSecretKeyVariable:       true,
 		stripeTimeoutVariable:         true,
 	}
@@ -310,6 +315,29 @@ func Load(environ []string) (Config, error) {
 		validationErrors = append(validationErrors, problems...)
 	}
 
+	if raw, present := values[billingSuccessURLVariable]; present {
+		validated, problems := parseBillingReturnURL(billingSuccessURLVariable, raw, config.env == EnvProduction)
+		config.billingSuccessURL = validated
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[billingCancelURLVariable]; present {
+		validated, problems := parseBillingReturnURL(billingCancelURLVariable, raw, config.env == EnvProduction)
+		config.billingCancelURL = validated
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	// The two return URLs are one allowlist: both must send the buyer back to
+	// the same origin, and a mismatch is a misconfiguration that could leak a
+	// buyer to another site.
+	if config.billingSuccessURL != "" && config.billingCancelURL != "" &&
+		!sameOrigin(config.billingSuccessURL, config.billingCancelURL) {
+		validationErrors = append(validationErrors, ValidationError{
+			Variable: billingCancelURLVariable,
+			Problem:  "must share the origin of " + billingSuccessURLVariable,
+		})
+	}
+
 	if raw, present := values[stripeSecretKeyVariable]; present {
 		secret, problems := parseStripeSecretKey(raw)
 		config.stripeSecretKey = secret
@@ -397,6 +425,17 @@ func (config Config) String() string {
 		"config{env:%s addr:%s database_url:%s log_level:%s db_max_conns:%d db_min_conns:%d}",
 		config.env, config.addr, config.databaseURL, config.logLevel, config.dbMaxConns, config.dbMinConns,
 	)
+}
+
+// sameOrigin reports whether two validated return URLs share scheme, host and
+// port, so the checkout can only ever send the buyer back to one place.
+func sameOrigin(left, right string) bool {
+	leftURL, leftErr := url.Parse(left)
+	rightURL, rightErr := url.Parse(right)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return leftURL.Scheme == rightURL.Scheme && leftURL.Host == rightURL.Host
 }
 
 // validateAddr enforces a host:port TCP address with a numeric port.

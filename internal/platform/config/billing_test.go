@@ -152,3 +152,116 @@ func TestBillingConfigurationIsImmutableThroughItsGetters(t *testing.T) {
 		t.Error("Config must not expose its internal price slice")
 	}
 }
+
+// TestBillingReturnURLsAreAllowlisted covers the checkout return URLs
+// (P12-T04): they are configuration, they must share one origin, and they must
+// be HTTPS in production — the checkout can never become an open redirect.
+func TestBillingReturnURLsAreAllowlisted(t *testing.T) {
+	t.Parallel()
+
+	config, err := Load(environ(
+		"ARENA_BILLING_SUCCESS_URL=https://arena.example/checkout/success?product=ink",
+		"ARENA_BILLING_CANCEL_URL=https://arena.example/checkout/cancel",
+	))
+	if err != nil {
+		t.Fatalf("load valid return URLs: %v", err)
+	}
+	if config.BillingSuccessURL() != "https://arena.example/checkout/success?product=ink" {
+		t.Errorf("success URL = %q", config.BillingSuccessURL())
+	}
+	if config.BillingCancelURL() != "https://arena.example/checkout/cancel" {
+		t.Errorf("cancel URL = %q", config.BillingCancelURL())
+	}
+
+	unset, err := Load(environ())
+	if err != nil {
+		t.Fatalf("return URLs are optional in the environment: %v", err)
+	}
+	if unset.BillingSuccessURL() != "" || unset.BillingCancelURL() != "" {
+		t.Error("no return URL must be invented by default")
+	}
+
+	valid := []struct {
+		name     string
+		success  string
+		cancel   string
+		envValue string
+	}{
+		{name: "loopback in development", success: "http://127.0.0.1:8080/checkout/success", cancel: "http://127.0.0.1:8080/checkout/cancel"},
+		{name: "same origin with a port", success: "https://arena.example:8443/ok", cancel: "https://arena.example:8443/no"},
+		{name: "https in production", success: "https://arena.example/ok", cancel: "https://arena.example/no", envValue: "production"},
+	}
+	for _, testCase := range valid {
+		t.Run("valid/"+testCase.name, func(t *testing.T) {
+			t.Parallel()
+			environment := environ(
+				"ARENA_BILLING_SUCCESS_URL="+testCase.success,
+				"ARENA_BILLING_CANCEL_URL="+testCase.cancel,
+			)
+			if testCase.envValue == "production" {
+				environment = environ(
+					"ARENA_ENV=production",
+					"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
+					"ARENA_STRIPE_SECRET_KEY=sk_live_urls",
+					"ARENA_BILLING_SUCCESS_URL="+testCase.success,
+					"ARENA_BILLING_CANCEL_URL="+testCase.cancel,
+				)
+			}
+			if _, err := Load(environment); err != nil {
+				t.Fatalf("load: %v", err)
+			}
+		})
+	}
+
+	invalid := []struct {
+		name    string
+		success string
+		cancel  string
+		want    string
+	}{
+		{name: "relative success URL", success: "/checkout/success", cancel: "https://arena.example/no", want: "absolute HTTP(S)"},
+		{name: "javascript scheme", success: "javascript:alert(1)", cancel: "https://arena.example/no", want: "absolute HTTP(S)"},
+		{name: "missing host", success: "https:///success", cancel: "https://arena.example/no", want: "host"},
+		{name: "embedded credentials", success: "https://user:pass@arena.example/ok", cancel: "https://arena.example/no", want: "credentials"},
+		{name: "fragment", success: "https://arena.example/ok#fragment", cancel: "https://arena.example/no", want: "fragment"},
+		{name: "empty value", success: "", cancel: "https://arena.example/no", want: "cannot be empty"},
+		{name: "different origins", success: "https://arena.example/ok", cancel: "https://evil.example/no", want: "share the origin"},
+		{name: "different schemes", success: "https://arena.example/ok", cancel: "http://arena.example/no", want: "share the origin"},
+		{name: "different ports", success: "https://arena.example/ok", cancel: "https://arena.example:8443/no", want: "share the origin"},
+	}
+	for _, testCase := range invalid {
+		t.Run("invalid/"+testCase.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := Load(environ(
+				"ARENA_BILLING_SUCCESS_URL="+testCase.success,
+				"ARENA_BILLING_CANCEL_URL="+testCase.cancel,
+			))
+			if err == nil {
+				t.Fatalf("return URLs %q / %q must be refused", testCase.success, testCase.cancel)
+			}
+			if !strings.Contains(err.Error(), testCase.want) {
+				t.Errorf("error should explain %q: %v", testCase.want, err)
+			}
+			if !strings.Contains(err.Error(), "ARENA_BILLING_") {
+				t.Errorf("error must name the variable: %v", err)
+			}
+		})
+	}
+
+	t.Run("plain HTTP is refused in production", func(t *testing.T) {
+		t.Parallel()
+		_, err := Load(environ(
+			"ARENA_ENV=production",
+			"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
+			"ARENA_STRIPE_SECRET_KEY=sk_live_urls",
+			"ARENA_BILLING_SUCCESS_URL=http://arena.example/ok",
+			"ARENA_BILLING_CANCEL_URL=http://arena.example/no",
+		))
+		if err == nil {
+			t.Fatal("plain HTTP return URLs must be refused in production")
+		}
+		if !strings.Contains(err.Error(), "HTTPS") {
+			t.Errorf("error should name the production rule: %v", err)
+		}
+	})
+}

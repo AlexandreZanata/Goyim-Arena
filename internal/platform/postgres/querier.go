@@ -159,6 +159,10 @@ type Querier interface {
 	// the decision record, so no projection can observe an unrecorded
 	// invalidation.
 	GetAttributionForModeration(ctx context.Context, attributionID pgtype.UUID) (GetAttributionForModerationRow, error)
+	// GetCheckoutIntentBySession resolves the intent a provider session already
+	// stands for. The session identifier is unique by constraint, which is what
+	// makes a replay resolve the original intent instead of creating a second one.
+	GetCheckoutIntentBySession(ctx context.Context, stripeCheckoutSessionID pgtype.Text) (GetCheckoutIntentBySessionRow, error)
 	// GetCommunicationPreferencesByAccountID joins the interface locale owned by
 	// app.profiles with the explicit opt-ins. A missing preferences row resolves
 	// to the conservative default (marketing opt-in false), never to an implicit
@@ -204,6 +208,7 @@ type Querier interface {
 	// administrative flags, and deliberately omits account_id.
 	GetPublicProfileByUsername(ctx context.Context, usernameNormalized string) (GetPublicProfileByUsernameRow, error)
 	GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (AppSession, error)
+	GetStripeCustomer(ctx context.Context, accountID pgtype.UUID) (GetStripeCustomerRow, error)
 	GetWalletAccount(ctx context.Context, accountID pgtype.UUID) (AppWalletAccount, error)
 	// GetWalletAccountForUpdate locks the balance projection row of an account
 	// for the duration of the transaction, serializing concurrent debits so no
@@ -222,6 +227,16 @@ type Querier interface {
 	// needs for negative authorization: the account exists, is active and has a
 	// verified email. It never reads email, credentials or payment identifiers.
 	IsAccountEligibleForProfile(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
+	// Checkout queries (P12-T04). The commercial decision of an intent is
+	// resolved by the server from the versioned catalog and is immutable once
+	// written; these queries insert it and resolve replays, never recompute it.
+	// IsAccountEligibleForPurchase projects the single bit the checkout needs
+	// before it decides to charge anyone: the account exists, is active and has a
+	// verified email (docs/BUSINESS_RULES.md §7, REQ-AUTH-02). It reads no email,
+	// no credential and no payment identifier, so an ineligible or forged
+	// identifier can never be mistaken for a legitimate buyer. A missing row means
+	// the account does not exist at all.
+	IsAccountEligibleForPurchase(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error)
 	// ListArenaArgumentsPage returns one keyset page of published top-level
 	// arguments of one relation in one Arena, newest first, with the derived
 	// published-reply count computed in the same statement (no N+1). Withdrawn
@@ -330,6 +345,16 @@ type Querier interface {
 	// optimistic version check inside the publication transaction, so the Arena
 	// row and the consumed Arena Pass commit together (P08-T04).
 	PublishArenaDraft(ctx context.Context, arg PublishArenaDraftParams) (AppArena, error)
+	// RecordCheckoutIntentIfAbsent inserts the commercial decision exactly once per
+	// provider session, so a replay of the same operation resolves the stored
+	// intent. The lifecycle CHECK is what keeps the recorded state honest: an open
+	// intent has a session, an expired one is closed at a known instant.
+	RecordCheckoutIntentIfAbsent(ctx context.Context, arg RecordCheckoutIntentIfAbsentParams) (RecordCheckoutIntentIfAbsentRow, error)
+	// RecordStripeCustomerIfAbsent stores the account→customer correlation exactly
+	// once per account: a concurrent or retried insertion writes nothing and
+	// resolves the stored mapping, so the account is never charged through two
+	// different provider customers.
+	RecordStripeCustomerIfAbsent(ctx context.Context, arg RecordStripeCustomerIfAbsentParams) (RecordStripeCustomerIfAbsentRow, error)
 	// RemoveArena applies the moderation removal to a published, closed or
 	// restricted Arena under the optimistic version check; removed is terminal.
 	RemoveArena(ctx context.Context, arg RemoveArenaParams) (AppArena, error)

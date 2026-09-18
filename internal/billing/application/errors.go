@@ -67,3 +67,36 @@ var (
 func IsRetryablePaymentGatewayError(err error) bool {
 	return errors.Is(err, ErrPaymentGatewayUnavailable) || errors.Is(err, ErrPaymentGatewayTimeout)
 }
+
+// Checkout error vocabulary (P12-T04).
+//
+// The messages never carry the email, the account identifier, the provider
+// customer or any amount that a caller supplied: a refusal says what rule was
+// broken, never who broke it.
+var (
+	// ErrPurchaserNotFound indicates no account carries the acting
+	// identifier. It is distinct from an ineligible account so a forged
+	// identifier is never treated as a legitimate buyer.
+	ErrPurchaserNotFound = errors.New("application: account was not found")
+
+	// ErrPurchaserNotEligible indicates the account exists but may not
+	// purchase: it is not active or its email is not verified
+	// (docs/BUSINESS_RULES.md §7, REQ-AUTH-02).
+	ErrPurchaserNotEligible = errors.New("application: account is not eligible to purchase")
+
+	// ErrProviderModeChanged indicates the account's stored provider customer
+	// belongs to the other provider mode (test vs live). Test and live
+	// objects are never mixed, so the flow stops instead of charging a live
+	// session against a test mapping.
+	ErrProviderModeChanged = errors.New("application: account provider customer belongs to the other mode")
+
+	// ErrProviderAmountMismatch indicates the provider would charge something
+	// other than the price the versioned catalog resolved. The buyer is never
+	// shown one price and charged another.
+	ErrProviderAmountMismatch = errors.New("application: provider price does not match the resolved catalog price")
+
+	// ErrInvalidCheckoutConfig indicates the checkout use case could not be
+	// built from the given configuration (missing or incoherent return URLs).
+	// It is a composition error, raised before the process serves anything.
+	ErrInvalidCheckoutConfig = errors.New("application: checkout configuration is invalid")
+)

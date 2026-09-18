@@ -42,3 +42,108 @@ type PassLotRepository interface {
 	// the original lot with Replayed set and writes nothing.
 	GrantPassLot(ctx context.Context, request GrantPassLotRequest) (*GrantPassLotResult, error)
 }
+
+// Purchaser is the billing view of the account that wants to buy: its
+// identifier and whether it may purchase at all.
+type Purchaser struct {
+	AccountID domain.AccountID
+	// Eligible reports an active account with a verified email
+	// (docs/BUSINESS_RULES.md §7, REQ-AUTH-02). Nothing else about the
+	// account — email, credentials, profile — ever crosses this port.
+	Eligible bool
+}
+
+// PurchaserDirectory answers the purchase eligibility question without
+// exposing the identity module: the composition root satisfies it, and the
+// eligibility rule stays in one documented predicate.
+type PurchaserDirectory interface {
+	// PurchaserForCheckout returns the acting account's eligibility. It
+	// returns ErrPurchaserNotFound when no account carries the identifier,
+	// so an unknown account can never be treated as an eligible one.
+	PurchaserForCheckout(ctx context.Context, accountID domain.AccountID) (Purchaser, error)
+}
+
+// StripeCustomerRecord is the stored correlation between an account and its
+// provider customer. The provider identifier is private: it is persisted and
+// correlated locally, never projected to a client.
+type StripeCustomerRecord struct {
+	AccountID  domain.AccountID
+	CustomerID domain.StripeCustomerID
+	// Livemode pins the provider mode of the mapping: test and live objects
+	// are never mixed for one account.
+	Livemode  bool
+	CreatedAt time.Time
+}
+
+// RecordStripeCustomerRequest stores a provider customer mapping.
+type RecordStripeCustomerRequest struct {
+	AccountID  domain.AccountID
+	CustomerID domain.StripeCustomerID
+	Livemode   bool
+}
+
+// StripeCustomerRepository persists the account→customer correlation, which is
+// the anchor every checkout of the account is created against.
+type StripeCustomerRepository interface {
+	// StripeCustomer returns the stored mapping, nil when the account has
+	// none yet.
+	StripeCustomer(ctx context.Context, accountID domain.AccountID) (*StripeCustomerRecord, error)
+
+	// RecordStripeCustomer stores the mapping exactly once per account. A
+	// concurrent creation resolves the stored mapping instead of overwriting
+	// it, so a retried request never leaves the account charged through two
+	// different provider customers.
+	RecordStripeCustomer(ctx context.Context, request RecordStripeCustomerRequest) (*StripeCustomerRecord, error)
+}
+
+// RecordCheckoutIntentRequest is the commercial decision to persist, already
+// resolved by the server from the versioned catalog. No field of it can come
+// from a browser.
+type RecordCheckoutIntentRequest struct {
+	AccountID      domain.AccountID
+	Market         domain.Market
+	ProductID      domain.ProductID
+	CatalogVersion int
+	Amount         domain.Money
+	Livemode       bool
+	// SessionID is the provider session the decision was shipped as.
+	SessionID domain.StripeCheckoutSessionID
+	// Status is open for a payable session and expired when the provider
+	// reports a session that can no longer be paid.
+	Status domain.CheckoutIntentStatus
+	// ClosedAt is required exactly when Status is expired: the instant the
+	// intent stopped being payable.
+	ClosedAt *time.Time
+}
+
+// CheckoutIntentRecord is one stored checkout intent as read back from
+// persistence.
+type CheckoutIntentRecord struct {
+	ID             string
+	AccountID      domain.AccountID
+	Market         domain.Market
+	ProductID      domain.ProductID
+	CatalogVersion int
+	Amount         domain.Money
+	Livemode       bool
+	Status         domain.CheckoutIntentStatus
+	SessionID      domain.StripeCheckoutSessionID
+	CreatedAt      time.Time
+}
+
+// RecordCheckoutIntentResult is the outcome of recording an intent: the stored
+// record and whether the provider session had already been recorded.
+type RecordCheckoutIntentResult struct {
+	Intent   CheckoutIntentRecord
+	Replayed bool
+}
+
+// CheckoutIntentRepository persists checkout intents with idempotency anchored
+// on the provider session identifier, which is unique by schema constraint.
+type CheckoutIntentRepository interface {
+	// RecordCheckoutIntent inserts the intent exactly once per provider
+	// session. A replay resolves the stored intent with Replayed set and
+	// writes nothing; a session already recorded for another account is
+	// refused instead of being disclosed.
+	RecordCheckoutIntent(ctx context.Context, request RecordCheckoutIntentRequest) (*RecordCheckoutIntentResult, error)
+}

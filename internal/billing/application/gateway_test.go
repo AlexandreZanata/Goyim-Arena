@@ -20,17 +20,47 @@ import (
 type fakeGateway struct {
 	requests []string
 	answers  []application.CheckoutSession
+
+	// Recording of the full requests, used by the checkout use case tests.
+	customerRequests []application.CreateCustomerRequest
+	sessionRequests  []application.CreateCheckoutSessionRequest
+
+	// Configured answers and failures. An explicit checkoutSession wins, then
+	// the per-price answers (what a real provider would charge for each
+	// price), then the queue above.
+	createCustomer  application.Customer
+	checkoutSession application.CheckoutSession
+	sessionByPrice  map[string]application.CheckoutSession
+	customerErr     error
+	checkoutErr     error
 }
 
 var _ application.PaymentGateway = (*fakeGateway)(nil)
 
 func (g *fakeGateway) CreateCustomer(_ context.Context, request application.CreateCustomerRequest) (application.Customer, error) {
 	g.requests = append(g.requests, "create customer "+request.IdempotencyKey)
-	return application.Customer{ID: domain.StripeCustomerID("cus_fake"), Livemode: false}, nil
+	g.customerRequests = append(g.customerRequests, request)
+	if g.customerErr != nil {
+		return application.Customer{}, g.customerErr
+	}
+	if g.createCustomer.ID.IsZero() {
+		return application.Customer{ID: domain.StripeCustomerID("cus_fake"), Livemode: false}, nil
+	}
+	return g.createCustomer, nil
 }
 
 func (g *fakeGateway) CreateCheckoutSession(_ context.Context, request application.CreateCheckoutSessionRequest) (application.CheckoutSession, error) {
 	g.requests = append(g.requests, "create session "+request.ClientReference)
+	g.sessionRequests = append(g.sessionRequests, request)
+	if g.checkoutErr != nil {
+		return application.CheckoutSession{}, g.checkoutErr
+	}
+	if !g.checkoutSession.ID.IsZero() {
+		return g.checkoutSession, nil
+	}
+	if answer, found := g.sessionByPrice[request.PriceID.String()]; found {
+		return answer, nil
+	}
 	if len(g.answers) == 0 {
 		return application.CheckoutSession{}, errors.New("fake gateway: no answer queued")
 	}
@@ -41,6 +71,9 @@ func (g *fakeGateway) CreateCheckoutSession(_ context.Context, request applicati
 
 func (g *fakeGateway) GetCheckoutSession(_ context.Context, id domain.StripeCheckoutSessionID) (application.CheckoutSession, error) {
 	g.requests = append(g.requests, "get session "+id.String())
+	if !g.checkoutSession.ID.IsZero() {
+		return g.checkoutSession, nil
+	}
 	if len(g.answers) == 0 {
 		return application.CheckoutSession{}, nil
 	}

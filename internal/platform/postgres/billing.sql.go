@@ -205,6 +205,96 @@ func (q *Queries) GetArenaPassLotByGrant(ctx context.Context, arg GetArenaPassLo
 	return i, err
 }
 
+const getCheckoutIntentBySession = `-- name: GetCheckoutIntentBySession :one
+SELECT id, account_id, market, product_id, catalog_version, currency, amount_minor, livemode, status, stripe_checkout_session_id, created_at
+FROM app.checkout_intents
+WHERE stripe_checkout_session_id = $1
+`
+
+type GetCheckoutIntentBySessionRow struct {
+	ID                      pgtype.UUID
+	AccountID               pgtype.UUID
+	Market                  string
+	ProductID               string
+	CatalogVersion          int32
+	Currency                string
+	AmountMinor             int64
+	Livemode                bool
+	Status                  string
+	StripeCheckoutSessionID pgtype.Text
+	CreatedAt               pgtype.Timestamptz
+}
+
+// GetCheckoutIntentBySession resolves the intent a provider session already
+// stands for. The session identifier is unique by constraint, which is what
+// makes a replay resolve the original intent instead of creating a second one.
+func (q *Queries) GetCheckoutIntentBySession(ctx context.Context, stripeCheckoutSessionID pgtype.Text) (GetCheckoutIntentBySessionRow, error) {
+	row := q.db.QueryRow(ctx, getCheckoutIntentBySession, stripeCheckoutSessionID)
+	var i GetCheckoutIntentBySessionRow
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Market,
+		&i.ProductID,
+		&i.CatalogVersion,
+		&i.Currency,
+		&i.AmountMinor,
+		&i.Livemode,
+		&i.Status,
+		&i.StripeCheckoutSessionID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getStripeCustomer = `-- name: GetStripeCustomer :one
+SELECT account_id, stripe_customer_id, livemode, created_at
+FROM app.stripe_customers
+WHERE account_id = $1
+`
+
+type GetStripeCustomerRow struct {
+	AccountID        pgtype.UUID
+	StripeCustomerID string
+	Livemode         bool
+	CreatedAt        pgtype.Timestamptz
+}
+
+func (q *Queries) GetStripeCustomer(ctx context.Context, accountID pgtype.UUID) (GetStripeCustomerRow, error) {
+	row := q.db.QueryRow(ctx, getStripeCustomer, accountID)
+	var i GetStripeCustomerRow
+	err := row.Scan(
+		&i.AccountID,
+		&i.StripeCustomerID,
+		&i.Livemode,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const isAccountEligibleForPurchase = `-- name: IsAccountEligibleForPurchase :one
+
+SELECT (status = 'active' AND email_verified_at IS NOT NULL) AS eligible
+FROM app.accounts
+WHERE id = $1
+`
+
+// Checkout queries (P12-T04). The commercial decision of an intent is
+// resolved by the server from the versioned catalog and is immutable once
+// written; these queries insert it and resolve replays, never recompute it.
+// IsAccountEligibleForPurchase projects the single bit the checkout needs
+// before it decides to charge anyone: the account exists, is active and has a
+// verified email (docs/BUSINESS_RULES.md §7, REQ-AUTH-02). It reads no email,
+// no credential and no payment identifier, so an ineligible or forged
+// identifier can never be mistaken for a legitimate buyer. A missing row means
+// the account does not exist at all.
+func (q *Queries) IsAccountEligibleForPurchase(ctx context.Context, id pgtype.UUID) (pgtype.Bool, error) {
+	row := q.db.QueryRow(ctx, isAccountEligibleForPurchase, id)
+	var eligible pgtype.Bool
+	err := row.Scan(&eligible)
+	return eligible, err
+}
+
 const listArenaPassConsumptionsByAccount = `-- name: ListArenaPassConsumptionsByAccount :many
 SELECT c.id, c.lot_id, c.arena_id, c.consumed_at, l.origin, l.reference
 FROM app.arena_pass_consumptions c
@@ -442,4 +532,111 @@ func (q *Queries) ListExpiredArenaPassLots(ctx context.Context, arg ListExpiredA
 		return nil, err
 	}
 	return items, nil
+}
+
+const recordCheckoutIntentIfAbsent = `-- name: RecordCheckoutIntentIfAbsent :one
+INSERT INTO app.checkout_intents (
+    account_id, market, product_id, catalog_version, currency, amount_minor,
+    livemode, status, stripe_checkout_session_id, closed_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (stripe_checkout_session_id) DO NOTHING
+RETURNING id, account_id, market, product_id, catalog_version, currency, amount_minor, livemode, status, stripe_checkout_session_id, created_at
+`
+
+type RecordCheckoutIntentIfAbsentParams struct {
+	AccountID               pgtype.UUID
+	Market                  string
+	ProductID               string
+	CatalogVersion          int32
+	Currency                string
+	AmountMinor             int64
+	Livemode                bool
+	Status                  string
+	StripeCheckoutSessionID pgtype.Text
+	ClosedAt                pgtype.Timestamptz
+}
+
+type RecordCheckoutIntentIfAbsentRow struct {
+	ID                      pgtype.UUID
+	AccountID               pgtype.UUID
+	Market                  string
+	ProductID               string
+	CatalogVersion          int32
+	Currency                string
+	AmountMinor             int64
+	Livemode                bool
+	Status                  string
+	StripeCheckoutSessionID pgtype.Text
+	CreatedAt               pgtype.Timestamptz
+}
+
+// RecordCheckoutIntentIfAbsent inserts the commercial decision exactly once per
+// provider session, so a replay of the same operation resolves the stored
+// intent. The lifecycle CHECK is what keeps the recorded state honest: an open
+// intent has a session, an expired one is closed at a known instant.
+func (q *Queries) RecordCheckoutIntentIfAbsent(ctx context.Context, arg RecordCheckoutIntentIfAbsentParams) (RecordCheckoutIntentIfAbsentRow, error) {
+	row := q.db.QueryRow(ctx, recordCheckoutIntentIfAbsent,
+		arg.AccountID,
+		arg.Market,
+		arg.ProductID,
+		arg.CatalogVersion,
+		arg.Currency,
+		arg.AmountMinor,
+		arg.Livemode,
+		arg.Status,
+		arg.StripeCheckoutSessionID,
+		arg.ClosedAt,
+	)
+	var i RecordCheckoutIntentIfAbsentRow
+	err := row.Scan(
+		&i.ID,
+		&i.AccountID,
+		&i.Market,
+		&i.ProductID,
+		&i.CatalogVersion,
+		&i.Currency,
+		&i.AmountMinor,
+		&i.Livemode,
+		&i.Status,
+		&i.StripeCheckoutSessionID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const recordStripeCustomerIfAbsent = `-- name: RecordStripeCustomerIfAbsent :one
+INSERT INTO app.stripe_customers (account_id, stripe_customer_id, livemode)
+VALUES ($1, $2, $3)
+ON CONFLICT (account_id) DO NOTHING
+RETURNING account_id, stripe_customer_id, livemode, created_at
+`
+
+type RecordStripeCustomerIfAbsentParams struct {
+	AccountID        pgtype.UUID
+	StripeCustomerID string
+	Livemode         bool
+}
+
+type RecordStripeCustomerIfAbsentRow struct {
+	AccountID        pgtype.UUID
+	StripeCustomerID string
+	Livemode         bool
+	CreatedAt        pgtype.Timestamptz
+}
+
+// RecordStripeCustomerIfAbsent stores the account→customer correlation exactly
+// once per account: a concurrent or retried insertion writes nothing and
+// resolves the stored mapping, so the account is never charged through two
+// different provider customers.
+func (q *Queries) RecordStripeCustomerIfAbsent(ctx context.Context, arg RecordStripeCustomerIfAbsentParams) (RecordStripeCustomerIfAbsentRow, error) {
+	row := q.db.QueryRow(ctx, recordStripeCustomerIfAbsent, arg.AccountID, arg.StripeCustomerID, arg.Livemode)
+	var i RecordStripeCustomerIfAbsentRow
+	err := row.Scan(
+		&i.AccountID,
+		&i.StripeCustomerID,
+		&i.Livemode,
+		&i.CreatedAt,
+	)
+	return i, err
 }

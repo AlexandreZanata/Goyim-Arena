@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -32,8 +33,17 @@ const (
 	// billingPriceIDsVariable lists the Stripe price of each product.
 	billingPriceIDsVariable = "ARENA_BILLING_PRICE_IDS"
 
+	// billingSuccessURLVariable and billingCancelURLVariable are the
+	// allowlisted return URLs of the checkout (P12-T04).
+	billingSuccessURLVariable = "ARENA_BILLING_SUCCESS_URL"
+	billingCancelURLVariable  = "ARENA_BILLING_CANCEL_URL"
+
 	// maxBillingPriceIDLength bounds a configured provider identifier.
 	maxBillingPriceIDLength = 200
+
+	// maxBillingReturnURLLength bounds a configured return URL: it travels to
+	// the payment provider, which documents a bounded length for it.
+	maxBillingReturnURLLength = 2000
 )
 
 // BillingMarket is one enabled commercial region and the currency it charges.
@@ -151,6 +161,37 @@ func parseBillingPrices(raw string) ([]BillingPrice, ValidationErrors) {
 	return prices, validationErrors
 }
 
+// parseBillingReturnURL validates one allowlisted return URL: an absolute
+// HTTP(S) URL with a host and without embedded credentials, bounded in length.
+// HTTPS is required in production (an external buyer must never be sent back
+// over plain HTTP), while development may use a loopback address.
+func parseBillingReturnURL(variable, raw string, production bool) (string, ValidationErrors) {
+	problem := ""
+	parsed, err := url.Parse(raw)
+	switch {
+	case raw == "":
+		problem = "cannot be empty (remove the variable instead of leaving it blank)"
+	case err != nil:
+		problem = "is not a valid URL"
+	case parsed.Scheme != "http" && parsed.Scheme != "https":
+		problem = fmt.Sprintf("invalid value %q (want an absolute HTTP(S) URL)", raw)
+	case parsed.Host == "":
+		problem = fmt.Sprintf("invalid value %q (want a URL with a host, for example https://arena.example/checkout/success)", raw)
+	case parsed.User != nil:
+		problem = "must not carry credentials"
+	case parsed.Fragment != "":
+		problem = "must not carry a fragment (the provider appends its own parameters)"
+	case len(raw) > maxBillingReturnURLLength:
+		problem = fmt.Sprintf("is longer than %d characters", maxBillingReturnURLLength)
+	case production && parsed.Scheme != "https":
+		problem = "must use HTTPS when ARENA_ENV=production"
+	}
+	if problem != "" {
+		return "", ValidationErrors{{Variable: variable, Problem: problem}}
+	}
+	return raw, nil
+}
+
 // BillingMarkets returns the enabled commercial regions of this deployment,
 // empty when none is configured. The slice is a copy, so the immutable Config
 // cannot be mutated through it.
@@ -168,3 +209,11 @@ func (config Config) BillingPrices() []BillingPrice {
 	copy(prices, config.billingPrices)
 	return prices
 }
+
+// BillingSuccessURL returns the allowlisted URL the provider sends the buyer
+// to after paying, empty when this deployment does not serve checkout.
+func (config Config) BillingSuccessURL() string { return config.billingSuccessURL }
+
+// BillingCancelURL returns the allowlisted URL the provider sends the buyer to
+// after cancelling, empty when this deployment does not serve checkout.
+func (config Config) BillingCancelURL() string { return config.billingCancelURL }

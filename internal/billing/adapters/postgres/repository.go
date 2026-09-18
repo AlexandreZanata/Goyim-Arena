@@ -2,7 +2,10 @@
 // It implements the Arena Pass grant port against the entitlement schema
 // (migration 00011): the grant is inserted with ON CONFLICT DO NOTHING on
 // (account_id, origin, reference), so retries resolve the original lot
-// untouched.
+// untouched. Since P12-T04 it also implements the checkout surface — purchase
+// eligibility, the account→provider customer correlation and the checkout
+// intents — with the same replay rule, anchored on the provider session
+// identifier that the schema keeps unique.
 package postgres
 
 import (

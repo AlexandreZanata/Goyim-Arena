@@ -52,6 +52,13 @@ const (
 	CodeInvalidCheckoutMode          ErrorCode = "BILLING_INVALID_CHECKOUT_MODE"
 	CodeInvalidBillingPeriod         ErrorCode = "BILLING_INVALID_BILLING_PERIOD"
 	CodeInvalidCheckoutPaymentStatus ErrorCode = "BILLING_INVALID_CHECKOUT_PAYMENT_STATUS"
+
+	// Checkout intent errors (P12-T04): the local record of one purchase
+	// attempt and the retry key that makes it replayable.
+	CodeEmptyIdempotencyKey         ErrorCode = "BILLING_EMPTY_IDEMPOTENCY_KEY"
+	CodeInvalidIdempotencyKey       ErrorCode = "BILLING_INVALID_IDEMPOTENCY_KEY"
+	CodeIdempotencyKeyTooLong       ErrorCode = "BILLING_IDEMPOTENCY_KEY_TOO_LONG"
+	CodeInvalidCheckoutIntentStatus ErrorCode = "BILLING_INVALID_CHECKOUT_INTENT_STATUS"
 )
 
 // DomainError represents an invariant or rule failure in the billing domain.
@@ -115,4 +122,9 @@ var (
 	ErrInvalidCheckoutMode               = DomainError{Code: CodeInvalidCheckoutMode, Message: "checkout mode is outside the supported vocabulary"}
 	ErrInvalidBillingPeriod              = DomainError{Code: CodeInvalidBillingPeriod, Message: "billing period must be a complete interval with the end after the start"}
 	ErrInvalidCheckoutPaymentStatus      = DomainError{Code: CodeInvalidCheckoutPaymentStatus, Message: "checkout payment status is outside the provider vocabulary"}
+
+	ErrEmptyIdempotencyKey         = DomainError{Code: CodeEmptyIdempotencyKey, Message: "idempotency key cannot be empty"}
+	ErrInvalidIdempotencyKey       = DomainError{Code: CodeInvalidIdempotencyKey, Message: "idempotency key contains unsupported characters"}
+	ErrIdempotencyKeyTooLong       = DomainError{Code: CodeIdempotencyKeyTooLong, Message: "idempotency key exceeds the maximum allowed length"}
+	ErrInvalidCheckoutIntentStatus = DomainError{Code: CodeInvalidCheckoutIntentStatus, Message: "checkout intent status is outside the local vocabulary"}
 )
