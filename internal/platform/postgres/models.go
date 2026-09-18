@@ -19,6 +19,18 @@ type AppAccount struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+// Minimal administrative assignments: one row per account, granted by an existing account, revocable with a dated revocation
+type AppAdminRole struct {
+	AccountID pgtype.UUID
+	// Administrative capability: moderator or admin; policy enforcement arrives with P13-T02
+	Role string
+	// Acting account that granted the role; immutable provenance of the assignment
+	GrantedBy pgtype.UUID
+	GrantedAt pgtype.Timestamptz
+	// Instant the role was revoked, when it was; NULL while the assignment is active
+	RevokedAt pgtype.Timestamptz
+}
+
 // Arena aggregation root: immutable published statement and fixed content language, mutable lifecycle status
 type AppArena struct {
 	ID        pgtype.UUID
@@ -232,6 +244,68 @@ type AppEmailVerificationToken struct {
 	TokenHash []byte
 	ExpiresAt pgtype.Timestamptz
 	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
+// Immutable sanction facts of a case: actor, applied rule, restricted justification and optional expiry; reversals are new rows, never edits
+type AppModerationAction struct {
+	ID         pgtype.UUID
+	CaseID     pgtype.UUID
+	ActionType string
+	ActorID    pgtype.UUID
+	// Stable rule reference applied by the moderator (for example MOD-3:spam); policy neutrality is tested in P13-T08
+	RuleApplied string
+	// Restricted internal justification up to 2000 chars; never part of a public projection
+	Justification string
+	// Expiry of time-boxed measures (suspension, interaction_limit); required exactly for those, forbidden for the rest
+	ExpiresAt pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
+// Restricted appeal per action: exactly one appeal contests one action; review outcome is appended once by a reviewer
+type AppModerationAppeal struct {
+	ID pgtype.UUID
+	// Contested action; UNIQUE enforces one appeal per action when applicable
+	ActionID    pgtype.UUID
+	AppellantID pgtype.UUID
+	Status      string
+	// Appellant context up to 2000 chars; restricted evidence, never part of a public projection
+	Context    string
+	ReviewerID pgtype.UUID
+	// Reviewer justification written once when the appeal is decided; the rest of the record is immutable
+	DecisionReason pgtype.Text
+	CreatedAt      pgtype.Timestamptz
+	DecidedAt      pgtype.Timestamptz
+}
+
+// Moderation case per target with an explicit triage lifecycle; reporter evidence stays in reports, decisions stay in actions
+type AppModerationCase struct {
+	ID               pgtype.UUID
+	TargetType       string
+	TargetArenaID    pgtype.UUID
+	TargetArgumentID pgtype.UUID
+	TargetAccountID  pgtype.UUID
+	// Triage lifecycle: open -> under_review -> decided -> closed; enforced by trigger
+	Status string
+	// Triage priority: low, normal, high or urgent; mutable without moving the lifecycle
+	Priority  string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+	ClosedAt  pgtype.Timestamptz
+}
+
+// Restricted report evidence: reporter, structured reason and optional context; never part of a public projection
+type AppModerationReport struct {
+	ID               pgtype.UUID
+	ReporterID       pgtype.UUID
+	TargetType       string
+	TargetArenaID    pgtype.UUID
+	TargetArgumentID pgtype.UUID
+	TargetAccountID  pgtype.UUID
+	// Closed reason vocabulary from MODERATION §3; free text lives only in context
+	Reason string
+	// Optional reporter context up to 2000 chars; restricted evidence, never logged or exported
+	Context   pgtype.Text
 	CreatedAt pgtype.Timestamptz
 }
 
