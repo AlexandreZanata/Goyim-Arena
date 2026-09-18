@@ -151,10 +151,11 @@ type SessionRepository interface {
 	RevokeAllAccountSessions(ctx context.Context, accountID domain.AccountID) error
 }
 
-// RateLimiter evaluates whether an operation identified by key is allowed.
-// A definitive rate limiting policy arrives in later plan phases; this port
-// provides the extension hook required by P04-T08.
-type RateLimiter interface {
-	// Allow reports whether an action identified by key is currently permitted.
-	Allow(ctx context.Context, key string) (bool, error)
-}
+// The rate limiting hook P04-T08 declared here was replaced in P16-T03 by
+// internal/platform/ratelimit. The hook was a bool keyed on a string the
+// adapter built itself, and the identity adapter built it from RemoteAddr and
+// the first X-Forwarded-For entry — a value any client controls, so rotating
+// the header produced unlimited distinct keys. The policy now lives in one
+// platform table keyed by action, the mechanism is bounded in memory, and the
+// transport facts come from internal/platform/clientip, which honors a
+// forwarding header only when the peer is a configured trusted proxy.

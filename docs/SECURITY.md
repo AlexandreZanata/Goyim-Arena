@@ -65,6 +65,19 @@ Camadas complementares:
 
 IP é sinal imperfeito e dado pessoal potencial. Nunca é prova isolada de abuso. A aplicação só confia em headers de IP recebidos de proxies explicitamente confiáveis.
 
+### Limites na aplicação (P16-T03)
+
+Implementados em `internal/platform/ratelimit`: uma tabela de políticas por ação (`auth.register`, `auth.login`, `auth.password_reset_request`, `auth.password_reset_confirm`, `position.confirm`, `position.change`, `argument.publish`, `report.file`, `checkout.create`, `billing.portal`) com orçamento por endereço de rede e, quando autenticado, também por conta. O orçamento por conta é mais apertado que o por endereço: o endereço é sinal bruto (NAT de operadora coloca milhares de pessoas atrás dele) e a conta é exata. Cada recusa é um problem RFC 9457 com `code: rate_limited` e `Retry-After` em delta-seconds arredondado para cima.
+
+Onde os headers de proxy entram: `internal/platform/clientip` só lê `X-Forwarded-For` quando o par imediato da conexão está num CIDR confiável configurado. Sem proxies confiáveis (o default), todo header de encaminhamento é ignorado e a chave é o endereço da conexão — um cliente que varia o header para parecer mil clientes continua sendo um. Com proxies confiáveis, a cadeia é percorrida da direita para a esquerda pulando endereços confiáveis, e a primeira entrada não confiável é o cliente. `X-Real-IP` e `CF-Connecting-IP` não são consultados: são valores únicos, sem cadeia, e a aplicação não tem como distinguir o que o proxy escreveu do que o cliente escreveu.
+
+Limites conhecidos destes limites, que precisam de decisão antes de escalar horizontalmente:
+
+- **o limitador é por processo e em memória.** Com N instâncias o orçamento efetivo é N vezes a tabela: o edge (Cloudflare) é quem limita entre instâncias hoje, e um store compartilhado (Redis) é o passo necessário para fechar a lacuna;
+- **a memória é limitada por eviction.** O mapa guarda no máximo `DefaultCapacity` chaves, descartando as menos recentemente usadas, e chaves ociosas expiram. O custo honesto dessa escolha é que eviction esquece um balde: quem inunda chaves distintas (botnet) pode zerar a contagem das chaves que força para fora. O limite absoluto de memória é a razão de aceitar isso; contra um botnet, quem limita é o edge;
+- **endereços em memória são dado pessoal potencial.** Não são persistidos, não entram em log, não entram em métrica, e uma decisão de recusa carrega apenas o tipo de dimensão que recusou, nunca o valor;
+- **as políticas são pontos de partida conservadores**, derivados do custo de servir uma requisição aceita (hash Argon2id, email enviado, chamada ao Stripe, atenção humana na fila). Ajuste real depende de tráfego real (fase 28); afrouxar uma linha é decisão registrada, não conveniência local.
+
 ## 7. Wallet e concorrência
 
 - Ledger append-only; saldo materializado nunca é autoridade isolada.
