@@ -1,0 +1,16 @@
+{
+  "email": {
+    "greeting": "Olá,",
+    "signature": "Equipe Goyim Arena",
+    "verification": {
+      "subject": "Confirme seu email no Goyim Arena",
+      "lead": "Use o código abaixo para confirmar seu email. Se você não pediu isso, ignore esta mensagem.",
+      "code_label": "Código de verificação"
+    },
+    "password_reset": {
+      "subject": "Redefinição de senha do Goyim Arena",
+      "lead": "Use o código abaixo para redefinir sua senha. Se você não pediu isso, ignore esta mensagem.",
+      "code_label": "Código de redefinição"
+    }
+  }
+}

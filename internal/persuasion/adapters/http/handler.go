@@ -173,18 +173,37 @@ func writeJSON(w http.ResponseWriter, status int, document any) {
 	_ = json.NewEncoder(w).Encode(document)
 }
 
-// writeCacheableJSON renders a public document with a strong ETag computed
-// over its canonical JSON body and honors If-None-Match with 304. The helper
-// mirrors the other public reads; the copy keeps the adapters independent.
-func writeCacheableJSON(w http.ResponseWriter, r *http.Request, document any) {
+// writeCacheableJSON serves a public document whose body carries the instant
+// of its own derivation.
+//
+// The validator covers that document without the instant, and it is weak.
+// A strong validator over the whole body was wrong, and the mistake had a
+// measurable cost: the instant moves on every request, so two reads of the
+// same facts never compared equal and a client revalidating after the cache
+// window was sent the entire document again — the ETag saved nothing at all.
+// RFC 9110 section 8.8.1 requires a strong validator to be unique across every
+// representation, which no validator can be while the annotation is part of
+// the body; section 8.8.2 is for exactly this case, a representation that
+// stays equivalent while its metadata moves, and If-None-Match performs the
+// weak comparison for GET.
+//
+// facts is the document with the annotation left empty; document is the same
+// document as it is served. The helper mirrors the other public reads, and the
+// copy keeps the adapters independent.
+func writeCacheableJSON(w http.ResponseWriter, r *http.Request, facts, document any) {
+	factsBody, err := json.Marshal(facts)
+	if err != nil {
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindInternal, "server_error", "failed to encode response"))
+		return
+	}
 	body, err := json.Marshal(document)
 	if err != nil {
 		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindInternal, "server_error", "failed to encode response"))
 		return
 	}
 
-	sum := sha256.Sum256(body)
-	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	sum := sha256.Sum256(factsBody)
+	etag := `W/"` + hex.EncodeToString(sum[:]) + `"`
 
 	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(publicCacheSeconds))
 	w.Header().Set("Vary", "Accept-Encoding")
@@ -200,8 +219,11 @@ func writeCacheableJSON(w http.ResponseWriter, r *http.Request, document any) {
 	_, _ = w.Write(body)
 }
 
-// etagMatches implements the weak comparison of RFC 9110 for If-None-Match.
+// etagMatches implements the weak comparison of RFC 9110 for If-None-Match:
+// the opaque tags are compared, and the weakness prefix of either side is not
+// part of the identity of the representation.
 func etagMatches(header, etag string) bool {
+	etag = strings.TrimPrefix(etag, "W/")
 	header = strings.TrimSpace(header)
 	if header == "" {
 		return false
@@ -317,11 +339,13 @@ func (h *Handler) GetArgumentMetrics(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeCacheableJSON(w, r, argumentMetricsResponse{
+	facts := argumentMetricsResponse{
 		ValidAttributions: metrics.ValidAttributions,
 		DistinctPeople:    metrics.DistinctPeople,
-		CheckedAt:         metrics.CheckedAt.UTC().Format(time.RFC3339),
-	})
+	}
+	served := facts
+	served.CheckedAt = metrics.CheckedAt.UTC().Format(time.RFC3339)
+	writeCacheableJSON(w, r, facts, served)
 }
 
 // GetProfileReputation handles GET /api/v1/profiles/{username}/reputation.
@@ -345,15 +369,17 @@ func (h *Handler) GetProfileReputation(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeCacheableJSON(w, r, profileReputationResponse{
+	facts := profileReputationResponse{
 		Username:          reputation.Username,
 		InfluencedPeople:  reputation.InfluencedPeople(),
 		ValidAttributions: reputation.TotalValidAttributions(),
 		Arenas:            arenas,
 		ByCategory:        dimensionResponses(reputation.ByCategory()),
 		ByLanguage:        dimensionResponses(reputation.ByLanguage()),
-		CheckedAt:         reputation.CheckedAt.UTC().Format(time.RFC3339),
-	})
+	}
+	served := facts
+	served.CheckedAt = reputation.CheckedAt.UTC().Format(time.RFC3339)
+	writeCacheableJSON(w, r, facts, served)
 }
 
 // GetAttributionSignals handles GET

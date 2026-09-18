@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,6 +22,17 @@ import (
 )
 
 func setupTransparencyHarness(t *testing.T) (http.Handler, *pgxpool.Pool) {
+	t.Helper()
+	return setupTransparencyHarnessWithClock(t, clockseed.NewClock())
+}
+
+// harnessClock is what the harness needs from a clock: the handler accepts any
+// implementation of it.
+type harnessClock interface{ Now() time.Time }
+
+// setupTransparencyHarnessWithClock wires the harness over a given clock, which
+// lets a test move time between two reads of the same metrics.
+func setupTransparencyHarnessWithClock(t *testing.T, clock harnessClock) (http.Handler, *pgxpool.Pool) {
 	t.Helper()
 	testDB := dbtest.New(t)
 	pool := testDB.Pool.Pool()
@@ -37,11 +49,75 @@ func setupTransparencyHarness(t *testing.T) (http.Handler, *pgxpool.Pool) {
 	handler := adapterhttp.NewHandler(adapterhttp.HandlerConfig{
 		Derive:    derive,
 		Templates: templates,
-		Clock:     clockseed.NewClock(),
+		Clock:     clock,
 	})
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 	return mux, pool
+}
+
+// steppingClock moves the instant on every read, which is exactly the boundary
+// the cache defect could not survive: the derivation instant of two consecutive
+// reads never lands on the same second.
+type steppingClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newSteppingClock(at time.Time) *steppingClock { return &steppingClock{now: at} }
+
+func (c *steppingClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(2 * time.Second)
+	return c.now
+}
+
+// TestTransparencyValidatorsSurviveAMovingInstant is the regression test of the
+// cache defect, on both public documents: the page and the JSON state the
+// instant they were derived at, the clock moves between the reads here, and the
+// metrics did not move — so a revalidation must still answer 304 without a
+// body. A validator computed over the annotation instead of the metrics answers
+// 200, which is what used to happen under load and what made these documents
+// uncacheable in production.
+func TestTransparencyValidatorsSurviveAMovingInstant(t *testing.T) {
+	mux, _ := setupTransparencyHarnessWithClock(t, newSteppingClock(time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)))
+	for _, route := range []string{"/api/v1/public/transparency", "/transparency"} {
+		t.Run(route, func(t *testing.T) {
+			first := httptest.NewRecorder()
+			mux.ServeHTTP(first, httptest.NewRequest(http.MethodGet, route, nil))
+			if first.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200 (body: %s)", first.Code, first.Body.String())
+			}
+			etag := first.Header().Get("ETag")
+			if etag == "" {
+				t.Fatal("validator is missing on a public document")
+			}
+			if !strings.HasPrefix(etag, "W/\"") {
+				t.Fatalf("ETag = %q, want the weak validator of an annotated representation", etag)
+			}
+
+			second := httptest.NewRecorder()
+			mux.ServeHTTP(second, httptest.NewRequest(http.MethodGet, route, nil))
+			if first.Body.String() == second.Body.String() {
+				t.Fatal("the document did not move between the reads: the test would pass without proving anything")
+			}
+			if second.Header().Get("ETag") != etag {
+				t.Fatalf("ETag moved with the annotation: %q then %q", etag, second.Header().Get("ETag"))
+			}
+
+			revalidation := httptest.NewRequest(http.MethodGet, route, nil)
+			revalidation.Header.Set("If-None-Match", etag)
+			notModified := httptest.NewRecorder()
+			mux.ServeHTTP(notModified, revalidation)
+			if notModified.Code != http.StatusNotModified {
+				t.Fatalf("revalidation status = %d, want 304 with the metrics unchanged (body: %s)", notModified.Code, notModified.Body.String())
+			}
+			if notModified.Body.Len() != 0 {
+				t.Fatalf("304 body has %d bytes, want empty", notModified.Body.Len())
+			}
+		})
+	}
 }
 
 func decodeTransparencyJSON(t *testing.T, body []byte) map[string]any {
@@ -62,8 +138,12 @@ func assertPublicCache(t *testing.T, recorder *httptest.ResponseRecorder) {
 	if strings.Contains(cacheControl, "no-store") {
 		t.Fatalf("Cache-Control = %q, must not be no-store on public documents", cacheControl)
 	}
+	// Public documents carry a validator; the ones whose body states the
+	// instant of its own derivation carry a weak one, because that annotation
+	// moves on every request and cannot be part of the representation identity
+	// (RFC 9110 section 8.8.2).
 	if etag := recorder.Header().Get("ETag"); etag == "" {
-		t.Fatal("public document must carry a strong ETag")
+		t.Fatal("public document must carry a validator")
 	}
 }
 

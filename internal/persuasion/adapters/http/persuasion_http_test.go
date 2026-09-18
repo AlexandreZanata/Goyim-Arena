@@ -195,6 +195,17 @@ func mustProfile(t *testing.T, ctx context.Context, pool *pgxpool.Pool, account 
 
 func setupPersuasionHarness(t *testing.T) *persuasionHarness {
 	t.Helper()
+	return setupPersuasionHarnessWithClock(t, clockseed.NewClock())
+}
+
+// harnessClock is what the harness needs from a clock: the use cases accept any
+// implementation of it.
+type harnessClock interface{ Now() time.Time }
+
+// setupPersuasionHarnessWithClock wires the harness over a given clock, which
+// lets a test move time between two reads of the same facts.
+func setupPersuasionHarnessWithClock(t *testing.T, clock harnessClock) *persuasionHarness {
+	t.Helper()
 	ctx := context.Background()
 	db := dbtest.New(t)
 	pool := db.Pool.Pool()
@@ -216,7 +227,6 @@ func setupPersuasionHarness(t *testing.T) *persuasionHarness {
 	mustProfile(t, ctx, pool, harness.author, "autora_publica")
 
 	harness.repo = persuasionpg.NewRepository(pool)
-	clock := clockseed.NewClock()
 	harness.authorizer = &stubSignalAuthorizer{}
 	handler := persuasionhttp.NewHandler(persuasionhttp.HandlerConfig{
 		RecordUseCase: application.NewRecordAttributionsUseCase(
@@ -630,6 +640,80 @@ func TestPublicArgumentAttributionCount(t *testing.T) {
 	}
 	if code, _ := persuasionDecode(t, missing.Body.Bytes())["code"].(string); code != "argument_not_found" {
 		t.Fatalf("missing code = %q, want argument_not_found", code)
+	}
+}
+
+// steppingClock moves the instant on every read, which is exactly the boundary
+// the cache defect could not survive: the derivation instant of two consecutive
+// reads never lands on the same second.
+type steppingClock struct {
+	mu  sync.Mutex
+	now time.Time
+}
+
+func newSteppingClock(at time.Time) *steppingClock { return &steppingClock{now: at} }
+
+func (c *steppingClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.now = c.now.Add(2 * time.Second)
+	return c.now
+}
+
+// TestReputationValidatorSurvivesAMovingInstant is the regression test of the
+// cache defect: the document states when it was derived, the clock moves
+// between the reads here, and the facts did not move — so a revalidation must
+// still answer 304 without a body. A validator computed over the annotation
+// instead of the facts answers 200, which is what used to happen under load and
+// what made the response uncacheable in production.
+func TestReputationValidatorSurvivesAMovingInstant(t *testing.T) {
+	ctx := context.Background()
+	harness := setupPersuasionHarnessWithClock(t, newSteppingClock(time.Date(2026, 9, 18, 12, 0, 0, 0, time.UTC)))
+	attribute(t, ctx, harness.pool, harness.arena, harness.speaker, 2, time.Now().UTC(), harness.argument, harness.speaker, "valid")
+
+	const path = "/api/v1/profiles/autora_publica/reputation"
+	first := harness.get(t, path)
+	if first.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body: %s)", first.Code, first.Body.String())
+	}
+	etag := first.Header().Get("ETag")
+	if etag == "" {
+		t.Fatal("ETag is missing on the public reputation read")
+	}
+	firstInstant, _ := persuasionDecode(t, first.Body.Bytes())["checked_at"].(string)
+
+	second := harness.get(t, path)
+	secondInstant, _ := persuasionDecode(t, second.Body.Bytes())["checked_at"].(string)
+	if firstInstant == "" || secondInstant == "" {
+		t.Fatalf("checked_at = %q and %q, want the instant on both documents", firstInstant, secondInstant)
+	}
+	if firstInstant == secondInstant {
+		t.Fatalf("checked_at did not move (%q): the test would pass without proving anything", firstInstant)
+	}
+	if second.Header().Get("ETag") != etag {
+		t.Fatalf("ETag moved with the annotation: %q then %q", etag, second.Header().Get("ETag"))
+	}
+
+	revalidation := httptest.NewRequest(http.MethodGet, path, nil)
+	revalidation.Header.Set("If-None-Match", etag)
+	notModified := httptest.NewRecorder()
+	harness.mux.ServeHTTP(notModified, revalidation)
+	if notModified.Code != http.StatusNotModified {
+		t.Fatalf("revalidation status = %d, want 304 with the facts unchanged (body: %s)", notModified.Code, notModified.Body.String())
+	}
+	if notModified.Body.Len() != 0 {
+		t.Fatalf("304 body has %d bytes, want empty", notModified.Body.Len())
+	}
+
+	// The other public read of the module holds the same property.
+	counts := harness.get(t, "/api/v1/arguments/"+persuasionUUID(harness.argument)+"/attributions")
+	if counts.Code != http.StatusOK {
+		t.Fatalf("counts status = %d, want 200 (body: %s)", counts.Code, counts.Body.String())
+	}
+	countsEtag := counts.Header().Get("ETag")
+	again := harness.get(t, "/api/v1/arguments/"+persuasionUUID(harness.argument)+"/attributions")
+	if again.Header().Get("ETag") != countsEtag {
+		t.Fatalf("counts ETag moved with the annotation: %q then %q", countsEtag, again.Header().Get("ETag"))
 	}
 }
 

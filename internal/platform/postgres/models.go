@@ -302,6 +302,36 @@ type AppEmailVerificationToken struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// Durable job queue: one row per unit of work, leased with SKIP LOCKED and recoverable after a crashed holder
+type AppJob struct {
+	ID pgtype.UUID
+	// Closed workload vocabulary; handlers per type arrive with the worker
+	Type string
+	// Schema version of the payload; a bump is an explicit, reviewable change
+	Version int32
+	// Bounded JSON object with identifiers, references and arguments (the job payload); rendered output, credentials and free prose are unrepresentable
+	Parameters []byte
+	// Caller-chosen retry key, unique when set; NULL enqueues unconditionally
+	IdempotencyKey pgtype.Text
+	// Lifecycle: queued, leased, succeeded or dead
+	State string
+	// Earliest instant the job may run (also the retry instant after a failure)
+	AvailableAt pgtype.Timestamptz
+	// Attempts already consumed; bounded by max_attempts
+	Attempts    int32
+	MaxAttempts int32
+	// Worker that holds the lease; NULL for every non-leased row
+	LeaseOwner pgtype.Text
+	// Instant the lease expires and the job becomes claimable again
+	LeasedUntil pgtype.Timestamptz
+	// Stable redacted code (JOB_*) of the last failure; never a provider message
+	LastErrorCode pgtype.Text
+	// Bounded, already-sanitized failure detail; never a stack trace or payload echo
+	LastErrorDetail pgtype.Text
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+}
+
 // Immutable sanction facts of a case: actor, applied rule, restricted justification and optional expiry; reversals are new rows, never edits
 type AppModerationAction struct {
 	ID         pgtype.UUID
