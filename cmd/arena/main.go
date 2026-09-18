@@ -1,6 +1,6 @@
 // Command arena is the single binary of Goyim Arena. Per the master plan,
 // subcommands include server, worker, migrate and explicitly approved
-// operations; for now server, migrate, version and help exist.
+// operations; server, worker, migrate, version and help exist.
 package main
 
 import (
@@ -35,6 +35,7 @@ Usage:
 The commands are:
 
   server     run the HTTP server (ARENA_* configuration from the environment)
+  worker     consume durable jobs until stopped (SIGTERM or SIGINT)
   migrate    apply or inspect database migrations (status, up)
   version    show the arena version; use --json for machine-readable output
   help       show this help
@@ -57,6 +58,8 @@ func run(args []string, stdout *os.File) error {
 	switch args[0] {
 	case "server":
 		return runServer(args[1:], stdout)
+	case "worker":
+		return runWorker(args[1:], stdout)
 	case "migrate":
 		return runMigrate(args[1:], stdout)
 	case "version":

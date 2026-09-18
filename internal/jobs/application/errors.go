@@ -33,4 +33,28 @@ var (
 	// ErrInvalidMaxAttempts indicates the enqueue command carries an attempt
 	// budget below one.
 	ErrInvalidMaxAttempts = errors.New("application: max attempts is invalid")
+
+	// ErrInvalidWorkerConfig indicates the worker configuration is incoherent
+	// (unbounded concurrency, a handler deadline that outlives its lease, a
+	// non-positive poll interval or an unusable backoff policy).
+	ErrInvalidWorkerConfig = errors.New("application: worker configuration is invalid")
+
+	// ErrInvalidBackoff indicates the retry policy has no usable bounds.
+	ErrInvalidBackoff = errors.New("application: backoff policy is invalid")
+
+	// ErrInvalidHandler indicates a registration carries no handler function.
+	ErrInvalidHandler = errors.New("application: job handler is nil")
+
+	// ErrDuplicateHandler indicates the same workload and payload version were
+	// registered twice; a silent replacement would change the meaning of jobs
+	// already in the queue.
+	ErrDuplicateHandler = errors.New("application: job handler is already registered")
+
+	// ErrUnknownHandler indicates no handler exists for the workload at all.
+	ErrUnknownHandler = errors.New("application: no handler for job type")
+
+	// ErrUnsupportedHandlerVersion indicates the workload has handlers but not
+	// for the payload version carried by the job: the deployment must be rolled
+	// forward instead of guessing what the payload means.
+	ErrUnsupportedHandlerVersion = errors.New("application: unsupported job payload version")
 )
