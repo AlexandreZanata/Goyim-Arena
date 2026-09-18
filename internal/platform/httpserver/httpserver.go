@@ -25,6 +25,7 @@ import (
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/requestid"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/securityheaders"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
 )
 
@@ -252,17 +253,26 @@ func writeStatus(status string) http.Handler {
 
 // NewMux composes the platform router from the route registry (routes.go):
 // request ID correlation around the health routes registered with explicit
-// method patterns, so wrong methods answer 405 automatically. Registration
-// failures (duplicate or malformed registry entries) return an error
-// instead of panicking at boot.
-func NewMux(ids ports.IDGenerator, locales *locale.Resolver, readyCheckers ...ReadyChecker) (http.Handler, error) {
+// method patterns, so wrong methods answer 405 automatically, under the
+// browser security policy of the environment. Registration failures
+// (duplicate or malformed registry entries) return an error instead of
+// panicking at boot.
+//
+// The policy is the outermost layer on purpose: it has to cover responses
+// that never reach a module handler — 404 on an unknown path, 405 on a wrong
+// method, readiness failures, and anything written by an adapter before it
+// can be trusted.
+func NewMux(ids ports.IDGenerator, locales *locale.Resolver, security securityheaders.Config, readyCheckers ...ReadyChecker) (http.Handler, error) {
 	mux := http.NewServeMux()
 	if err := RegisterAll(mux, RegisteredRoutes(), readyCheckers...); err != nil {
 		return nil, err
 	}
-	handler := requestid.Middleware(ids, mux)
+
+	var handler http.Handler = mux
 	if locales != nil {
 		handler = locale.SetHandler(locales, handler)
 	}
-	return handler, nil
+	handler = requestid.Middleware(ids, handler)
+
+	return securityheaders.Middleware(security)(handler), nil
 }
