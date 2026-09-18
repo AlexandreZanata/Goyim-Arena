@@ -238,12 +238,12 @@ func TestArenaAPIRequiresAuthentication(t *testing.T) {
 		method string
 		path   string
 	}{
-		{http.MethodPost, "/api/v1/me/arenas/drafts"},
-		{http.MethodGet, "/api/v1/me/arenas/drafts"},
-		{http.MethodGet, "/api/v1/me/arenas/drafts/00000000-0000-0000-0000-000000000000"},
-		{http.MethodPatch, "/api/v1/me/arenas/drafts/00000000-0000-0000-0000-000000000000"},
-		{http.MethodDelete, "/api/v1/me/arenas/drafts/00000000-0000-0000-0000-000000000000"},
-		{http.MethodPost, "/api/v1/me/arenas/drafts/00000000-0000-0000-0000-000000000000/publish"},
+		{http.MethodPost, "/api/v1/me/arena-drafts"},
+		{http.MethodGet, "/api/v1/me/arena-drafts"},
+		{http.MethodGet, "/api/v1/me/arena-drafts/00000000-0000-0000-0000-000000000000"},
+		{http.MethodPatch, "/api/v1/me/arena-drafts/00000000-0000-0000-0000-000000000000"},
+		{http.MethodDelete, "/api/v1/me/arena-drafts/00000000-0000-0000-0000-000000000000"},
+		{http.MethodPost, "/api/v1/me/arena-drafts/00000000-0000-0000-0000-000000000000/publish"},
 		{http.MethodPost, "/api/v1/me/arenas/00000000-0000-0000-0000-000000000000/close"},
 	}
 
@@ -263,7 +263,7 @@ func TestArenaAPIRequiresAuthentication(t *testing.T) {
 		})
 	}
 
-	invalid := arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arenas/drafts", "revoked-token")
+	invalid := arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arena-drafts", "revoked-token")
 	recorder := httptest.NewRecorder()
 	harness.mux.ServeHTTP(recorder, invalid)
 	if recorder.Code != http.StatusUnauthorized {
@@ -276,7 +276,7 @@ func TestArenaDraftLifecycleHTTP(t *testing.T) {
 
 	createBody := `{"statement":"` + statementOne + `","context":"Contexto opcional do debate","category":"technology","language":"pt-BR"}`
 	recorder := httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPost, "/api/v1/me/arenas/drafts", arenaOwnerSessionToken, createBody))
+	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPost, "/api/v1/me/arena-drafts", arenaOwnerSessionToken, createBody))
 
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("create status = %d, want 201 (body: %s)", recorder.Code, recorder.Body.String())
@@ -299,7 +299,7 @@ func TestArenaDraftLifecycleHTTP(t *testing.T) {
 
 	// Owner list returns only the owned draft.
 	recorder = httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arenas/drafts", arenaOwnerSessionToken))
+	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arena-drafts", arenaOwnerSessionToken))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("list status = %d, want 200 (body: %s)", recorder.Code, recorder.Body.String())
 	}
@@ -313,7 +313,7 @@ func TestArenaDraftLifecycleHTTP(t *testing.T) {
 
 	// Read one draft.
 	recorder = httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arenas/drafts/"+draftID, arenaOwnerSessionToken))
+	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arena-drafts/"+draftID, arenaOwnerSessionToken))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("read status = %d, want 200 (body: %s)", recorder.Code, recorder.Body.String())
 	}
@@ -326,7 +326,7 @@ func TestArenaDraftLifecycleHTTP(t *testing.T) {
 	// Update under the optimistic check.
 	updateBody := `{"statement":"` + statementTwo + `","context":"","category":"science","language":"pt-BR","expected_version":1}`
 	recorder = httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPatch, "/api/v1/me/arenas/drafts/"+draftID, arenaOwnerSessionToken, updateBody))
+	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPatch, "/api/v1/me/arena-drafts/"+draftID, arenaOwnerSessionToken, updateBody))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("update status = %d, want 200 (body: %s)", recorder.Code, recorder.Body.String())
 	}
@@ -339,7 +339,7 @@ func TestArenaDraftLifecycleHTTP(t *testing.T) {
 	// A stale version must not write.
 	staleBody := `{"statement":"` + statementThree + `","context":"","category":"science","language":"pt-BR","expected_version":1}`
 	recorder = httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPatch, "/api/v1/me/arenas/drafts/"+draftID, arenaOwnerSessionToken, staleBody))
+	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPatch, "/api/v1/me/arena-drafts/"+draftID, arenaOwnerSessionToken, staleBody))
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("stale update status = %d, want 409 (body: %s)", recorder.Code, recorder.Body.String())
 	}
@@ -363,7 +363,7 @@ func TestArenaDraftLifecycleHTTP(t *testing.T) {
 
 	// Delete the draft: 204 without body, then the draft is gone.
 	recorder = httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodDelete, "/api/v1/me/arenas/drafts/"+draftID, arenaOwnerSessionToken))
+	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodDelete, "/api/v1/me/arena-drafts/"+draftID, arenaOwnerSessionToken))
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204 (body: %s)", recorder.Code, recorder.Body.String())
 	}
@@ -373,7 +373,7 @@ func TestArenaDraftLifecycleHTTP(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arenas/drafts/"+draftID, arenaOwnerSessionToken))
+	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arena-drafts/"+draftID, arenaOwnerSessionToken))
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("read after delete status = %d, want 404", recorder.Code)
 	}
@@ -396,7 +396,7 @@ func TestArenaPublishAndCloseHTTP(t *testing.T) {
 
 	// Publishing without an available pass keeps the draft untouched.
 	recorder := httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodPost, "/api/v1/me/arenas/drafts/"+draft.ID().String()+"/publish", arenaOwnerSessionToken))
+	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodPost, "/api/v1/me/arena-drafts/"+draft.ID().String()+"/publish", arenaOwnerSessionToken))
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("publish without pass status = %d, want 409 (body: %s)", recorder.Code, recorder.Body.String())
 	}
@@ -407,7 +407,7 @@ func TestArenaPublishAndCloseHTTP(t *testing.T) {
 	}
 
 	recorder = httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arenas/drafts/"+draft.ID().String(), arenaOwnerSessionToken))
+	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arena-drafts/"+draft.ID().String(), arenaOwnerSessionToken))
 	stillDraft := arenaDecodeObject(t, recorder.Body.Bytes())
 	if stillDraft["status"] != "draft" {
 		t.Fatalf("draft after failed publish = %v, want draft", stillDraft["status"])
@@ -416,7 +416,7 @@ func TestArenaPublishAndCloseHTTP(t *testing.T) {
 	grantArenaPass(t, ctx, harness.billingRepo, harness.ownerID, "stripe:evt_http_publish")
 
 	recorder = httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodPost, "/api/v1/me/arenas/drafts/"+draft.ID().String()+"/publish", arenaOwnerSessionToken))
+	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodPost, "/api/v1/me/arena-drafts/"+draft.ID().String()+"/publish", arenaOwnerSessionToken))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("publish status = %d, want 200 (body: %s)", recorder.Code, recorder.Body.String())
 	}
@@ -431,7 +431,7 @@ func TestArenaPublishAndCloseHTTP(t *testing.T) {
 	// conflict code; nothing is written.
 	publishedVersion := int(published["version"].(float64))
 	recorder = httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPatch, "/api/v1/me/arenas/drafts/"+draft.ID().String(), arenaOwnerSessionToken,
+	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPatch, "/api/v1/me/arena-drafts/"+draft.ID().String(), arenaOwnerSessionToken,
 		fmt.Sprintf(`{"statement":%q,"category":"science","language":"pt-BR","expected_version":%d}`, statementThree, publishedVersion)))
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("edit published status = %d, want 409 (body: %s)", recorder.Code, recorder.Body.String())
@@ -541,11 +541,11 @@ func TestArenaDraftOwnerScoped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create draft: %v", err)
 	}
-	draftPath := "/api/v1/me/arenas/drafts/" + draft.ID().String()
+	draftPath := "/api/v1/me/arena-drafts/" + draft.ID().String()
 
 	// The other account sees an empty list and never the owner draft.
 	recorder := httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arenas/drafts", arenaOtherSessionToken))
+	harness.mux.ServeHTTP(recorder, arenaAuthenticatedRequest(http.MethodGet, "/api/v1/me/arena-drafts", arenaOtherSessionToken))
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("other list status = %d, want 200", recorder.Code)
 	}
@@ -795,7 +795,7 @@ func TestArenaDraftBodyLimit(t *testing.T) {
 	huge := strings.Repeat("a", 70<<10)
 	body := `{"statement":"` + huge + `","category":"technology","language":"pt-BR"}`
 	recorder := httptest.NewRecorder()
-	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPost, "/api/v1/me/arenas/drafts", arenaOwnerSessionToken, body))
+	harness.mux.ServeHTTP(recorder, arenaJSONRequest(http.MethodPost, "/api/v1/me/arena-drafts", arenaOwnerSessionToken, body))
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("oversized body status = %d, want 400 (body: %s)", recorder.Code, recorder.Body.String())

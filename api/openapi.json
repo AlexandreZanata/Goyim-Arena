@@ -903,7 +903,7 @@
         }
       }
     },
-    "/api/v1/me/arenas/drafts": {
+    "/api/v1/me/arena-drafts": {
       "post": {
         "operationId": "createArenaDraft",
         "summary": "Create a private draft",
@@ -950,7 +950,7 @@
         }
       }
     },
-    "/api/v1/me/arenas/drafts/{id}": {
+    "/api/v1/me/arena-drafts/{id}": {
       "get": {
         "operationId": "getArenaDraft",
         "summary": "Read an owned draft",
@@ -1040,7 +1040,7 @@
         }
       }
     },
-    "/api/v1/me/arenas/drafts/{id}/publish": {
+    "/api/v1/me/arena-drafts/{id}/publish": {
       "post": {
         "operationId": "publishArenaDraft",
         "summary": "Publish a draft",

@@ -110,7 +110,7 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		if route.Path == "/api/v1/me/moderation/reports" || route.Path == "/api/v1/me/moderation/appeals" || route.Path == "/api/v1/moderation/cases" || route.Path == "/api/v1/moderation/cases/{id}/claim" || route.Path == "/api/v1/moderation/cases/{id}/decisions" {
 			continue
 		}
-		if strings.HasPrefix(route.Path, "/api/v1/me/arenas") || route.Path == "/api/v1/arenas" || strings.HasPrefix(route.Path, "/api/v1/arenas/") {
+		if strings.HasPrefix(route.Path, "/api/v1/me/arenas") || strings.HasPrefix(route.Path, "/api/v1/me/arena-drafts") || route.Path == "/api/v1/arenas" || strings.HasPrefix(route.Path, "/api/v1/arenas/") {
 			continue
 		}
 		if route.Path == "/d/{slug}" {
@@ -555,9 +555,9 @@ func TestContractArenaSchemasExposeOnlyAllowedFields(t *testing.T) {
 
 	// Authenticated arena routes require the session cookie.
 	for _, path := range []string{
-		"/api/v1/me/arenas/drafts",
-		"/api/v1/me/arenas/drafts/{id}",
-		"/api/v1/me/arenas/drafts/{id}/publish",
+		"/api/v1/me/arena-drafts",
+		"/api/v1/me/arena-drafts/{id}",
+		"/api/v1/me/arena-drafts/{id}/publish",
 		"/api/v1/me/arenas/{id}/close",
 	} {
 		operations, ok := document.Paths[path]
