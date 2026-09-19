@@ -9,6 +9,7 @@ GOFMT ?= gofmt
 NPM ?= npm
 K6 ?= k6
 SQLC ?= $(shell which sqlc 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/sqlc")
+ASSETGEN := $(GO) run ./cmd/assetgen
 
 .PHONY: fmt fmt-check test-unit test-integration test-security typecheck build-web test-contract test-load-smoke generate generate-check verify
 
@@ -52,6 +53,8 @@ typecheck:
 build-web:
 	$(NPM) ci --prefix web
 	$(NPM) --prefix web run build
+	@rm -rf web/dist
+	$(ASSETGEN) -input web/generated -input web/src -output web/dist -manifest web/dist/manifest.json
 	@echo "build-web: ok"
 
 # test-contract valida o contrato OpenAPI versionado: o documento parseia,
