@@ -32,31 +32,31 @@ Após o beta fornecer baseline, estabelecer:
 
 SLO sem medição e orçamento de erro não é compromisso válido.
 
-## 4. Estágios
+## 4. Runbook de decisão por evidência
 
-### Estágio 1 — VPS única
+Nenhuma etapa abaixo é ativada por volume de contas, previsão de marketing ou uma
+métrica isolada. O gatilho precisa apontar para um baseline reproduzível (commit,
+hardware, dataset, cache, configuração, p50/p95/p99, erro, CPU, memória, I/O,
+conexões, locks e cache hit) e para uma regressão ou orçamento de erro observado.
 
-Cloudflare absorve leitura pública; Go, worker e PostgreSQL rodam com limites. Meta: validar produto e encontrar perfil real de carga.
+Cada mudança tem uma saída conservadora: manter a topologia atual, comparar o
+resultado com o baseline e reverter se o teste de sucesso não confirmar o ganho.
 
-### Estágio 2 — separar o banco
+| Etapa | Métricas e gatilho observável | Risco principal | Rollback | Teste de sucesso |
+|---|---|---|---|---|
+| VPS única → banco dedicado | I/O, memória, conexões, locks ou manutenção do PostgreSQL consomem repetidamente o orçamento medido no baseline, mesmo após queries, pool e índices terem sido revisados. | Custo, rede e uma nova fronteira de backup/readiness. | Voltar a apontar o app para o banco anterior enquanto o tráfego permanece bloqueado para a nova origem; não remover dados sem backup verificado. | Reexecutar o mesmo cenário k6 e o exercício de restauração; confirmar que p95/p99, erros, locks e RPO/RTO não pioram. |
+| Primário → réplicas de leitura | A carga de leituras tolerantes a atraso é o gargalo dominante e existe uma política explícita de frescor para cada query candidata; nenhuma réplica é usada para wallet, posição, moderação ou estado crítico. | Lag servir dados antigos ou uma falha de replicação esconder uma escrita. | Remover a rota de leitura da réplica e voltar ao primário; preservar o monitoramento de lag e o replay da configuração anterior. | Cenários de leitura cold/hot mantêm os percentis e o erro do baseline, o lag fica dentro do orçamento de frescor e leituras críticas continuam no primário. |
+| Tabelas grandes → particionamento | Plano, bloat, autovacuum, manutenção ou latência degradam em uma tabela cujo padrão de acesso e chave de partição foram comprovados por `pg_stat_statements` e `EXPLAIN (ANALYZE, BUFFERS)`. | Locks, partições órfãs, consultas que deixam de usar pruning e migração difícil de desfazer. | Usar expand/contract: manter a tabela antiga e o caminho de leitura anterior até a validação; interromper a migração sem apagar a fonte. | Repetir o plano e o workload sintético antes/depois, confirmar ausência de full scan inesperado, integridade dos dados e conclusão/rollback da migração em banco descartável. |
+| PostgreSQL jobs/cache → Valkey ou broker | Jobs, locks ou cache de borda continuam fora do orçamento após tuning, backpressure, índices e projeções; o relatório identifica a coordenação específica que saturou. | Durabilidade, duplicação, ordering, operação e nova superfície de indisponibilidade. | Manter PostgreSQL como fonte de verdade e desativar o consumidor novo; reprocessar a fila por idempotência, sem descartar jobs. | Testar crash/restart, duplicação, ordenação, atraso e recovery com o mesmo dataset; confirmar que wallet, posição e moderação não dependem do componente novo para consistência. |
+| Monólito → serviço extraído | Um módulo tem fronteira de dados, owner, SLO, carga e modo de falha demonstrados; a contenção causa impacto mensurável que cache, queries, réplica e worker não resolveram. | Complexidade distribuída, contratos divergentes e falha de rede entre módulos. | Manter o caminho no monólito e desativar o consumidor externo por feature/configuração; reverter sem migração destrutiva. | Teste de contrato, replay de eventos, carga do módulo e falha de rede passam; p95/p99, erros e recuperação são iguais ou melhores que o baseline. |
 
-Quando I/O, memória, backup ou risco justificarem, PostgreSQL vai para host dedicado. App permanece stateless e ganha réplicas horizontais.
+### Checklist obrigatório antes de avançar
 
-### Estágio 3 — leitura em escala
-
-Melhorar cache hit, ETag, projeções e índices antes de réplica. Réplicas atendem somente queries tolerantes a atraso explicitamente marcadas.
-
-### Estágio 4 — tabelas grandes
-
-Particionar somente por padrão de acesso comprovado, geralmente tempo ou aggregate estável. Índices parciais e archival vêm antes de shard.
-
-### Estágio 5 — coordenação distribuída
-
-Adicionar Valkey, broker ou serviço extra apenas se Postgres jobs, locks e cache de borda forem insuficientes por evidência. Cada novo componente exige owner, backup, monitoramento e modo de falha.
-
-### Estágio 6 — extração seletiva
-
-Extrair serviço por isolamento real, não por previsão. Billing/webhooks ou busca podem ser candidatos futuros, mas continuam módulos enquanto isso reduzir risco.
+1. Anexar o relatório do baseline e o gráfico que identifica o gargalo.
+2. Registrar a alternativa mais simples tentada e por que ela não bastou.
+3. Definir owner, backup, monitoramento, rollback e período de observação.
+4. Reexecutar o mesmo workload sintético após a mudança; não comparar testes com datasets ou hardware diferentes.
+5. Abortar a etapa se qualquer rota crítica depender de consistência eventual sem contrato explícito.
 
 ## 5. Proteção do PostgreSQL
 
