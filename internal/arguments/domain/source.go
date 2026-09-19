@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"strconv"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -82,14 +83,24 @@ func (s Source) Equals(other Source) bool {
 	return s.url == other.url && s.description == other.description
 }
 
-// parseSourceURL validates an absolute http(s) address within the
-// structural bounds. The domain never parses URLs as transport data
-// (net/url is forbidden here): it enforces scheme, host presence and the
-// absence of whitespace, mirroring the database check.
+// parseSourceURL validates and canonicalizes an absolute HTTP(S) address.
+// Parsing is structural only: the domain never fetches or dereferences the
+// URL. Userinfo is refused so credentials cannot be persisted or rendered,
+// and non-ASCII hostnames are refused rather than being silently transformed
+// without an approved IDNA policy. The parser deliberately stays textual so
+// the domain does not import a transport URL package.
 func parseSourceURL(raw string) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", ErrEmptySourceURL
+	}
+	if len(trimmed) > SourceURLMaxLength {
+		return "", ErrInvalidSourceURL
+	}
+	for _, r := range trimmed {
+		if unicode.IsSpace(r) || unicode.IsControl(r) {
+			return "", ErrInvalidSourceURL
+		}
 	}
 
 	separator := strings.Index(trimmed, "://")
@@ -100,21 +111,79 @@ func parseSourceURL(raw string) (string, error) {
 	if scheme != "http" && scheme != "https" {
 		return "", ErrInvalidSourceURL
 	}
-	canonical := scheme + trimmed[separator:]
+	rest := trimmed[separator+3:]
+	authorityEnd := len(rest)
+	if index := strings.IndexAny(rest, "/?#"); index >= 0 {
+		authorityEnd = index
+	}
+	authority := rest[:authorityEnd]
+	if !validSourceAuthority(authority) {
+		return "", ErrInvalidSourceURL
+	}
 
+	canonical := scheme + "://" + rest
 	if len(canonical) < SourceURLMinLength || len(canonical) > SourceURLMaxLength {
 		return "", ErrInvalidSourceURL
 	}
-	host := canonical[separator+3:]
-	if host == "" || strings.HasPrefix(host, "/") {
-		return "", ErrInvalidSourceURL
+	return canonical, nil
+}
+
+// validSourceAuthority checks the host and optional numeric port. It rejects
+// userinfo, malformed ports, empty labels and non-ASCII hostnames. This is a
+// URL allowlist, not a DNS lookup: hostnames are not resolved by the server.
+func validSourceAuthority(authority string) bool {
+	if authority == "" || strings.Contains(authority, "@") {
+		return false
 	}
-	for _, r := range canonical {
-		if unicode.IsSpace(r) || unicode.IsControl(r) {
-			return "", ErrInvalidSourceURL
+
+	host := authority
+	if strings.HasPrefix(host, "[") {
+		closing := strings.IndexByte(host, ']')
+		if closing < 2 {
+			return false
+		}
+		for _, r := range host[1:closing] {
+			if r > unicode.MaxASCII || !(r == ':' || r == '.' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+				return false
+			}
+		}
+		host = host[closing+1:]
+		if host != "" {
+			if !strings.HasPrefix(host, ":") || !validSourcePort(host[1:]) {
+				return false
+			}
+		}
+		return true
+	}
+
+	if colon := strings.LastIndexByte(host, ':'); colon >= 0 {
+		if strings.Contains(host[:colon], ":") || !validSourcePort(host[colon+1:]) {
+			return false
+		}
+		host = host[:colon]
+	}
+	if host == "" || strings.HasPrefix(host, ".") || strings.HasSuffix(host, ".") || strings.Contains(host, "..") {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if r > unicode.MaxASCII || !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-') {
+				return false
+			}
 		}
 	}
-	return canonical, nil
+	return true
+}
+
+func validSourcePort(raw string) bool {
+	if raw == "" || len(raw) > 5 {
+		return false
+	}
+	port, err := strconv.Atoi(raw)
+	return err == nil && port >= 1 && port <= 65535
 }
 
 // parseSourceDescription trims the optional description and enforces its
