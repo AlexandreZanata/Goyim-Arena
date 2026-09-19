@@ -72,7 +72,7 @@ func setupHarness(t *testing.T, rateLimit ratelimit.Protector, challenge turnsti
 	logUC := application.NewLoginUseCase(repo, repo, repo, hasher, clock, random, sPolicy)
 	loutUC := application.NewLogoutUseCase(repo)
 	reqResetUC := application.NewRequestPasswordResetUseCase(repo, repo, sender, clock, random, rPolicy)
-	compResetUC := application.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, clock)
+	compResetUC := application.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, sender, clock)
 	authSessUC := application.NewAuthenticateSessionUseCase(repo, repo, clock, sPolicy, 5*time.Minute)
 
 	secMgr, err := security.New(security.Options{

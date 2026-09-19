@@ -8,6 +8,10 @@ import (
 	"os/signal"
 	"syscall"
 
+	identityjobs "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/jobs"
+	identityrepo "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/postgres"
+	identityapp "github.com/AlexandreZanata/Goyim-Arena/internal/identity/application"
+	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
 	jobsrepo "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/adapters/postgres"
 	jobsapp "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
@@ -82,12 +86,29 @@ func runWorker(args []string, stdout *os.File) error {
 		return err
 	}
 
-	// Handlers are registered by the phases that own each workload (email
-	// delivery arrives with P15-T03/T04, scheduled maintenance with P15-T05).
-	// Until then the registry is empty and a job of an unregistered type is
-	// recorded as JOB_UNKNOWN_TYPE rather than being guessed at.
+	// Handlers are registered by the phases that own each workload. The
+	// scheduled session cleanup is the first one to land here (P16-T06): its
+	// cadence has been queued by the scheduler since P15-T05, and a queued
+	// workload with no handler is not idle, it is a dead job per period. The
+	// remaining workloads (email delivery, retention and the rest of the
+	// scheduled maintenance) are still recorded as JOB_UNKNOWN_TYPE rather
+	// than guessed at, and the started record below counts what is wired.
 	registry := jobsapp.NewHandlerMap()
 	_ = enqueue // Enqueue is composed for producers wired in later phases.
+
+	sessionCleanup, err := identityjobs.NewCleanupHandler(
+		identityapp.NewCleanupSessionsUseCase(
+			identityrepo.NewRepository(pool.Pool()),
+			clock,
+			identitydomain.DefaultSessionPolicy(),
+		),
+	)
+	if err != nil {
+		return err
+	}
+	if err := sessionCleanup.Register(registry); err != nil {
+		return err
+	}
 
 	worker, err := jobsapp.NewWorker(jobsapp.WorkerDeps{
 		Lease:    lease,

@@ -486,6 +486,16 @@ type Querier interface {
 	// FOR UPDATE SKIP LOCKED lets concurrent workers take different rows without
 	// queueing behind each other and without ever taking the same row twice.
 	LeaseJob(ctx context.Context, arg LeaseJobParams) (AppJob, error)
+	// ListActiveAccountSessions returns the sessions of one account that are
+	// still usable (P16-T06), newest activity first.
+	//
+	// The three instants are the policy boundaries, not `now()`: the session
+	// policy lives in the domain, so the adapter states the same question the
+	// domain asks (`created_at + absolute`, `last_seen_at + idle`, the stored
+	// deadline) instead of re-deriving its own answer here. A row outside them is
+	// already refused by the evaluator, and listing it would show the owner a
+	// session that cannot accept a request.
+	ListActiveAccountSessions(ctx context.Context, arg ListActiveAccountSessionsParams) ([]ListActiveAccountSessionsRow, error)
 	// Data retention statements (P14-T07, docs/PRIVACY.md §1/§5,
 	// REQ-PRIV-01). One schedule per governed class decides the action; these
 	// statements execute it and count what happened.
@@ -774,12 +784,28 @@ type Querier interface {
 	// immediately recorded dead again. Only lifecycle columns change, which is
 	// what the provenance trigger allows.
 	RetryDeadJob(ctx context.Context, arg RetryDeadJobParams) (RetryDeadJobRow, error)
+	// RevokeAccountSessionByID ends one session of one account.
+	//
+	// The account is part of the key on purpose: a revoke addressed by session
+	// identifier alone would let a caller end a session it does not own, and the
+	// single statement is what makes two concurrent revokes of the same row agree
+	// (one reports a change, the other reports none) without a read-modify-write.
+	RevokeAccountSessionByID(ctx context.Context, arg RevokeAccountSessionByIDParams) (int64, error)
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
 	// RevokeDeletedAccountAdminRoles revokes any active administrative role of
 	// the deleted account. The assignment row is retained as restricted audit
 	// evidence; marking it revoked removes the latent privilege.
 	RevokeDeletedAccountAdminRoles(ctx context.Context, arg RevokeDeletedAccountAdminRolesParams) (int64, error)
 	RevokeSession(ctx context.Context, tokenHash []byte) error
+	// RevokeSessionsPastDeadline revokes every session that has passed its policy
+	// deadline (P16-T06).
+	//
+	// It revokes, it never deletes: the rows of terminal sessions are the retention
+	// pass's to remove, under its own window and its holds, so this statement
+	// cannot shorten a retention floor. Marking the row terminal makes the
+	// refusal a state instead of an arithmetic comparison, which is the same
+	// defense in depth the rest of the module uses.
+	RevokeSessionsPastDeadline(ctx context.Context, arg RevokeSessionsPastDeadlineParams) (int64, error)
 	SetEmailVerified(ctx context.Context, id pgtype.UUID) (AppAccount, error)
 	SuspendAccountForModeration(ctx context.Context, id pgtype.UUID) (SuspendAccountForModerationRow, error)
 	TouchSession(ctx context.Context, arg TouchSessionParams) error

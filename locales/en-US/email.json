@@ -11,6 +11,10 @@
       "subject": "Reset your Goyim Arena password",
       "lead": "Use the code below to reset your password. If you did not request this, ignore this message.",
       "code_label": "Reset code"
+    },
+    "password_changed": {
+      "subject": "Your Goyim Arena password was changed",
+      "lead": "Your account password was changed and every older session was ended. If this was not you, reset your password now and review the active sessions."
     }
   }
 }

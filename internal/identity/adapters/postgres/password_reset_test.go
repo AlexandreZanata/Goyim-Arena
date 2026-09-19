@@ -113,7 +113,7 @@ func TestRepository_PasswordResetConcurrentRace(t *testing.T) {
 		t.Fatalf("create reset token failed: %v", err)
 	}
 
-	completeUC := application.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, clock)
+	completeUC := application.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, fakeemail.NewSender(), clock)
 
 	const workers = 10
 	var wg sync.WaitGroup
@@ -169,7 +169,7 @@ func TestIntegration_FullPasswordResetJourney(t *testing.T) {
 	loginUC := application.NewLoginUseCase(repo, repo, repo, hasher, clock, rnd, sessPolicy)
 	authUC := application.NewAuthenticateSessionUseCase(repo, repo, clock, sessPolicy, 5*time.Minute)
 	requestResetUC := application.NewRequestPasswordResetUseCase(repo, repo, sender, clock, rnd, resetPolicy)
-	completeResetUC := application.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, clock)
+	completeResetUC := application.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, sender, clock)
 
 	userEmail := "fullresetjourney@arena.local"
 	initialPassword := "OriginalSecret123!"

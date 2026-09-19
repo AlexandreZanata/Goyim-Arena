@@ -72,6 +72,10 @@ const (
 	ActionBillingPortal Action = "billing.portal"
 	// ActionMFAVerify checks a second factor code (step-up or recovery).
 	ActionMFAVerify Action = "mfa.verify"
+	// ActionSessionTransition covers the two transitions of the session
+	// surface: ending another session, which verifies the account password and
+	// is therefore a place to guess at it, and rotating the calling one.
+	ActionSessionTransition Action = "session.transition"
 )
 
 // Budget is one token bucket: Burst requests may be spent back to back, and
@@ -179,6 +183,17 @@ var policies = map[Action]Policy{
 	// account dimension is the one that matters here, because the caller is
 	// already authenticated.
 	ActionMFAVerify: {Address: Budget{Burst: 60, Window: time.Hour}, Account: &Budget{Burst: 10, Window: time.Hour}},
+
+	// Ending another session verifies the account password, so this row bounds a
+	// guess at it; rotating is cheaper to serve but shares the row because both
+	// are transitions of an authenticated session and neither deserves a second
+	// policy to keep in step. Thirty per hour per account is more than a client
+	// rotating after a privilege change and a person reviewing a device list
+	// need together, and small enough that the password-verified half cannot be
+	// used as a fast oracle. The address bound is looser because the caller is
+	// authenticated and a shared address must not be able to lock an account out
+	// of its own session list.
+	ActionSessionTransition: {Address: Budget{Burst: 60, Window: time.Hour}, Account: &Budget{Burst: 30, Window: time.Hour}},
 }
 
 // Actions lists every declared action, so completeness is testable and so

@@ -1,6 +1,7 @@
 package renderer_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -40,7 +41,7 @@ func TestRenderedEmailsMatchTheCommittedSnapshots(t *testing.T) {
 	for _, templateID := range domain.TemplateIDs() {
 		for _, locale := range domain.Locales() {
 			t.Run(templateID.String()+"."+locale.String(), func(t *testing.T) {
-				body, err := engine.Render(templateID, locale, values(t, name, code))
+				body, err := engine.Render(templateID, locale, valuesFor(t, templateID, name, code))
 				if err != nil {
 					t.Fatalf("Render() error = %v", err)
 				}
@@ -72,7 +73,7 @@ func TestEveryTemplateIsReallyLocalized(t *testing.T) {
 	for _, templateID := range domain.TemplateIDs() {
 		rendered := make(map[domain.Locale]domain.Body, len(domain.Locales()))
 		for _, locale := range domain.Locales() {
-			body, err := engine.Render(templateID, locale, values(t, "Ana", "K7QP-2M4Z-9RTX"))
+			body, err := engine.Render(templateID, locale, valuesFor(t, templateID, "Ana", "K7QP-2M4Z-9RTX"))
 			if err != nil {
 				t.Fatalf("Render(%s, %s) error = %v", templateID, locale, err)
 			}
@@ -102,37 +103,103 @@ func TestEveryTemplateIsReallyLocalized(t *testing.T) {
 // tagPattern matches one markup tag, attributes included.
 var tagPattern = regexp.MustCompile(`</?[a-zA-Z][^>]*>`)
 
+// codeBlockTags is the markup the code block contributes to the shared
+// document, in order. A template that carries no code renders everything else
+// and nothing of this.
+var codeBlockTags = []string{"<p>", "<strong>", "</strong>", "</p>", "<p>", "</p>"}
+
 // TestTemplatesShareOneDocumentStructure is the parity of the markup: the
 // templates differ in the catalog block they read, never in the document they
 // render. A template that silently gained or lost markup — or that reached for
 // a second document — fails here, and the values it fills are proven to be the
 // only difference.
+//
+// The one structural difference the set is allowed to have is the code block
+// (P16-T06): the notice renders the same document without it, so its tag
+// sequence must equal a code-carrying template's sequence with exactly that run
+// of tags removed. Stating the exception makes it testable instead of tolerated
+// — a notice that quietly dropped or gained a paragraph fails here.
 func TestTemplatesShareOneDocumentStructure(t *testing.T) {
 	engine := newRenderer(t)
 	ids := domain.TemplateIDs()
-	if len(ids) < 2 {
-		t.Fatalf("templates = %d, want at least two to compare", len(ids))
+	if len(ids) < 3 {
+		t.Fatalf("templates = %d, want at least three to compare", len(ids))
 	}
 	for _, locale := range domain.Locales() {
 		t.Run(locale.String(), func(t *testing.T) {
 			markup := make(map[domain.TemplateID]string, len(ids))
 			for _, templateID := range ids {
-				body, err := engine.Render(templateID, locale, values(t, "Ana", "K7QP-2M4Z-9RTX"))
+				body, err := engine.Render(templateID, locale, valuesFor(t, templateID, "Ana", "K7QP-2M4Z-9RTX"))
 				if err != nil {
 					t.Fatalf("Render(%s, %s) error = %v", templateID, locale, err)
 				}
 				markup[templateID] = body.HTML
 			}
-			first := tagPattern.FindAllString(markup[ids[0]], -1)
-			second := tagPattern.FindAllString(markup[ids[1]], -1)
-			if strings.Join(first, "|") != strings.Join(second, "|") {
-				t.Errorf("markup differs between templates:\n%s\n%s", strings.Join(first, "\n"), strings.Join(second, "\n"))
+
+			var codeTemplates []domain.TemplateID
+			var noticeTemplates []domain.TemplateID
+			for _, templateID := range ids {
+				if templateID.CarriesCode() {
+					codeTemplates = append(codeTemplates, templateID)
+					continue
+				}
+				noticeTemplates = append(noticeTemplates, templateID)
 			}
-			valuesFirst := strings.Join(tagPattern.Split(markup[ids[0]], -1), "|")
-			valuesSecond := strings.Join(tagPattern.Split(markup[ids[1]], -1), "|")
-			if valuesFirst == valuesSecond {
-				t.Error("both templates filled the document with the same values")
+			if len(codeTemplates) < 2 || len(noticeTemplates) == 0 {
+				t.Fatalf("the set must hold both kinds, got %d code-carrying and %d notices", len(codeTemplates), len(noticeTemplates))
+			}
+
+			// Every code-carrying template renders the document with the block.
+			wantTags := strings.Join(tagPattern.FindAllString(markup[codeTemplates[0]], -1), "|")
+			wantValues := strings.Join(tagPattern.Split(markup[codeTemplates[0]], -1), "|")
+			for _, templateID := range codeTemplates[1:] {
+				if got := strings.Join(tagPattern.FindAllString(markup[templateID], -1), "|"); got != wantTags {
+					t.Errorf("markup of %s differs from %s:\n%s\n%s", templateID, codeTemplates[0], wantTags, got)
+				}
+				if got := strings.Join(tagPattern.Split(markup[templateID], -1), "|"); got == wantValues {
+					t.Errorf("%s and %s filled the document with the same values", templateID, codeTemplates[0])
+				}
+			}
+
+			// A notice is the same document without the code block, and no
+			// other change is allowed.
+			withoutBlock, err := removeFirst(tagPattern.FindAllString(markup[codeTemplates[0]], -1), codeBlockTags)
+			if err != nil {
+				t.Fatalf("the code-carrying document does not carry the code block: %v", err)
+			}
+			for _, templateID := range noticeTemplates {
+				got := tagPattern.FindAllString(markup[templateID], -1)
+				if strings.Join(got, "|") != strings.Join(withoutBlock, "|") {
+					t.Errorf("markup of the code-free %s is not the document minus the code block:\n%v\n%v", templateID, withoutBlock, got)
+				}
+				if strings.Join(tagPattern.Split(markup[templateID], -1), "|") == wantValues {
+					t.Errorf("%s filled the document with the same values as %s", templateID, codeTemplates[0])
+				}
 			}
 		})
 	}
+}
+
+// removeFirst deletes the first occurrence of a contiguous subsequence and
+// returns the rest. An absent subsequence is an error rather than a silent
+// no-op: the whole point of the comparison above is that the block exists
+// exactly once.
+func removeFirst(tags []string, block []string) ([]string, error) {
+	for start := 0; start+len(block) <= len(tags); start++ {
+		matched := true
+		for offset, tag := range block {
+			if tags[start+offset] != tag {
+				matched = false
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		out := make([]string, 0, len(tags)-len(block))
+		out = append(out, tags[:start]...)
+		out = append(out, tags[start+len(block):]...)
+		return out, nil
+	}
+	return nil, fmt.Errorf("subsequence %v not found in %v", block, tags)
 }

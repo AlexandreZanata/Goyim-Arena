@@ -11,6 +11,10 @@
       "subject": "Redefinição de senha do Goyim Arena",
       "lead": "Use o código abaixo para redefinir sua senha. Se você não pediu isso, ignore esta mensagem.",
       "code_label": "Código de redefinição"
+    },
+    "password_changed": {
+      "subject": "Sua senha do Goyim Arena foi alterada",
+      "lead": "A senha da sua conta foi alterada e todas as sessões antigas foram encerradas. Se não foi você, redefina a senha agora e revise as sessões ativas."
     }
   }
 }

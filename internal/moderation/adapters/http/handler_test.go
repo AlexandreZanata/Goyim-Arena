@@ -318,6 +318,35 @@ func TestModerationAdminRoutesDenyStrangers(t *testing.T) {
 // presented a second factor inside the step-up window. All three administrative
 // routes are exercised, because a gate that covers only the queue would still
 // let a non-elevated session decide a case.
+// TestModerationGateFollowsTheRoleChangeImmediately is the privilege-change
+// rule of P16-T06: the capability is read from the assignment on every request,
+// so revoking it stops the operator's existing session at once. A gate that
+// cached the role in the session would keep serving a person who no longer has
+// the capability until that session expired, which is the window a revocation
+// exists to close.
+func TestModerationGateFollowsTheRoleChangeImmediately(t *testing.T) {
+	harness := setupModerationHarness(t)
+
+	recorder := httptest.NewRecorder()
+	harness.mux.ServeHTTP(recorder, modAuthenticatedRequest(http.MethodGet, "/api/v1/moderation/cases", modModeratorSession, ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("elevated moderator status = %d, want 200 (body: %s)", recorder.Code, recorder.Body.String())
+	}
+
+	if _, err := harness.pool.Exec(context.Background(),
+		`UPDATE app.admin_roles SET revoked_at = now() WHERE account_id = $1`, harness.moderatorID); err != nil {
+		t.Fatalf("revoke the assignment: %v", err)
+	}
+
+	// The same session, the same fresh factor: only the capability changed,
+	// and that is enough.
+	recorder = httptest.NewRecorder()
+	harness.mux.ServeHTTP(recorder, modAuthenticatedRequest(http.MethodGet, "/api/v1/moderation/cases", modModeratorSession, ""))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("revoked moderator status = %d, want 403 (body: %s)", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestModerationAdminGateRequiresSecondFactor(t *testing.T) {
 	harness := setupModerationHarness(t)
 

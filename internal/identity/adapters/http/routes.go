@@ -28,5 +28,12 @@ func Routes() []httpserver.Route {
 		{Method: http.MethodPost, Path: "/api/v1/me/mfa/enrollment/confirm"},
 		{Method: http.MethodPost, Path: "/api/v1/me/mfa/step-up"},
 		{Method: http.MethodPost, Path: "/api/v1/me/mfa/recovery"},
+		// The owner's own device list and the critical transition of a session
+		// (P16-T06). The second route is a POST and not a DELETE because it is
+		// one endpoint for one decision with a body: the password that
+		// re-authenticates the owner.
+		{Method: http.MethodGet, Path: "/api/v1/me/sessions"},
+		{Method: http.MethodPost, Path: "/api/v1/me/sessions/revocation"},
+		{Method: http.MethodPost, Path: "/api/v1/me/sessions/rotation"},
 	}
 }

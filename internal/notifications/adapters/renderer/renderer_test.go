@@ -29,6 +29,23 @@ func values(t *testing.T, name, code string) domain.TemplateValues {
 	return rendered
 }
 
+// valuesFor builds the values of one template, including the templates that
+// carry no code (P16-T06): the code argument is ignored for those, because a
+// notice has no field to render one in and the domain refuses it outright. A
+// test that loops over the whole set therefore asks each template for the pair
+// it actually declares instead of forcing one shape onto all of them.
+func valuesFor(t *testing.T, templateID domain.TemplateID, name, code string) domain.TemplateValues {
+	t.Helper()
+	if !templateID.CarriesCode() {
+		code = ""
+	}
+	built, err := domain.ValidateTemplateValues(templateID, name, code)
+	if err != nil {
+		t.Fatalf("ValidateTemplateValues(%s) error = %v", templateID, err)
+	}
+	return built
+}
+
 // TestRenderIsLocalized proves the body comes from the catalog: each locale
 // matches its own catalog entries, and the two locales do not produce the
 // same subject (a hardcoded string would pass the first check and fail this
@@ -69,6 +86,11 @@ func TestRenderIsLocalized(t *testing.T) {
 // package: a display name and a code are data, never markup — in every locale
 // and every template, because escaping is a property of the position and not
 // of the language.
+//
+// The notice has no code, so what is proven for it is the half of the property
+// that exists: its display name is escaped, and its body carries no code at
+// all. The code position is covered by the templates that have one — the
+// document is shared, so the escaping of that position is exercised there.
 func TestRenderEscapesUntrustedValues(t *testing.T) {
 	engine := newRenderer(t)
 	hostileName := `<script>alert("x")</script>&'"><`
@@ -76,7 +98,7 @@ func TestRenderEscapesUntrustedValues(t *testing.T) {
 	for _, locale := range domain.Locales() {
 		for _, templateID := range domain.TemplateIDs() {
 			t.Run(locale.String()+"."+templateID.String(), func(t *testing.T) {
-				body, err := engine.Render(templateID, locale, values(t, hostileName, hostileCode))
+				body, err := engine.Render(templateID, locale, valuesFor(t, templateID, hostileName, hostileCode))
 				if err != nil {
 					t.Fatalf("Render() error = %v", err)
 				}
@@ -85,15 +107,22 @@ func TestRenderEscapesUntrustedValues(t *testing.T) {
 						t.Errorf("html contains unescaped %q: %s", raw, body.HTML)
 					}
 				}
-				for _, escaped := range []string{"&lt;script&gt;", "&amp;", "&#34;", "&lt;b&gt;code&lt;/b&gt;"} {
+				for _, escaped := range []string{"&lt;script&gt;", "&amp;", "&#34;"} {
 					if !strings.Contains(body.HTML, escaped) {
 						t.Errorf("html does not contain %q", escaped)
 					}
 				}
 				// The plain-text alternative carries the same values verbatim: it
 				// has no markup context to escape for.
-				if !strings.Contains(body.Text, hostileCode) {
-					t.Error("text body does not carry the code verbatim")
+				if templateID.CarriesCode() {
+					if !strings.Contains(body.HTML, "&lt;b&gt;code&lt;/b&gt;") {
+						t.Error("html does not escape the code value")
+					}
+					if !strings.Contains(body.Text, hostileCode) {
+						t.Error("text body does not carry the code verbatim")
+					}
+				} else if strings.Contains(body.Text, "<b>") || strings.Contains(body.HTML, "<b>code</b>") {
+					t.Error("a template that carries no code rendered a code value")
 				}
 				if strings.Contains(body.Subject, "&lt;") {
 					t.Error("subject was html-escaped: it is a plain-text header value")

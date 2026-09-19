@@ -82,13 +82,25 @@ type VerificationTokenRepository interface {
 	InvalidateActiveTokens(ctx context.Context, accountID domain.AccountID) error
 }
 
-// EmailSender delivers or enqueues transactional verification and password recovery emails.
+// EmailSender delivers or enqueues transactional verification and password
+// recovery emails.
 type EmailSender interface {
 	// SendVerificationEmail delivers or enqueues an email containing the unhashed verification token.
 	SendVerificationEmail(ctx context.Context, email domain.Email, token string) error
 
 	// SendPasswordResetEmail delivers or enqueues an email containing the unhashed password reset token.
 	SendPasswordResetEmail(ctx context.Context, email domain.Email, token string) error
+
+	// SendPasswordChangedEmail delivers or enqueues the notice that the
+	// account's password changed (P16-T06). It carries no secret: the message
+	// announces a transition, and its value is that the owner learns about a
+	// change they did not make.
+	//
+	// ChangeID identifies the change itself — the consumed recovery token, for
+	// instance. It is not a secret and it is not rendered: it is what makes two
+	// different changes two messages, so the second change of an account is not
+	// deduplicated against the first.
+	SendPasswordChangedEmail(ctx context.Context, email domain.Email, changeID string) error
 }
 
 // PasswordResetTokenRecord represents a stored single-use password recovery token.
@@ -133,6 +145,87 @@ type PasswordCredentialRepository interface {
 	UpdatePasswordCredential(ctx context.Context, accountID domain.AccountID, passwordHash string, algorithm string, version int32) error
 }
 
+// SessionWindow is the evaluation instant and the policy boundaries a session
+// statement is scoped to (P16-T06).
+//
+// The boundaries are passed in instead of computed by the adapter because the
+// session policy is a domain rule: `IdleCutoff` is the oldest `last_seen_at`
+// that is still usable and `AbsoluteCutoff` the oldest `created_at`, so the
+// statement asks exactly the question `SessionPolicy.IsExpired` answers. Two
+// places deriving "still alive" from the policy would be two answers.
+type SessionWindow struct {
+	// Now is the instant the evaluation happens at.
+	Now time.Time
+	// IdleCutoff is the instant before which inactivity has expired a session.
+	IdleCutoff time.Time
+	// AbsoluteCutoff is the instant before which a session is past its
+	// absolute lifetime regardless of activity.
+	AbsoluteCutoff time.Time
+	// MaxRows bounds the listing. A non-positive value selects
+	// DefaultSessionListingRows.
+	MaxRows int
+}
+
+// DefaultSessionListingRows bounds how many sessions one listing returns.
+//
+// The limit closes the response size at the storage boundary instead of
+// trusting an account to hold a reasonable number of sessions: an account with
+// a script that logs in repeatedly would otherwise turn one request into an
+// unbounded response.
+const DefaultSessionListingRows = 50
+
+// SessionWindowFor derives the policy boundaries of one instant. It is the
+// single place where the session policy becomes timestamps, so every statement
+// that scopes rows by liveness answers the same question. A non-positive
+// maxRows selects DefaultSessionListingRows.
+func SessionWindowFor(now time.Time, policy domain.SessionPolicy, maxRows int) SessionWindow {
+	if maxRows <= 0 {
+		maxRows = DefaultSessionListingRows
+	}
+	return SessionWindow{
+		Now:            now,
+		IdleCutoff:     now.Add(-policy.IdleTimeout),
+		AbsoluteCutoff: now.Add(-policy.AbsoluteLifetime),
+		MaxRows:        maxRows,
+	}
+}
+
+// SessionRecord is one stored session as storage reports it.
+//
+// It is deliberately not a domain.Session: a listing has no use for the token
+// hash, and returning the entity would mean fabricating a credential field the
+// statement never read. The absence is the point — the port cannot hand back a
+// credential it did not load.
+type SessionRecord struct {
+	ID         domain.SessionID
+	AccountID  domain.AccountID
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+	ExpiresAt  time.Time
+	IPAddress  string
+	UserAgent  string
+}
+
+// SessionSummary is one entry of the account's own session list (P16-T06).
+//
+// It carries the facts the session itself recorded when it was established —
+// when it was created, when it was last seen, when it dies, the address it
+// came from and the user agent it presented — and nothing derived from them.
+// There is deliberately no device identifier, no fingerprint and no
+// cross-session correlation here: the list is what the server already stores,
+// not a new way to recognize a person.
+type SessionSummary struct {
+	ID         domain.SessionID
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+	ExpiresAt  time.Time
+	IPAddress  string
+	UserAgent  string
+	// Current reports that this entry is the session making the request, so
+	// the owner can see which one to keep before ending the others.
+	Current bool
+}
+
 // SessionRepository manages persistence, retrieval, and revocation of opaque user sessions.
 type SessionRepository interface {
 	// CreateSession stores a newly created session record and returns the reconstituted domain Session.
@@ -149,6 +242,22 @@ type SessionRepository interface {
 
 	// RevokeAllAccountSessions revokes all active sessions for a given account.
 	RevokeAllAccountSessions(ctx context.Context, accountID domain.AccountID) error
+
+	// ListActiveSessions returns the account's usable sessions, most recently
+	// seen first, bounded by the window's MaxRows.
+	ListActiveSessions(ctx context.Context, accountID domain.AccountID, window SessionWindow) ([]SessionRecord, error)
+
+	// RevokeSessionByID revokes one session of one account, reporting whether
+	// an active row changed. A session that does not exist, belongs to another
+	// account or is already revoked reports false — the three cases are one
+	// answer on purpose, so the endpoint cannot be asked whether a session
+	// identifier exists.
+	RevokeSessionByID(ctx context.Context, accountID domain.AccountID, sessionID domain.SessionID) (bool, error)
+
+	// RevokeSessionsPastDeadline revokes every session past its policy
+	// deadline, reporting how many rows changed. It never deletes: removal
+	// belongs to the retention pass, with its own window and holds.
+	RevokeSessionsPastDeadline(ctx context.Context, window SessionWindow) (int64, error)
 }
 
 // The rate limiting hook P04-T08 declared here was replaced in P16-T03 by

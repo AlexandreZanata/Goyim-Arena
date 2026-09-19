@@ -40,6 +40,9 @@ type HandlerConfig struct {
 	ConfirmMFAEnrollmentUseCase  *application.ConfirmMFAEnrollmentUseCase
 	StepUpMFAUseCase             *application.StepUpMFAUseCase
 	RecoverMFAUseCase            *application.RecoverMFAUseCase
+	ListSessionsUseCase          *application.ListSessionsUseCase
+	RevokeSessionUseCase         *application.RevokeSessionUseCase
+	RotateSessionUseCase         *application.RotateSessionUseCase
 	Templates                    *HTMLTemplates
 }
 
@@ -59,6 +62,9 @@ type Handler struct {
 	confirmMFA           *application.ConfirmMFAEnrollmentUseCase
 	stepUpMFA            *application.StepUpMFAUseCase
 	recoverMFA           *application.RecoverMFAUseCase
+	listSessions         *application.ListSessionsUseCase
+	revokeSession        *application.RevokeSessionUseCase
+	rotateSession        *application.RotateSessionUseCase
 	templates            *HTMLTemplates
 }
 
@@ -84,6 +90,9 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		confirmMFA:           cfg.ConfirmMFAEnrollmentUseCase,
 		stepUpMFA:            cfg.StepUpMFAUseCase,
 		recoverMFA:           cfg.RecoverMFAUseCase,
+		listSessions:         cfg.ListSessionsUseCase,
+		revokeSession:        cfg.RevokeSessionUseCase,
+		rotateSession:        cfg.RotateSessionUseCase,
 		templates:            templates,
 	}
 }
@@ -452,6 +461,14 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/me/mfa/enrollment/confirm", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.ConfirmMFAEnrollment))))
 	mux.Handle("POST /api/v1/me/mfa/step-up", withPrivateNoStore(h.protect(ratelimit.ActionMFAVerify, h.privateRoute(http.HandlerFunc(h.StepUpMFA)))))
 	mux.Handle("POST /api/v1/me/mfa/recovery", withPrivateNoStore(h.protect(ratelimit.ActionMFAVerify, h.privateRoute(http.HandlerFunc(h.RecoverMFA)))))
+
+	// The device list and the critical transition of sessions (P16-T06). The
+	// list is a read of the caller's own rows; ending another session is the
+	// one that carries a throttle, because it verifies a password and a guess
+	// there is a guess at the credential itself.
+	mux.Handle("GET /api/v1/me/sessions", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.ListSessions))))
+	mux.Handle("POST /api/v1/me/sessions/revocation", withPrivateNoStore(h.protect(ratelimit.ActionSessionTransition, h.privateRoute(http.HandlerFunc(h.RevokeSession)))))
+	mux.Handle("POST /api/v1/me/sessions/rotation", withPrivateNoStore(h.protect(ratelimit.ActionSessionTransition, h.privateRoute(http.HandlerFunc(h.RotateSession)))))
 }
 
 // privateRoute applies the session requirement when a security manager is

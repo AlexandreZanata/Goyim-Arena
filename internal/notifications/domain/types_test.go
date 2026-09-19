@@ -114,7 +114,7 @@ func TestParseLocaleIsExact(t *testing.T) {
 }
 
 func TestTemplateSetIsClosed(t *testing.T) {
-	if !domain.TemplateVerification.Valid() || !domain.TemplatePasswordReset.Valid() {
+	if !domain.TemplateVerification.Valid() || !domain.TemplatePasswordReset.Valid() || !domain.TemplatePasswordChanged.Valid() {
 		t.Error("a shipped template is not valid")
 	}
 	for _, unknown := range []domain.TemplateID{"marketing", "", "VERIFICATION", "verification "} {
@@ -122,8 +122,56 @@ func TestTemplateSetIsClosed(t *testing.T) {
 			t.Errorf("TemplateID(%q).Valid() = true, want false", unknown)
 		}
 	}
-	if len(domain.TemplateIDs()) != 2 {
+	if len(domain.TemplateIDs()) != 3 {
 		t.Errorf("TemplateIDs() = %v, want the closed set", domain.TemplateIDs())
+	}
+}
+
+// TestCarriesCodeIsTheContractOfThePair pins which templates deliver a code.
+// The list is stated here and not derived from CarriesCode, so the two have to
+// agree by construction: a template that changes kind without changing this
+// table fails, which is the review the change deserves.
+func TestCarriesCodeIsTheContractOfThePair(t *testing.T) {
+	for templateID, carries := range map[domain.TemplateID]bool{
+		domain.TemplateVerification:    true,
+		domain.TemplatePasswordReset:   true,
+		domain.TemplatePasswordChanged: false,
+	} {
+		if got := templateID.CarriesCode(); got != carries {
+			t.Errorf("%s.CarriesCode() = %v, want %v", templateID, got, carries)
+		}
+	}
+	if domain.TemplateID("marketing").CarriesCode() {
+		t.Error("an unknown template must not claim to carry a code")
+	}
+}
+
+// TestValidateTemplateValuesRefusesTheWrongPair is the rule that keeps a secret
+// from being dropped: a code-carrying template without a code and a notice that
+// was handed one are both refused, and the notice's own values are what a
+// notice accepts.
+func TestValidateTemplateValuesRefusesTheWrongPair(t *testing.T) {
+	if _, err := domain.ValidateTemplateValues(domain.TemplateVerification, "Ana", ""); !errors.Is(err, domain.ErrInvalidTemplateValue) {
+		t.Errorf("a code-carrying template without a code: error = %v, want ErrInvalidTemplateValue", err)
+	}
+	if _, err := domain.ValidateTemplateValues(domain.TemplatePasswordChanged, "Ana", "K7QP-2M4Z-9RTX"); !errors.Is(err, domain.ErrInvalidTemplateValue) {
+		t.Errorf("a notice handed a code: error = %v, want ErrInvalidTemplateValue", err)
+	}
+	values, err := domain.ValidateTemplateValues(domain.TemplatePasswordChanged, " Ana ", "")
+	if err != nil {
+		t.Fatalf("a notice with a name: error = %v, want nil", err)
+	}
+	if values.Name != "Ana" || values.Code != "" {
+		t.Errorf("values = %+v, want the trimmed name and no code", values)
+	}
+	if _, err := domain.ValidateTemplateValues("marketing", "Ana", ""); !errors.Is(err, domain.ErrUnsupportedTemplate) {
+		t.Errorf("an unknown template: error = %v, want ErrUnsupportedTemplate", err)
+	}
+	if _, err := domain.ValidateTemplateValues(domain.TemplatePasswordChanged, strings.Repeat("a", 81), ""); !errors.Is(err, domain.ErrInvalidTemplateValue) {
+		t.Errorf("an oversized name: error = %v, want ErrInvalidTemplateValue", err)
+	}
+	if _, err := domain.ValidateTemplateValues(domain.TemplatePasswordChanged, "Ana\nBea", ""); !errors.Is(err, domain.ErrInvalidTemplateValue) {
+		t.Errorf("a name with a control character: error = %v, want ErrInvalidTemplateValue", err)
 	}
 }
 

@@ -20,12 +20,21 @@ type SentResetEmail struct {
 	Token string
 }
 
+// SentPasswordChangedEmail records the notice that an account's password
+// changed (P16-T06). It has no token by construction, and the change
+// identifier is recorded so a test can tell two changes apart.
+type SentPasswordChangedEmail struct {
+	Email    domain.Email
+	ChangeID string
+}
+
 // Sender implements application.EmailSender in-memory for testing and non-production environments.
 type Sender struct {
-	mu          sync.Mutex
-	emails      []SentVerificationEmail
-	resetEmails []SentResetEmail
-	failOn      error
+	mu            sync.Mutex
+	emails        []SentVerificationEmail
+	resetEmails   []SentResetEmail
+	changedEmails []SentPasswordChangedEmail
+	failOn        error
 }
 
 var _ application.EmailSender = (*Sender)(nil)
@@ -63,6 +72,22 @@ func (s *Sender) SendPasswordResetEmail(ctx context.Context, email domain.Email,
 	s.resetEmails = append(s.resetEmails, SentResetEmail{
 		Email: email,
 		Token: token,
+	})
+	return nil
+}
+
+// SendPasswordChangedEmail records the notice that the password changed.
+func (s *Sender) SendPasswordChangedEmail(ctx context.Context, email domain.Email, changeID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.failOn != nil {
+		return s.failOn
+	}
+
+	s.changedEmails = append(s.changedEmails, SentPasswordChangedEmail{
+		Email:    email,
+		ChangeID: changeID,
 	})
 	return nil
 }
@@ -120,11 +145,22 @@ func (s *Sender) SetFailure(err error) {
 	s.failOn = err
 }
 
+// SentPasswordChangedEmails returns a copy of all recorded password change notices.
+func (s *Sender) SentPasswordChangedEmails() []SentPasswordChangedEmail {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]SentPasswordChangedEmail, len(s.changedEmails))
+	copy(out, s.changedEmails)
+	return out
+}
+
 // Reset clears all recorded messages and error states.
 func (s *Sender) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.emails = nil
 	s.resetEmails = nil
+	s.changedEmails = nil
 	s.failOn = nil
 }

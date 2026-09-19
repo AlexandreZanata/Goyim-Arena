@@ -16,7 +16,8 @@ type CompletePasswordResetCommand struct {
 }
 
 // CompletePasswordResetUseCase validates the single-use recovery token, updates the password credential,
-// consumes the token, invalidates remaining active tokens, and revokes all active sessions.
+// consumes the token, invalidates remaining active tokens, revokes all active sessions, and notifies the
+// owner that the change happened.
 type CompletePasswordResetUseCase struct {
 	accounts           AccountRepository
 	credentials        PasswordCredentialRepository
@@ -24,6 +25,7 @@ type CompletePasswordResetUseCase struct {
 	verificationTokens VerificationTokenRepository
 	sessions           SessionRepository
 	hasher             PasswordHasher
+	emails             EmailSender
 	clock              Clock
 }
 
@@ -35,6 +37,7 @@ func NewCompletePasswordResetUseCase(
 	verificationTokens VerificationTokenRepository,
 	sessions SessionRepository,
 	hasher PasswordHasher,
+	emails EmailSender,
 	clock Clock,
 ) *CompletePasswordResetUseCase {
 	return &CompletePasswordResetUseCase{
@@ -44,6 +47,7 @@ func NewCompletePasswordResetUseCase(
 		verificationTokens: verificationTokens,
 		sessions:           sessions,
 		hasher:             hasher,
+		emails:             emails,
 		clock:              clock,
 	}
 }
@@ -121,6 +125,21 @@ func (uc *CompletePasswordResetUseCase) Execute(ctx context.Context, cmd Complet
 		if err := uc.verificationTokens.InvalidateActiveTokens(ctx, account.ID()); err != nil {
 			return fmt.Errorf("invalidate active verification tokens: %w", err)
 		}
+	}
+
+	// The owner is told, and the notice is queued inside the same transaction
+	// as the change it announces (P16-T06): the message claims the password
+	// changed and every older session ended, which is only true once those
+	// writes are the ones that commit, and a queue that cannot accept the job
+	// fails the reset instead of leaving an undetected change behind. The
+	// identifier of the consumed token anchors the event, so a retry of this
+	// reset resolves the notice it already queued while the next reset of the
+	// same account is a new message.
+	if uc.emails == nil {
+		return ErrMissingEmailSender
+	}
+	if err := uc.emails.SendPasswordChangedEmail(ctx, account.Email(), record.ID); err != nil {
+		return fmt.Errorf("notify password change: %w", err)
 	}
 
 	return nil
