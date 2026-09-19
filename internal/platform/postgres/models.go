@@ -98,6 +98,16 @@ type AppArenaPassLot struct {
 	CreatedAt pgtype.Timestamptz
 }
 
+// Rebuildable public Arena count projection; normalized Arena, position and attribution tables remain authoritative
+type AppArenaPublicStatProjection struct {
+	ArenaID           pgtype.UUID
+	ProjectionVersion int32
+	// Latest source instant observed by the rebuild; it is not a wall-clock freshness claim
+	SourceWatermark pgtype.Timestamptz
+	Stats           []byte
+	RebuiltAt       pgtype.Timestamptz
+}
+
 // Substitution/continuation notes linking one Arena to another (never to itself)
 type AppArenaRelation struct {
 	ID             pgtype.UUID
@@ -602,6 +612,17 @@ type AppSubscription struct {
 	CanceledAt pgtype.Timestamptz
 	CreatedAt  pgtype.Timestamptz
 	UpdatedAt  pgtype.Timestamptz
+}
+
+// Rebuildable period metrics projection; normalized source tables remain authoritative
+type AppTransparencyStatProjection struct {
+	PeriodStart        pgtype.Timestamptz
+	PeriodEnd          pgtype.Timestamptz
+	MethodologyVersion int32
+	// Latest source instant observed by the period rebuild
+	SourceWatermark pgtype.Timestamptz
+	Stats           []byte
+	RebuiltAt       pgtype.Timestamptz
 }
 
 // Audit trail of every username set or changed by an account (P05-T02 requires auditable history)
