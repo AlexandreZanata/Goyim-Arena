@@ -70,6 +70,8 @@ const (
 	ActionCheckoutCreate Action = "checkout.create"
 	// ActionBillingPortal opens the hosted billing portal, which calls Stripe.
 	ActionBillingPortal Action = "billing.portal"
+	// ActionMFAVerify checks a second factor code (step-up or recovery).
+	ActionMFAVerify Action = "mfa.verify"
 )
 
 // Budget is one token bucket: Burst requests may be spent back to back, and
@@ -170,6 +172,13 @@ var policies = map[Action]Policy{
 
 	// Opening the hosted portal is the same external call with less state.
 	ActionBillingPortal: {Address: Budget{Burst: 40, Window: time.Hour}, Account: &Budget{Burst: 8, Window: time.Hour}},
+
+	// A second factor code is a secret with few enough digits that guessing it
+	// is a matter of volume: ten attempts per hour per account, with a looser
+	// network bound so that a shared address cannot silence the check. The
+	// account dimension is the one that matters here, because the caller is
+	// already authenticated.
+	ActionMFAVerify: {Address: Budget{Burst: 60, Window: time.Hour}, Account: &Budget{Burst: 10, Window: time.Hour}},
 }
 
 // Actions lists every declared action, so completeness is testable and so

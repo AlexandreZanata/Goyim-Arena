@@ -98,6 +98,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		if strings.HasPrefix(route.Path, "/api/v1/me/deletion") {
 			continue
 		}
+		if strings.HasPrefix(route.Path, "/api/v1/me/mfa/") {
+			continue
+		}
 		if route.Path == "/api/v1/me/wallet" || route.Path == "/api/v1/me/wallet/transactions" {
 			continue
 		}

@@ -26,6 +26,27 @@
 
 Não implementar JWT como sessão principal no browser. JWT pode ser reavaliado para integração específica, não por conveniência.
 
+### Segundo fator administrativo (P16-T05)
+
+O mecanismo é TOTP nativo sobre RFC 4226/6238 (`internal/platform/mfa`), e a decisão está registrada na ADR-014: a biblioteca padrão do Go cobre todos os primitivos (HMAC, AES-GCM, comparação em tempo constante, `crypto/rand`), os vectores publicados pela RFC provam a correção do algoritmo em teste, e as partes que uma biblioteca genérica **não** decide — quanto skew de relógio é tolerado, que um passo aceito é gasto, sob que conta o segredo é selado — são exatamente as que aqui são política escrita. A superfície é `internal/identity` (casos de uso) sobre esse mecanismo por porta.
+
+O que existe e por quê:
+
+- **o segredo é selado, nunca hasheado.** Verificar um código exige o segredo em claro, então ele é cifrado com AES-256-GCM e o identificador da conta é o *additional authenticated data*: um valor selado copiado de outra linha não abre. A coluna guarda só criptografia, então um dump, uma réplica ou um backup não contêm um segundo fator utilizável. A chave (32 bytes) entra com a composição dos módulos, pelo mesmo critério que a T03 registrou para proxies confiáveis e a T04 para o Turnstile;
+- **um passo de tempo é de uso único.** O maior passo aceito vive na própria linha (`app.account_mfa.last_accepted_step`) e o avanço é uma única instrução (`WHERE last_accepted_step < $2`), então duas verificações concorrentes do mesmo código não podem ambas vencer. Um código dentro da janela que já foi gasto é recusado como `mfa_code_replayed`, separado de `mfa_code_invalid`: um é replay de um código correto, o outro é um palpite errado, e quem lê um incidente precisa distinguir os dois;
+- **skew limitado.** Um passo para cada lado é o default (tolerância a relógio dessincronizado por segundos); alargar a janela amplia a superfície de palpite e é decisão, não inferência. `Verify` caminha a janela inteira e compara em tempo constante, sem parar cedo de forma dependente do conteúdo;
+- **códigos de recuperação são de uso único e hasheados** com o mesmo Argon2id das senhas, e a forma do código é validada **antes** de qualquer hashing, para que o endpoint não seja oráculo nem gasto barato de CPU. A recusa de um código já gasto é a mesma de um código inexistente, pelo mesmo motivo da T04;
+- **elevação é propriedade da sessão**, não da conta: `app.sessions.mfa_verified_at` diz quando **aquela** sessão apresentou o fator. A conta pode ter matrícula confirmada e ainda assim uma sessão que nunca apresentou nada, e é essa sessão que o gate administrativo recusa;
+- **recuperação falha fechado.** A ordem é consumir o código, registrar o fato na trilha de auditoria e só então elevar a sessão. Uma recuperação que não pode ser atribuída **não** eleva ninguém (o código é gasto e o acesso não é concedido), que é a única direção que não pode ser abusada por repetição até a trilha ficar disponível. Os fatos registrados são `mfa.enrolled` e `mfa.backup_code_used`.
+
+O gate administrativo (`internal/moderation/adapters/http`) exige, além do papel, que a sessão tenha apresentado o fator dentro de `domain.StepUpWindow` (15 minutos) e recusa com `mfa_step_up_required` nas três rotas de triagem (fila, claim e decisão). A recusa não descreve o estado da matrícula: ela diz que falta um step-up, nunca se a conta tem fator, se ele está confirmado ou quando foi apresentado. As rotas de step-up e recuperação carregam o orçamento `mfa.verify` (endereço e conta) da política da T03, porque um código é um segredo adivinhável.
+
+Limites conhecidos, que precisam de decisão antes do beta:
+
+- **matrícula e confirmação não têm orçamento por ação.** Elas só são alcançáveis por sessão autenticada, cada chamada reescreve no máximo uma linha pendente e não há amplificação (nem envio de email); o custo é limitado pela camada de plataforma da T02. Se a fase 18 expuser o widget, vale revisitar: um oráculo de geração de segredo por conta é barato de limitar;
+- **a memória de passos gastos é a linha do banco**, então — ao contrário do que acontece com os tokens do Turnstile — ela é global e não por processo: duas instâncias respeitam o mesmo passo;
+- **o segredo é mostrado uma única vez**, na resposta de `POST /api/v1/me/mfa/enrollment`, e os códigos de recuperação também só existem em claro na resposta de confirmação; nenhuma outra resposta os repete (há teste que percorre as respostas).
+
 ## 3. Autorização
 
 - Toda ação possui verificação server-side de ator, recurso e permissão.

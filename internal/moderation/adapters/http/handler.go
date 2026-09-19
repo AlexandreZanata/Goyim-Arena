@@ -332,6 +332,42 @@ func (h *Handler) requireAdminGate(w http.ResponseWriter, r *http.Request, ident
 		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindForbidden, "forbidden", "account lacks moderation capability"))
 		return false
 	}
+
+	return h.requireRecentSecondFactor(w, r, identity)
+}
+
+// requireRecentSecondFactor enforces the step-up rule of the administrative
+// surface (P16-T05): holding the capability is not enough, the session must
+// have presented a second factor recently.
+//
+// The rule is stated here rather than inside the assignment lookup because the
+// two facts are different: the assignment says who may, and the session's
+// elevation says which session proved it holds the factor. A session that
+// never presented one is refused, so an operator whose account has a confirmed
+// enrollment but whose session predates it is sent to the step-up endpoint
+// instead of being served the queue.
+func (h *Handler) requireRecentSecondFactor(w http.ResponseWriter, r *http.Request, identity security.AuthIdentity) bool {
+	if h.sessions == nil || h.clock == nil {
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindInternal, "server_error", "second factor freshness unavailable"))
+		return false
+	}
+
+	verifiedAt, elevated, err := h.sessions.MFAVerifiedAt(r.Context(), identity.SessionID)
+	if err != nil {
+		writeModerationProblem(w, r, err)
+		return false
+	}
+	if !elevated {
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindForbidden, "mfa_step_up_required", "administrative access requires a recent second factor"))
+		return false
+	}
+
+	// The window is the module's own step-up window, so the second factor and
+	// the high-impact actions expire together instead of drifting apart.
+	if h.clock.Now().UTC().Sub(verifiedAt) > domain.StepUpWindow {
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindForbidden, "mfa_step_up_required", "administrative access requires a recent second factor"))
+		return false
+	}
 	return true
 }
 

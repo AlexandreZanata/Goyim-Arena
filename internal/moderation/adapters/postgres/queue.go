@@ -73,6 +73,33 @@ func (r *Repository) ListQueuePage(ctx context.Context, status string, after *ap
 	return items, nil
 }
 
+// MFAVerifiedAt reports when the session last presented a second factor, and
+// whether it ever did (P16-T05).
+//
+// A session that never presented one is not an error and not a denial by
+// itself: it is a fact about the session, and the authorization rule that
+// refuses it lives in the HTTP layer, next to the assignment check it
+// complements. An unknown or malformed identifier denies distinctly, exactly
+// as the age lookup does.
+func (r *Repository) MFAVerifiedAt(ctx context.Context, sessionID string) (time.Time, bool, error) {
+	var id pgtype.UUID
+	if err := id.Scan(sessionID); err != nil {
+		return time.Time{}, false, application.ErrUnknownSession
+	}
+
+	verifiedAt, err := r.queries.GetSessionMFAVerifiedAt(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, false, application.ErrUnknownSession
+		}
+		return time.Time{}, false, fmt.Errorf("load session mfa instant: %w", err)
+	}
+	if !verifiedAt.Valid {
+		return time.Time{}, false, nil
+	}
+	return verifiedAt.Time.UTC(), true, nil
+}
+
 // SessionAgeAt returns how long ago the session authenticated, as of now.
 // Unknown or malformed session identifiers deny distinctly instead of
 // being treated as fresh.

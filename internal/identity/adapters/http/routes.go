@@ -20,5 +20,13 @@ func Routes() []httpserver.Route {
 		{Method: http.MethodPost, Path: "/api/v1/auth/password-reset/request"},
 		{Method: http.MethodGet, Path: "/api/v1/auth/password-reset"},
 		{Method: http.MethodPost, Path: "/api/v1/auth/password-reset/confirm"},
+		// The second factor of the administrative surface (P16-T05). The
+		// enrollment pair is open to any authenticated account — an operator
+		// must be able to hold a factor before holding a role — while the
+		// step-up pair is what an administrative action demands.
+		{Method: http.MethodPost, Path: "/api/v1/me/mfa/enrollment"},
+		{Method: http.MethodPost, Path: "/api/v1/me/mfa/enrollment/confirm"},
+		{Method: http.MethodPost, Path: "/api/v1/me/mfa/step-up"},
+		{Method: http.MethodPost, Path: "/api/v1/me/mfa/recovery"},
 	}
 }

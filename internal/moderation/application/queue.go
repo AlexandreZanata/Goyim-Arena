@@ -158,6 +158,13 @@ type SessionAgeDirectory interface {
 	// SessionAgeAt returns how long ago the session authenticated, as of
 	// now. Unknown sessions deny distinctly.
 	SessionAgeAt(ctx context.Context, sessionID string, now time.Time) (time.Duration, error)
+
+	// MFAVerifiedAt reports when the session last presented a second
+	// factor, and whether it ever did. It is part of this port because
+	// administrative capability is a property of the session and not only
+	// of the account: an assignment held by an account whose session never
+	// presented the factor is not administrative access (P16-T05).
+	MFAVerifiedAt(ctx context.Context, sessionID string) (time.Time, bool, error)
 }
 
 // GetCaseQueueUseCase answers one triage queue page for an active

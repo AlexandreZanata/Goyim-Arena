@@ -11,6 +11,7 @@ import (
 )
 
 type Querier interface {
+	AdvanceMFAVerifiedStep(ctx context.Context, arg AdvanceMFAVerifiedStepParams) (int64, error)
 	// AnonymizeDeletedAccount replaces the account's private identity with the
 	// opaque placeholder: the stable identifier survives for referential
 	// integrity, the email stops being personal data, and the account moves to
@@ -51,10 +52,12 @@ type Querier interface {
 	// one Arena. The primary key (arena_id, account_id) resolves concurrent
 	// confirmations: the loser inserts nothing and re-reads the winner (P09-T03).
 	ConfirmInitialPosition(ctx context.Context, arg ConfirmInitialPositionParams) (AppDebatePosition, error)
+	ConfirmMFAEnrollment(ctx context.Context, arg ConfirmMFAEnrollmentParams) (pgtype.Timestamptz, error)
 	// ConsumeArenaPassLot atomically decrements a lot that still has passes. The
 	// conditional predicate and the remaining_quantity CHECK together make
 	// over-consumption impossible, even under concurrent consumers (P07-T03).
 	ConsumeArenaPassLot(ctx context.Context, id pgtype.UUID) (int64, error)
+	ConsumeMFABackupCode(ctx context.Context, arg ConsumeMFABackupCodeParams) (int64, error)
 	// ConsumePersonalExportDownload serves one download and consumes one unit of
 	// the budget atomically: the token must match, the record must be ready, the
 	// link must be unexpired and the budget unexhausted. Zero rows answer an
@@ -201,6 +204,7 @@ type Querier interface {
 	// token of the account.
 	DeleteDeletedAccountVerificationTokens(ctx context.Context, accountID pgtype.UUID) (int64, error)
 	DeleteExpiredSessions(ctx context.Context) (int64, error)
+	DeleteMFABackupCodes(ctx context.Context, accountID pgtype.UUID) (int64, error)
 	// Durable job queue (P15-T01). Enqueue is idempotent by caller-chosen key;
 	// claim is a single statement that locks one due row with SKIP LOCKED, so
 	// many workers never claim the same job; complete and fail are lease-guarded;
@@ -336,6 +340,15 @@ type Querier interface {
 	// GetLastUsernameChangeAt returns the most recent username audit instant for
 	// the account, or NULL when the account has no history yet.
 	GetLastUsernameChangeAt(ctx context.Context, accountID pgtype.UUID) (pgtype.Timestamptz, error)
+	// MFA queries (P16-T05). The two statements that carry a security invariant
+	// are written as single statements on purpose:
+	//
+	//   * UpsertPendingMFAEnrollment refuses to overwrite a confirmed enrollment,
+	//     so "start enrollment" cannot become a way to reset somebody's second
+	//     factor;
+	//   * AdvanceMFAVerifiedStep only moves forward, so two requests presenting the
+	//     same code cannot both be accepted.
+	GetMFAEnrollment(ctx context.Context, accountID pgtype.UUID) (AppAccountMfa, error)
 	// Appeal reads and lifecycle (P13-T06). Exactly one appeal contests one
 	// action: the UNIQUE constraint refuses the second contest, and the
 	// adapter maps the violation to the duplicate sentinel instead of
@@ -404,6 +417,7 @@ type Querier interface {
 	// session creation as of the caller's instant; unknown sessions deny
 	// distinctly instead of being treated as fresh.
 	GetSessionCreatedAt(ctx context.Context, id pgtype.UUID) (pgtype.Timestamptz, error)
+	GetSessionMFAVerifiedAt(ctx context.Context, id pgtype.UUID) (pgtype.Timestamptz, error)
 	GetStripeCustomer(ctx context.Context, accountID pgtype.UUID) (GetStripeCustomerRow, error)
 	// Subscription lifecycle queries (P12-T08).
 	// The subscription mirror persists the provider state and anchors per-period
@@ -435,6 +449,7 @@ type Querier interface {
 	// provider identifier is the idempotency anchor and the commercial facts are
 	// immutable once written. Only the human resolution may be appended later.
 	InsertBillingRefundIfAbsent(ctx context.Context, arg InsertBillingRefundIfAbsentParams) (AppBillingRefund, error)
+	InsertMFABackupCode(ctx context.Context, arg InsertMFABackupCodeParams) error
 	InsertModerationAppeal(ctx context.Context, arg InsertModerationAppealParams) (InsertModerationAppealRow, error)
 	InsertReconciliationFinding(ctx context.Context, arg InsertReconciliationFindingParams) (AppBillingReconciliationFinding, error)
 	// Webhook event queries (P12-T05). The provider's unique event ID is the
@@ -660,6 +675,7 @@ type Querier interface {
 	ListRepliesPage(ctx context.Context, arg ListRepliesPageParams) ([]ListRepliesPageRow, error)
 	ListSubscriptionsForReconciliation(ctx context.Context, arg ListSubscriptionsForReconciliationParams) ([]AppSubscription, error)
 	ListUnprocessedStripeEvents(ctx context.Context, arg ListUnprocessedStripeEventsParams) ([]AppStripeEvent, error)
+	ListUnusedMFABackupCodes(ctx context.Context, accountID pgtype.UUID) ([]ListUnusedMFABackupCodesRow, error)
 	ListUsernameHistoryByAccountID(ctx context.Context, accountID pgtype.UUID) ([]AppUsernameHistory, error)
 	// ListWalletStatementPage returns one keyset-paginated page of the account
 	// statement, newest first. NULL after_* parameters select the first page;
@@ -682,6 +698,7 @@ type Querier interface {
 	// guard resolves concurrent generations: only the first writer wins and the
 	// loser resolves the recorded replay.
 	MarkPersonalExportReady(ctx context.Context, arg MarkPersonalExportReadyParams) (int64, error)
+	MarkSessionMFAVerified(ctx context.Context, arg MarkSessionMFAVerifiedParams) (int64, error)
 	// PingHealth executes a trivial query (SELECT 1) to verify connection readiness.
 	PingHealth(ctx context.Context) (int32, error)
 	// PublishArenaDraft performs the draft→published transition under the
@@ -793,6 +810,7 @@ type Querier interface {
 	// terminal state and records the processing completion time.
 	UpdateWebhookEventStatusProcessed(ctx context.Context, arg UpdateWebhookEventStatusProcessedParams) (AppStripeEvent, error)
 	UpsertCommunicationPreferences(ctx context.Context, arg UpsertCommunicationPreferencesParams) (AppCommunicationPreference, error)
+	UpsertPendingMFAEnrollment(ctx context.Context, arg UpsertPendingMFAEnrollmentParams) (AppAccountMfa, error)
 	UpsertSubscription(ctx context.Context, arg UpsertSubscriptionParams) (AppSubscription, error)
 	// WithdrawArgument moves a published argument out of the display under the
 	// author scope, recording the withdrawal instant once. Zero rows mean the

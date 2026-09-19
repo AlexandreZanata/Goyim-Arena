@@ -100,15 +100,15 @@ WHERE id = $1 AND used_at IS NULL;
 -- name: CreateSession :one
 INSERT INTO app.sessions (account_id, token_hash, expires_at, ip_address, user_agent)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent;
+RETURNING id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at;
 
 -- name: GetActiveSessionByTokenHash :one
-SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 FROM app.sessions
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now();
 
 -- name: GetSessionByTokenHash :one
-SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 FROM app.sessions
 WHERE token_hash = $1;
 

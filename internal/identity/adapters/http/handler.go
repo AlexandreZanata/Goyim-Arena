@@ -36,6 +36,10 @@ type HandlerConfig struct {
 	SecurityManager              *security.Manager
 	RateLimit                    ratelimit.Protector
 	Challenge                    turnstile.Challenger
+	BeginMFAEnrollmentUseCase    *application.BeginMFAEnrollmentUseCase
+	ConfirmMFAEnrollmentUseCase  *application.ConfirmMFAEnrollmentUseCase
+	StepUpMFAUseCase             *application.StepUpMFAUseCase
+	RecoverMFAUseCase            *application.RecoverMFAUseCase
 	Templates                    *HTMLTemplates
 }
 
@@ -51,6 +55,10 @@ type Handler struct {
 	security             *security.Manager
 	rateLimit            ratelimit.Protector
 	challenge            turnstile.Challenger
+	beginMFA             *application.BeginMFAEnrollmentUseCase
+	confirmMFA           *application.ConfirmMFAEnrollmentUseCase
+	stepUpMFA            *application.StepUpMFAUseCase
+	recoverMFA           *application.RecoverMFAUseCase
 	templates            *HTMLTemplates
 }
 
@@ -72,6 +80,10 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		security:             cfg.SecurityManager,
 		rateLimit:            cfg.RateLimit,
 		challenge:            cfg.Challenge,
+		beginMFA:             cfg.BeginMFAEnrollmentUseCase,
+		confirmMFA:           cfg.ConfirmMFAEnrollmentUseCase,
+		stepUpMFA:            cfg.StepUpMFAUseCase,
+		recoverMFA:           cfg.RecoverMFAUseCase,
 		templates:            templates,
 	}
 }
@@ -429,4 +441,26 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/auth/password-reset/request", h.protect(ratelimit.ActionAuthPasswordResetRequest, h.challenged(turnstile.ActionPasswordReset, http.HandlerFunc(h.RequestPasswordReset))))
 	mux.HandleFunc("GET /api/v1/auth/password-reset", h.ViewPasswordReset)
 	mux.Handle("POST /api/v1/auth/password-reset/confirm", h.protect(ratelimit.ActionAuthPasswordResetConfirm, http.HandlerFunc(h.ConfirmPasswordReset)))
+
+	// The second factor of the administrative surface (P16-T05). These four
+	// routes are authenticated — the session is what is being elevated — and
+	// the two that accept a code carry a throttle, because a code is a secret
+	// a caller can guess: the step-up spends one code per attempt and the
+	// recovery spends a hashed comparison per attempt, and both are bounded by
+	// the account dimension rather than by the address.
+	mux.Handle("POST /api/v1/me/mfa/enrollment", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.BeginMFAEnrollment))))
+	mux.Handle("POST /api/v1/me/mfa/enrollment/confirm", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.ConfirmMFAEnrollment))))
+	mux.Handle("POST /api/v1/me/mfa/step-up", withPrivateNoStore(h.protect(ratelimit.ActionMFAVerify, h.privateRoute(http.HandlerFunc(h.StepUpMFA)))))
+	mux.Handle("POST /api/v1/me/mfa/recovery", withPrivateNoStore(h.protect(ratelimit.ActionMFAVerify, h.privateRoute(http.HandlerFunc(h.RecoverMFA)))))
+}
+
+// privateRoute applies the session requirement when a security manager is
+// configured, which is the same contract the other modules' private surfaces
+// use: the composition installs the manager, and a handler built without one
+// answers about the missing identity rather than panicking.
+func (h *Handler) privateRoute(next http.Handler) http.Handler {
+	if h.security == nil {
+		return next
+	}
+	return h.security.RequireAuthMiddleware()(next)
 }

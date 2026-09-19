@@ -115,7 +115,7 @@ func (q *Queries) CreatePasswordResetToken(ctx context.Context, arg CreatePasswo
 const createSession = `-- name: CreateSession :one
 INSERT INTO app.sessions (account_id, token_hash, expires_at, ip_address, user_agent)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+RETURNING id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 `
 
 type CreateSessionParams struct {
@@ -145,6 +145,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (A
 		&i.RevokedAt,
 		&i.IpAddress,
 		&i.UserAgent,
+		&i.MfaVerifiedAt,
 	)
 	return i, err
 }
@@ -264,7 +265,7 @@ func (q *Queries) GetActivePasswordResetToken(ctx context.Context, tokenHash []b
 }
 
 const getActiveSessionByTokenHash = `-- name: GetActiveSessionByTokenHash :one
-SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 FROM app.sessions
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
 `
@@ -282,6 +283,7 @@ func (q *Queries) GetActiveSessionByTokenHash(ctx context.Context, tokenHash []b
 		&i.RevokedAt,
 		&i.IpAddress,
 		&i.UserAgent,
+		&i.MfaVerifiedAt,
 	)
 	return i, err
 }
@@ -347,7 +349,7 @@ func (q *Queries) GetPasswordResetTokenByHash(ctx context.Context, tokenHash []b
 }
 
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
-SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 FROM app.sessions
 WHERE token_hash = $1
 `
@@ -365,6 +367,7 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (
 		&i.RevokedAt,
 		&i.IpAddress,
 		&i.UserAgent,
+		&i.MfaVerifiedAt,
 	)
 	return i, err
 }
