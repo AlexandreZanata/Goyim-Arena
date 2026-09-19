@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/profiles/application"
@@ -69,8 +70,7 @@ func setPublicNoStoreHeaders(w http.ResponseWriter) {
 
 // setPrivateNoStoreHeaders enforces THR-CACHE-01 on authenticated routes.
 func setPrivateNoStoreHeaders(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "private, no-store, no-cache, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
+	httpcache.Private(w)
 }
 
 // writeJSON renders a JSON response document.

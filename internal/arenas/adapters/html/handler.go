@@ -2,19 +2,17 @@ package html
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"html/template"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/i18n"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 )
 
@@ -201,7 +199,7 @@ func (h *Handler) renderErrorPage(w http.ResponseWriter, r *http.Request, status
 		return
 	}
 
-	w.Header().Set("Cache-Control", "no-store")
+	httpcache.NoStore(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	_, _ = w.Write(body.Bytes())
@@ -210,14 +208,12 @@ func (h *Handler) renderErrorPage(w http.ResponseWriter, r *http.Request, status
 // writeCacheableHTML writes a public HTML document with a strong ETag and
 // honors If-None-Match with 304.
 func writeCacheableHTML(w http.ResponseWriter, r *http.Request, body []byte) {
-	sum := sha256.Sum256(body)
-	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	etag := httpcache.Validator(body)
 
-	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(documentCacheSeconds))
-	w.Header().Set("Vary", "Accept-Encoding")
+	httpcache.Public(w, documentCacheSeconds)
 	w.Header().Set("ETag", etag)
 
-	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+	if httpcache.Matches(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}

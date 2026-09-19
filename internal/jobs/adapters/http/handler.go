@@ -19,6 +19,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/jobs/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/jobs/domain"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
@@ -122,8 +123,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 // restricted, and an intermediate cache holding it would outlive the
 // assignment that allowed it.
 func setPrivateNoStoreHeaders(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "private, no-store, no-cache, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
+	httpcache.Private(w)
 }
 
 // withPrivateNoStore guarantees the cache headers even for a rejection produced

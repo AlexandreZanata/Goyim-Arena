@@ -12,11 +12,11 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
@@ -135,8 +135,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 
 // setPrivateNoStoreHeaders enforces THR-CACHE-01 on authenticated routes.
 func setPrivateNoStoreHeaders(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "private, no-store, no-cache, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
+	httpcache.Private(w)
 }
 
 // withPrivateNoStore guarantees the private cache headers even for
@@ -186,8 +185,7 @@ func writeCacheableJSON(w http.ResponseWriter, r *http.Request, facts, document 
 	sum := sha256.Sum256(factsBody)
 	etag := `W/"` + hex.EncodeToString(sum[:]) + `"`
 
-	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(aggregateCacheSeconds))
-	w.Header().Set("Vary", "Accept-Encoding")
+	httpcache.Public(w, aggregateCacheSeconds)
 	w.Header().Set("ETag", etag)
 
 	if etagMatches(r.Header.Get("If-None-Match"), etag) {
