@@ -7,9 +7,10 @@
 GO ?= go
 GOFMT ?= gofmt
 NPM ?= npm
+K6 ?= k6
 SQLC ?= $(shell which sqlc 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/sqlc")
 
-.PHONY: fmt fmt-check test-unit test-integration test-security typecheck build-web test-contract generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security typecheck build-web test-contract test-load-smoke generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -81,6 +82,19 @@ generate-check:
 test-security:
 	$(GO) test -count=1 ./internal/security/... ./internal/platform/security/... ./internal/arguments/adapters/http/... ./internal/arguments/adapters/postgres/... ./internal/billing/adapters/stripe/... ./internal/billing/application/... ./internal/moderation/adapters/http/... ./internal/moderation/application/... ./internal/positions/adapters/http/... ./internal/transparency/adapters/http/... ./internal/wallet/adapters/http/... ./internal/wallet/adapters/postgres/...
 	@echo "test-security: ok"
+
+# test-load-smoke executa os cenários k6 versionados contra uma instância
+# local preparada exclusivamente com dados sintéticos. O gate falha se k6 não
+# estiver instalado ou se o workload não atingir os thresholds declarados.
+test-load-smoke:
+	@test -n "$(K6_BASE_URL)" || (echo "test-load-smoke: K6_BASE_URL is required" >&2; exit 1)
+	@command -v "$(K6)" >/dev/null 2>&1 || (echo "test-load-smoke: k6 is required; install it outside the repository" >&2; exit 1)
+	@report="$$(mktemp)"; trap 'rm -f "$$report"' EXIT; \
+	printf 'load-smoke report: commit=%s host=%s kernel=%s cpu=%s dataset=%s config=%s\n' \
+		"$$(git rev-parse --short HEAD)" "$$(hostname)" "$$(uname -sr)" "$$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo unknown)" \
+		"$${K6_DATASET_SEED:-unset}" "$${K6_BASE_URL}"; \
+	"$(K6)" run --summary-export "$$report" tests/load/smoke.js; \
+	printf 'load-smoke report: summary=%s\n' "$$report"
 
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
