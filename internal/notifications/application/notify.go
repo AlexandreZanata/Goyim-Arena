@@ -116,7 +116,7 @@ func (n *Notifier) Notify(ctx context.Context, request NotificationRequest) (Dur
 	if !request.Template.Valid() {
 		return DurableWork{}, domain.ErrUnsupportedTemplate
 	}
-	if _, err := domain.NewTemplateValues(request.Values.Name, request.Values.Code); err != nil {
+	if _, err := domain.ValidateTemplateValues(request.Template, request.Values.Name, request.Values.Code); err != nil {
 		return DurableWork{}, err
 	}
 	// The address is validated before the directory is consulted: asking

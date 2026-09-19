@@ -242,6 +242,63 @@ func jobFor(t *testing.T, payload string) *jobsdomain.Job {
 	}
 }
 
+// --- the identity bridge ---------------------------------------------------
+
+// TestSenderQueuesThePasswordChangeNoticeAnchoredOnTheChange proves the bridge
+// the identity module uses to announce a password change (P16-T06): the notice
+// carries no code, and the change identifier is what tells two changes apart —
+// without it the second change of an account would be swallowed as a replay of
+// the first.
+func TestSenderQueuesThePasswordChangeNoticeAnchoredOnTheChange(t *testing.T) {
+	built := newHarness(t)
+	ctx := context.Background()
+	address := identityEmail(t, "ana.silva@example.com")
+
+	bridge, err := outbox.NewSender(built.notifier)
+	if err != nil {
+		t.Fatalf("NewSender() error = %v", err)
+	}
+
+	if err := bridge.SendPasswordChangedEmail(ctx, address, "reset-1"); err != nil {
+		t.Fatalf("SendPasswordChangedEmail() error = %v", err)
+	}
+	if len(built.queue.records) != 1 {
+		t.Fatalf("queued records = %d, want one per change", len(built.queue.records))
+	}
+	payload := built.queue.payloads()[0]
+	if !strings.Contains(payload, domain.TemplatePasswordChanged.String()) {
+		t.Fatalf("queued payload = %s, want the password change notice", payload)
+	}
+	if strings.Contains(payload, "\"code\":\"reset-1\"") {
+		t.Fatalf("queued payload = %s, want the anchor out of the message", payload)
+	}
+
+	// A retry of the same change resolves the message it already queued.
+	if err := bridge.SendPasswordChangedEmail(ctx, address, "reset-1"); err != nil {
+		t.Fatalf("replayed SendPasswordChangedEmail() error = %v", err)
+	}
+	if len(built.queue.records) != 1 {
+		t.Fatalf("queued records after a retry = %d, want the original one", len(built.queue.records))
+	}
+
+	// The next change is a new message, not a replay.
+	if err := bridge.SendPasswordChangedEmail(ctx, address, "reset-2"); err != nil {
+		t.Fatalf("second SendPasswordChangedEmail() error = %v", err)
+	}
+	if len(built.queue.records) != 2 {
+		t.Fatalf("queued records after a second change = %d, want two distinct messages", len(built.queue.records))
+	}
+
+	// An anchor is required: a notice nobody anchored would be deduplicated
+	// forever after the first change of the account.
+	if err := bridge.SendPasswordChangedEmail(ctx, address, "  "); err == nil {
+		t.Fatal("SendPasswordChangedEmail() without an anchor = nil, want a refusal")
+	}
+	if err := bridge.SendPasswordChangedEmail(ctx, address, "with space"); err == nil {
+		t.Fatal("SendPasswordChangedEmail() with a separator in the anchor = nil, want a refusal")
+	}
+}
+
 // --- the notifier ----------------------------------------------------------
 
 // TestNotifierFreezesThePreferenceLocale proves the locale is decided at

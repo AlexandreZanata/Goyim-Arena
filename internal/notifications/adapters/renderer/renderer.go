@@ -54,9 +54,9 @@ const htmlDocument = `<!doctype html>
 <body>
 <p>{{.Greeting}} {{.Name}}</p>
 <p>{{.Lead}}</p>
-<p><strong>{{.CodeLabel}}</strong></p>
+{{if .Code}}<p><strong>{{.CodeLabel}}</strong></p>
 <p>{{.Code}}</p>
-<p>{{.Signature}}</p>
+{{end}}<p>{{.Signature}}</p>
 </body>
 </html>
 `
@@ -68,6 +68,11 @@ func templateSources() map[domain.TemplateID]string {
 	return map[domain.TemplateID]string{
 		domain.TemplateVerification:  htmlDocument,
 		domain.TemplatePasswordReset: htmlDocument,
+		// The notice renders the same document, and its code block is the only
+		// part that falls away: a second document would be a second place to
+		// keep the shared markup in step for a message that differs by one
+		// paragraph.
+		domain.TemplatePasswordChanged: htmlDocument,
 	}
 }
 
@@ -219,15 +224,22 @@ func (r *Renderer) checkCatalog() error {
 // keysOf returns the catalog keys one template needs, in a deterministic
 // order. It is the template's contract with the catalog, and the parity gate
 // above is what keeps the two in step.
+//
+// A template that carries no code does not ask for a code label: requiring a
+// label for a message with no code would put a string in the catalog that no
+// recipient can ever read, and the parity gate would then protect a phantom.
 func keysOf(id domain.TemplateID) []string {
 	namespace := id.String()
-	return []string{
+	keys := []string{
 		keyGreeting,
 		keySignature,
 		fmt.Sprintf(keySubject, namespace),
 		fmt.Sprintf(keyLead, namespace),
-		fmt.Sprintf(keyCodeLabel, namespace),
 	}
+	if id.CarriesCode() {
+		keys = append(keys, fmt.Sprintf(keyCodeLabel, namespace))
+	}
+	return keys
 }
 
 // Render composes the body for one message. Unknown templates and locales
@@ -243,7 +255,7 @@ func (r *Renderer) Render(templateID domain.TemplateID, locale domain.Locale, va
 	if !locale.Valid() {
 		return domain.Body{}, domain.ErrUnsupportedLocale
 	}
-	if _, err := domain.NewTemplateValues(values.Name, values.Code); err != nil {
+	if _, err := domain.ValidateTemplateValues(templateID, values.Name, values.Code); err != nil {
 		return domain.Body{}, err
 	}
 	document, ok := r.documents[templateID]
@@ -259,16 +271,23 @@ func (r *Renderer) Render(templateID domain.TemplateID, locale domain.Locale, va
 	// Every localized string of the message is resolved through the same
 	// path, so a fallback cannot apply to the body but not the subject.
 	namespace := templateID.String()
-	for _, field := range []struct {
+	type catalogField struct {
 		target *string
 		key    string
-	}{
+	}
+	fields := []catalogField{
 		{&data.Subject, fmt.Sprintf(keySubject, namespace)},
 		{&data.Greeting, keyGreeting},
 		{&data.Lead, fmt.Sprintf(keyLead, namespace)},
-		{&data.CodeLabel, fmt.Sprintf(keyCodeLabel, namespace)},
 		{&data.Signature, keySignature},
-	} {
+	}
+	// The label of the code is resolved only for the templates that have one:
+	// asking the catalog for a key a notice does not declare would turn a
+	// correct message into a failed delivery.
+	if templateID.CarriesCode() {
+		fields = append(fields, catalogField{&data.CodeLabel, fmt.Sprintf(keyCodeLabel, namespace)})
+	}
+	for _, field := range fields {
 		message, err := r.resolve(templateID, locale, field.key)
 		if err != nil {
 			return domain.Body{}, err
@@ -324,6 +343,10 @@ func (r *Renderer) resolve(templateID domain.TemplateID, locale domain.Locale, k
 // plainText builds the text/plain alternative. Substitution is verbatim
 // here on purpose: this representation carries no markup, so there is no
 // context to escape for.
+//
+// The code block is written only when the message has one, which is the same
+// condition the HTML document applies, so both representations of a notice
+// omit it together instead of one of them leaving a dangling label.
 func plainText(greeting, name, lead, codeLabel, code, signature string) string {
 	var builder strings.Builder
 	builder.WriteString(greeting)
@@ -334,10 +357,12 @@ func plainText(greeting, name, lead, codeLabel, code, signature string) string {
 	builder.WriteString("\n\n")
 	builder.WriteString(lead)
 	builder.WriteString("\n\n")
-	builder.WriteString(codeLabel)
-	builder.WriteString(": ")
-	builder.WriteString(code)
-	builder.WriteString("\n\n")
+	if code != "" {
+		builder.WriteString(codeLabel)
+		builder.WriteString(": ")
+		builder.WriteString(code)
+		builder.WriteString("\n\n")
+	}
 	builder.WriteString(signature)
 	return builder.String()
 }

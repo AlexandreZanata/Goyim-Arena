@@ -1,0 +1,111 @@
+// Package securityheaders owns the browser security policy of Goyim Arena
+// (P16-T01): one middleware carries the policy on every response the arena
+// binary emits, so no route can opt out — not the module handlers, not the
+// health endpoints, not the 404 of an unknown path.
+//
+// The policy is docs/SECURITY.md section 4: a restrictive
+// Content-Security-Policy with the origin's own modules and styles, without
+// 'unsafe-inline' or 'unsafe-eval'; HSTS; nosniff; a referrer policy; a
+// permissions policy; and framing protection.
+package securityheaders
+
+import "net/http"
+
+// Header names of the policy.
+const (
+	headerContentSecurityPolicy = "Content-Security-Policy"
+	headerContentTypeOptions    = "X-Content-Type-Options"
+	headerReferrerPolicy        = "Referrer-Policy"
+	headerPermissionsPolicy     = "Permissions-Policy"
+	headerStrictTransportSec    = "Strict-Transport-Security"
+)
+
+// contentSecurityPolicy restricts every fetch to the origin itself. There is
+// deliberately no 'unsafe-inline', no 'unsafe-eval' and no nonce.
+//
+// A nonce is not needed here, and it would actively hurt. The only inline
+// <script> the binary renders is the JSON-LD data block of the public Arena
+// document, and a data block is never prepared for execution — its type is
+// not a JavaScript MIME type (HTML Standard, "prepare the script element") —
+// so script-src never applies to it. A nonce, by contrast, must be unique per
+// response, so it would put a fresh value in the body of documents that are
+// public and cacheable and make their ETags move on every request: the exact
+// defect class that made those documents uncacheable. The premise this policy
+// rests on — no server-rendered page carries an executable inline script, an
+// inline style or an inline event handler — is asserted by the tests in this
+// package, so adding one fails the build instead of silently breaking the
+// pages.
+//
+// Every directive is either an origin restriction or a restriction on what
+// the document may do with itself: frame-ancestors 'none' and form-action
+// 'self' bound framing and form submission, base-uri 'self' neutralizes an
+// injected <base>, and object-src 'none' removes plugin content. Widening any
+// of them is a reviewed policy change, never a local convenience.
+const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; " +
+	"img-src 'self'; font-src 'self'; connect-src 'self'; " +
+	"form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+
+// contentTypeOptions stops content sniffing, which is what turns a document
+// served with the wrong type into script execution.
+const contentTypeOptions = "nosniff"
+
+// referrerPolicy sends no Referer at all. Arena addresses carry the user's
+// own published slug in the path, and nothing in the product needs to tell a
+// third-party site which documents a visitor came from; same-origin
+// navigation does not need it either, because the product has no analytics.
+const referrerPolicy = "no-referrer"
+
+// permissionsPolicy disables the capabilities the product does not use, one
+// entry per capability so the set is auditable against the features the MVP
+// actually ships. Payment is denied because checkout is a server-created
+// Stripe session the browser is redirected to, not an in-page Payment Request
+// API call; enabling it back would be a deliberate decision with the payments
+// owner, not a default.
+const permissionsPolicy = "accelerometer=(), camera=(), display-capture=(), geolocation=(), " +
+	"gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), " +
+	"screen-wake-lock=(), usb=(), xr-spatial-tracking=()"
+
+// strictTransportSecurity pins browsers to HTTPS for a year, subdomains
+// included. It is production-only for a reason that is not cosmetic: over
+// plain HTTP the header is meaningless at best, and a browser that honors it
+// while developing against http://127.0.0.1 would pin that host to HTTPS and
+// make the development server unreachable until the max-age expires. There is
+// no 'preload' token: preload is a commitment submitted to browser vendors
+// and revoked by them, so it is an operational decision for the deployment
+// phase, not a default of the middleware.
+const strictTransportSecurity = "max-age=31536000; includeSubDomains"
+
+// Config is the policy of one environment.
+type Config struct {
+	// Production enables the transport security headers, which are only
+	// meaningful over TLS and only safe once the deployment actually serves
+	// HTTPS end to end (docs/DEPLOYMENT.md: Cloudflare in Full (strict)).
+	Production bool
+}
+
+// Middleware applies the policy to every response of the wrapped handler.
+//
+// The headers are written before the wrapped handler runs, so they are
+// present on success, on error, on redirect and on 304 alike: a cached
+// response is served with the policy the browser stored alongside it, and a
+// response that must never be cached is still not allowed to lose its
+// framing protection. A handler that wanted to remove one of them would have
+// to overwrite the header by name, and the package tests assert the policy on
+// every registered route and every class of response, so weakening it is a
+// visible edit rather than a silent one.
+func Middleware(config Config) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			header := writer.Header()
+			header.Set(headerContentSecurityPolicy, contentSecurityPolicy)
+			header.Set(headerContentTypeOptions, contentTypeOptions)
+			header.Set(headerReferrerPolicy, referrerPolicy)
+			header.Set(headerPermissionsPolicy, permissionsPolicy)
+			if config.Production {
+				header.Set(headerStrictTransportSec, strictTransportSecurity)
+			}
+
+			next.ServeHTTP(writer, request)
+		})
+	}
+}

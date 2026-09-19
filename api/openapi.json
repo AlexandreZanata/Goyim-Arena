@@ -903,7 +903,7 @@
         }
       }
     },
-    "/api/v1/me/arenas/drafts": {
+    "/api/v1/me/arena-drafts": {
       "post": {
         "operationId": "createArenaDraft",
         "summary": "Create a private draft",
@@ -950,7 +950,7 @@
         }
       }
     },
-    "/api/v1/me/arenas/drafts/{id}": {
+    "/api/v1/me/arena-drafts/{id}": {
       "get": {
         "operationId": "getArenaDraft",
         "summary": "Read an owned draft",
@@ -1040,7 +1040,7 @@
         }
       }
     },
-    "/api/v1/me/arenas/drafts/{id}/publish": {
+    "/api/v1/me/arena-drafts/{id}/publish": {
       "post": {
         "operationId": "publishArenaDraft",
         "summary": "Publish a draft",
@@ -2006,10 +2006,284 @@
           "404": { "$ref": "#/components/responses/NotFound" }
         }
       }
+    },
+    "/api/v1/me/mfa/enrollment": {
+      "post": {
+        "operationId": "beginMFAEnrollment",
+        "summary": "Begin a second factor enrollment",
+        "description": "Generates a pending TOTP secret for the authenticated account and returns it with the otpauth URI exactly once. The secret is stored sealed (AES-256-GCM, bound to the account identifier) and never returned again. The enrollment stays pending until a code confirms it, and an account with a confirmed enrollment is refused, so this route can never replace a working second factor (P16-T05).",
+        "tags": ["auth"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "Pending enrollment with its secret and otpauth URI.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MFAEnrollmentResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "409": { "$ref": "#/components/responses/Conflict" }
+        }
+      }
+    },
+    "/api/v1/me/mfa/enrollment/confirm": {
+      "post": {
+        "operationId": "confirmMFAEnrollment",
+        "summary": "Confirm a second factor enrollment",
+        "description": "Verifies a code from the pending enrollment, records the confirmation and returns the one-time recovery codes in their only clear-text appearance: they are stored hashed and can be spent exactly once. The code that confirms the enrollment is spent, so it cannot be replayed at step-up (P16-T05).",
+        "tags": ["auth"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MFAConfirmRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Enrollment confirmed with its one-time recovery codes.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MFAConfirmResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/me/mfa/step-up": {
+      "post": {
+        "operationId": "stepUpMFA",
+        "summary": "Elevate the session with a second factor code",
+        "description": "Verifies a TOTP code and marks the calling session as second-factor elevated, which is what the administrative surface requires. The accepted time step is spent, so a replay of the same code is refused even inside the tolerated clock window (P16-T05).",
+        "tags": ["auth"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MFAVerifyRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session elevated.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MFAElevationResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/me/mfa/recovery": {
+      "post": {
+        "operationId": "recoverMFA",
+        "summary": "Spend a one-time recovery code",
+        "description": "Spends one backup code and elevates the calling session: the path of an operator whose authenticator is gone. The code is consumed before anything else and only a code that was never spent can be spent, and the recovery is recorded in the audit trail before the session is elevated, so a recovery that cannot be attributed cannot succeed (P16-T05).",
+        "tags": ["auth"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/MFAVerifyRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session elevated by a recovery code.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MFAElevationResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/me/sessions": {
+      "get": {
+        "operationId": "listSessions",
+        "summary": "List the caller's own sessions",
+        "description": "Returns the sessions of the authenticated account that are still usable under the session policy (idle and absolute expiry), most recently seen first, with the calling session marked. The list carries only what each session recorded — creation, last activity, deadline, address and user agent — and never a token, a token hash or a derived device fingerprint (P16-T06). Responses are private, no-store (THR-CACHE-01).",
+        "tags": ["auth"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "The account's usable sessions.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionListResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" }
+        }
+      }
+    },
+    "/api/v1/me/sessions/rotation": {
+      "post": {
+        "operationId": "rotateSession",
+        "summary": "Rotate the calling session",
+        "description": "Ends the session making the request and issues a fresh opaque token in the same response, so a copy of the previous token taken before the rotation is worthless after it. The new token is generated server-side from the platform's entropy port: no value supplied by the client can become a session token, which is what closes session fixation. Responses are private, no-store (THR-CACHE-01).",
+        "tags": ["auth"],
+        "security": [{ "SessionCookie": [] }],
+        "responses": {
+          "200": {
+            "description": "The session was rotated; the response carries the new cookie.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionRotationResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/api/v1/me/sessions/revocation": {
+      "post": {
+        "operationId": "revokeSession",
+        "summary": "End another session of the account",
+        "description": "Ends one session of the authenticated account. The action is critical, so it requires the account password in the same request: a session cookie alone cannot evict the sessions of the person it was stolen from. The password is verified before the session is looked at, so a wrong password and an unknown session identifier receive the same answer and the endpoint cannot be used to probe identifiers; a refusal changes nothing. The calling session is ended by the logout route instead (P16-T06). Responses are private, no-store (THR-CACHE-01).",
+        "tags": ["auth"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SessionRevocationRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The session was ended.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/SessionRevocationResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": { "$ref": "#/components/responses/Conflict" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "MFAEnrollmentResponse": {
+        "type": "object",
+        "required": ["secret", "uri"],
+        "properties": {
+          "secret": { "type": "string", "description": "Base32 shared secret, returned exactly once." },
+          "uri": { "type": "string", "description": "otpauth URI for the authenticator application." }
+        }
+      },
+      "MFAConfirmRequest": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": { "type": "string", "minLength": 6, "maxLength": 8, "pattern": "^[0-9]{6,8}$" }
+        }
+      },
+      "MFAConfirmResponse": {
+        "type": "object",
+        "required": ["backup_codes"],
+        "properties": {
+          "backup_codes": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "One-time recovery codes, returned exactly once and stored hashed."
+          }
+        }
+      },
+      "MFAVerifyRequest": {
+        "type": "object",
+        "required": ["code"],
+        "properties": {
+          "code": { "type": "string", "description": "TOTP code, or a one-time recovery code on the recovery route." }
+        }
+      },
+      "MFAElevationResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["elevated"] }
+        }
+      },
+      "SessionSummary": {
+        "type": "object",
+        "description": "One entry of the owner's device list. It carries the facts the session recorded and nothing derived from them: no token, no token hash, no device identifier and no cross-session correlation.",
+        "required": ["id", "created_at", "last_seen_at", "expires_at", "current"],
+        "properties": {
+          "id": { "type": "string", "description": "Opaque session identifier, never the session token." },
+          "created_at": { "type": "string", "format": "date-time" },
+          "last_seen_at": { "type": "string", "format": "date-time" },
+          "expires_at": { "type": "string", "format": "date-time" },
+          "ip_address": { "type": "string", "description": "Client address the session recorded, when it recorded one." },
+          "user_agent": { "type": "string", "description": "User agent the session presented, bounded and unmodified." },
+          "current": { "type": "boolean", "description": "True for the session making the request." }
+        }
+      },
+      "SessionListResponse": {
+        "type": "object",
+        "required": ["sessions"],
+        "properties": {
+          "sessions": { "type": "array", "items": { "$ref": "#/components/schemas/SessionSummary" } }
+        }
+      },
+      "SessionRevocationRequest": {
+        "type": "object",
+        "required": ["session_id", "password"],
+        "properties": {
+          "session_id": { "type": "string", "description": "Session to end; the account of the caller must own it." },
+          "password": { "type": "string", "description": "Account password, which re-authenticates the owner for this critical action." }
+        }
+      },
+      "SessionRevocationResponse": {
+        "type": "object",
+        "required": ["status"],
+        "properties": {
+          "status": { "type": "string", "enum": ["revoked"] }
+        }
+      },
+      "SessionRotationResponse": {
+        "type": "object",
+        "required": ["status", "session_id"],
+        "properties": {
+          "status": { "type": "string", "enum": ["rotated"] },
+          "session_id": { "type": "string", "description": "Identifier of the new session; the new token travels only in the cookie." }
+        }
+      },
       "RegisterRequest": {
         "type": "object",
         "required": ["email", "password"],

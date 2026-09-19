@@ -24,6 +24,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/securityheaders"
 )
 
 const usage = `arena is the command-line entrypoint of Goyim Arena.
@@ -104,7 +105,7 @@ func runServer(args []string, stdout *os.File) error {
 		readyCheckers = append(readyCheckers, pool)
 	}
 
-	handler, err := httpserver.NewMux(ids, locResolver, readyCheckers...)
+	handler, err := httpserver.NewMux(ids, locResolver, securityheaders.Config{Production: cfg.IsProduction()}, readyCheckers...)
 	if err != nil {
 		return err
 	}

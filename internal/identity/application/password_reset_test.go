@@ -185,7 +185,7 @@ func TestPasswordReset_SuccessAndReplayRejection(t *testing.T) {
 	}
 
 	requestUC := application.NewRequestPasswordResetUseCase(accRepo, resetRepo, sender, clock, rnd, resetPolicy)
-	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, clock)
+	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, sender, clock)
 	loginUC := application.NewLoginUseCase(accRepo, credRepo, sessRepo, hasher, clock, rnd, sessPolicy)
 
 	// Step 1: Request reset
@@ -256,7 +256,7 @@ func TestPasswordReset_ExpiredTokenRejection(t *testing.T) {
 	}
 
 	requestUC := application.NewRequestPasswordResetUseCase(accRepo, resetRepo, sender, clock, rnd, resetPolicy)
-	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, clock)
+	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, sender, clock)
 
 	_ = requestUC.Execute(ctx, application.RequestPasswordResetCommand{Email: email.String()})
 	token, _ := sender.LastResetTokenForEmail(email)
@@ -296,7 +296,7 @@ func TestPasswordReset_ReissuanceInvalidatesPreviousToken(t *testing.T) {
 	}
 
 	requestUC := application.NewRequestPasswordResetUseCase(accRepo, resetRepo, sender, clock, rnd, resetPolicy)
-	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, clock)
+	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, sender, clock)
 
 	// Request #1
 	_ = requestUC.Execute(ctx, application.RequestPasswordResetCommand{Email: email.String()})
@@ -355,7 +355,7 @@ func TestPasswordReset_SuspendedAccountRejection(t *testing.T) {
 	}
 
 	requestUC := application.NewRequestPasswordResetUseCase(accRepo, resetRepo, sender, clock, rnd, resetPolicy)
-	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, clock)
+	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, sender, clock)
 
 	// Issue token while active
 	_ = requestUC.Execute(ctx, application.RequestPasswordResetCommand{Email: email.String()})
@@ -401,7 +401,7 @@ func TestPasswordReset_RevokesExistingSessions(t *testing.T) {
 	loginUC := application.NewLoginUseCase(accRepo, credRepo, sessRepo, hasher, clock, rnd, sessPolicy)
 	authUC := application.NewAuthenticateSessionUseCase(accRepo, sessRepo, clock, sessPolicy, 5*time.Minute)
 	requestUC := application.NewRequestPasswordResetUseCase(accRepo, resetRepo, sender, clock, rnd, resetPolicy)
-	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, clock)
+	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, sender, clock)
 
 	// Establish session
 	loginRes, _ := loginUC.Execute(ctx, application.LoginCommand{Email: email.String(), Password: pass})
@@ -453,7 +453,7 @@ func TestPasswordReset_ConcurrentRaceOnSameToken(t *testing.T) {
 	}
 
 	requestUC := application.NewRequestPasswordResetUseCase(accRepo, resetRepo, sender, clock, rnd, resetPolicy)
-	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, clock)
+	completeUC := application.NewCompletePasswordResetUseCase(accRepo, credRepo, resetRepo, nil, sessRepo, hasher, sender, clock)
 
 	_ = requestUC.Execute(ctx, application.RequestPasswordResetCommand{Email: email.String()})
 	token, _ := sender.LastResetTokenForEmail(email)

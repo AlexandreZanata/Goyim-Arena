@@ -210,6 +210,18 @@ func (m *memoryEmailSender) SendPasswordResetEmail(ctx context.Context, email do
 	return nil
 }
 
+// SendPasswordChangedEmail records a password change notice. The change
+// identifier is what tells two notices apart; the notice carries no token.
+func (m *memoryEmailSender) SendPasswordChangedEmail(ctx context.Context, email domain.Email, changeID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.emails = append(m.emails, struct {
+		Email domain.Email
+		Token string
+	}{Email: email, Token: changeID})
+	return nil
+}
+
 func (m *memoryEmailSender) LastToken() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

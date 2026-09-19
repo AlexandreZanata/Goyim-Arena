@@ -25,10 +25,12 @@ import (
 )
 
 const (
-	modOwnerSession     = "mod-owner-session"
-	modModeratorSession = "mod-moderator-session"
-	modStrangerSession  = "mod-stranger-session"
-	modStaleSession     = "mod-stale-session"
+	modOwnerSession       = "mod-owner-session"
+	modModeratorSession   = "mod-moderator-session"
+	modStrangerSession    = "mod-stranger-session"
+	modStaleSession       = "mod-stale-session"
+	modNoFactorSession    = "mod-no-factor-session"
+	modStaleFactorSession = "mod-stale-factor-session"
 )
 
 type moderationHarness struct {
@@ -73,6 +75,24 @@ func mustSession(t *testing.T, ctx context.Context, pool *pgxpool.Pool, account 
 	return uuidString(id)
 }
 
+// mustSessionWithSecondFactor seeds a session that presented a second factor
+// factorAge ago. The factor age is deliberately independent from the session
+// age: the administrative gate reads the factor, the high-impact rule reads the
+// session, and the two are different facts (P16-T05).
+func mustSessionWithSecondFactor(t *testing.T, ctx context.Context, pool *pgxpool.Pool, account pgtype.UUID, sessionAge, factorAge time.Duration, label string) string {
+	t.Helper()
+	var id pgtype.UUID
+	now := time.Now().UTC()
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO app.sessions (account_id, token_hash, created_at, expires_at, mfa_verified_at)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id`,
+		account, []byte("hash-mfa-"+label+"-"+uuidString(account)), now.Add(-sessionAge), now.Add(time.Hour), now.Add(-factorAge)).Scan(&id); err != nil {
+		t.Fatalf("seed session with second factor: %v", err)
+	}
+	return uuidString(id)
+}
+
 func setupModerationHarness(t *testing.T) *moderationHarness {
 	t.Helper()
 	ctx := context.Background()
@@ -102,9 +122,20 @@ func setupModerationHarness(t *testing.T) *moderationHarness {
 	}
 
 	ownerSession := mustSession(t, ctx, pool, owner.ID, 0)
-	moderatorSession := mustSession(t, ctx, pool, moderator.ID, 0)
 	strangerSession := mustSession(t, ctx, pool, stranger.ID, 0)
-	staleSession := mustSession(t, ctx, pool, staleMod.ID, time.Hour)
+
+	// The moderator holds three sessions, because the two rules of the
+	// administrative gate are about different facts. One has stepped up and is
+	// fresh; one never presented a factor; one presented it outside the
+	// window. The first is served, the other two are refused.
+	moderatorSession := mustSessionWithSecondFactor(t, ctx, pool, moderator.ID, 0, 0, "moderator")
+	noFactorSession := mustSession(t, ctx, pool, moderator.ID, 0)
+	staleFactorSession := mustSessionWithSecondFactor(t, ctx, pool, moderator.ID, 0, time.Hour, "moderator-stale-factor")
+
+	// The stale moderator stepped up just now inside an old session: the factor
+	// is current, the session is not, which is what separates a low-impact
+	// claim from a high-impact decision.
+	staleSession := mustSessionWithSecondFactor(t, ctx, pool, staleMod.ID, time.Hour, 0, "stale")
 
 	clock := clockseed.NewClock()
 	authorizer, err := application.NewAuthorizer(repo, clock)
@@ -180,6 +211,10 @@ func setupModerationHarness(t *testing.T) *moderationHarness {
 			return security.AuthIdentity{AccountID: uuidString(stranger.ID), SessionID: strangerSession}, nil
 		case modStaleSession:
 			return security.AuthIdentity{AccountID: uuidString(staleMod.ID), SessionID: staleSession}, nil
+		case modNoFactorSession:
+			return security.AuthIdentity{AccountID: uuidString(moderator.ID), SessionID: noFactorSession}, nil
+		case modStaleFactorSession:
+			return security.AuthIdentity{AccountID: uuidString(moderator.ID), SessionID: staleFactorSession}, nil
 		default:
 			return security.AuthIdentity{}, errors.New("unknown session")
 		}
@@ -275,6 +310,92 @@ func TestModerationAdminRoutesDenyStrangers(t *testing.T) {
 			t.Fatalf("%s %s stranger status = %d, want 403 (body: %s)", target.method, target.path, recorder.Code, recorder.Body.String())
 		}
 		assertModPrivateCacheHeaders(t, recorder)
+	}
+}
+
+// TestModerationAdminGateRequiresSecondFactor is the adapter-level proof of
+// P16-T05: holding the capability is not enough, the calling session must have
+// presented a second factor inside the step-up window. All three administrative
+// routes are exercised, because a gate that covers only the queue would still
+// let a non-elevated session decide a case.
+// TestModerationGateFollowsTheRoleChangeImmediately is the privilege-change
+// rule of P16-T06: the capability is read from the assignment on every request,
+// so revoking it stops the operator's existing session at once. A gate that
+// cached the role in the session would keep serving a person who no longer has
+// the capability until that session expired, which is the window a revocation
+// exists to close.
+func TestModerationGateFollowsTheRoleChangeImmediately(t *testing.T) {
+	harness := setupModerationHarness(t)
+
+	recorder := httptest.NewRecorder()
+	harness.mux.ServeHTTP(recorder, modAuthenticatedRequest(http.MethodGet, "/api/v1/moderation/cases", modModeratorSession, ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("elevated moderator status = %d, want 200 (body: %s)", recorder.Code, recorder.Body.String())
+	}
+
+	if _, err := harness.pool.Exec(context.Background(),
+		`UPDATE app.admin_roles SET revoked_at = now() WHERE account_id = $1`, harness.moderatorID); err != nil {
+		t.Fatalf("revoke the assignment: %v", err)
+	}
+
+	// The same session, the same fresh factor: only the capability changed,
+	// and that is enough.
+	recorder = httptest.NewRecorder()
+	harness.mux.ServeHTTP(recorder, modAuthenticatedRequest(http.MethodGet, "/api/v1/moderation/cases", modModeratorSession, ""))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("revoked moderator status = %d, want 403 (body: %s)", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestModerationAdminGateRequiresSecondFactor(t *testing.T) {
+	harness := setupModerationHarness(t)
+
+	casePath := "/api/v1/moderation/cases/00000000-0000-0000-0000-000000000001"
+	adminRoutes := []struct{ method, path, body string }{
+		{http.MethodGet, "/api/v1/moderation/cases", ""},
+		{http.MethodPost, casePath + "/claim", ""},
+		{http.MethodPost, casePath + "/decisions", `{"action":"warning","rule":"MOD-2:warning","justification":"z"}`},
+	}
+
+	for _, target := range adminRoutes {
+		recorder := httptest.NewRecorder()
+		harness.mux.ServeHTTP(recorder, modAuthenticatedRequest(target.method, target.path, modNoFactorSession, target.body))
+		if recorder.Code != http.StatusForbidden {
+			t.Fatalf("%s %s without a second factor status = %d, want 403 (body: %s)", target.method, target.path, recorder.Code, recorder.Body.String())
+		}
+		assertModPrivateCacheHeaders(t, recorder)
+		document := modDecodeObject(t, recorder.Body.Bytes())
+		if document["code"] != "mfa_step_up_required" {
+			t.Fatalf("%s %s refusal code = %v, want mfa_step_up_required (body: %s)", target.method, target.path, document["code"], recorder.Body.String())
+		}
+	}
+
+	// A factor presented outside the window is refused like one that was never
+	// presented: the difference is what the operator has to do, and neither
+	// state is administrative access.
+	recorder := httptest.NewRecorder()
+	harness.mux.ServeHTTP(recorder, modAuthenticatedRequest(http.MethodGet, "/api/v1/moderation/cases", modStaleFactorSession, ""))
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("stale factor status = %d, want 403 (body: %s)", recorder.Code, recorder.Body.String())
+	}
+	staleDocument := modDecodeObject(t, recorder.Body.Bytes())
+	if staleDocument["code"] != "mfa_step_up_required" {
+		t.Fatalf("stale factor refusal code = %v, want mfa_step_up_required", staleDocument["code"])
+	}
+
+	// None of the refusals may describe the factor itself: the gate reports
+	// that a step-up is needed, never the enrollment state of the account.
+	for _, marker := range []string{"secret", "totp", "backup", "enrolled", "verified_at"} {
+		if strings.Contains(strings.ToLower(recorder.Body.String()), marker) {
+			t.Fatalf("refusal leaks factor state %q: %s", marker, recorder.Body.String())
+		}
+	}
+
+	// The moderator whose session stepped up inside the window is served.
+	recorder = httptest.NewRecorder()
+	harness.mux.ServeHTTP(recorder, modAuthenticatedRequest(http.MethodGet, "/api/v1/moderation/cases", modModeratorSession, ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("elevated moderator status = %d, want 200 (body: %s)", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -378,8 +499,9 @@ func TestModerationStepUpDeniesStaleHighImpact(t *testing.T) {
 	harness := setupModerationHarness(t)
 	ctx := context.Background()
 
-	// Stage a profile case owned by the reporter and claim it with the
-	// stale session: claiming is low-impact, so the aged session passes.
+	// Stage a profile case owned by the reporter and claim it with the stale
+	// session: the factor was presented just now, and claiming is low-impact,
+	// so the aged session passes.
 	var caseID pgtype.UUID
 	if err := harness.pool.QueryRow(ctx, `
 		INSERT INTO app.moderation_cases (target_type, target_account_id)
@@ -395,8 +517,9 @@ func TestModerationStepUpDeniesStaleHighImpact(t *testing.T) {
 		t.Fatalf("stale claim status = %d, want 200 (body: %s)", recorder.Code, recorder.Body.String())
 	}
 
-	// Deciding a suspension on the aged session denies: high-impact
-	// measures require recent authentication.
+	// Deciding a suspension on the aged session denies: high-impact measures
+	// require recent authentication, and a current second factor inside an old
+	// session is not a substitute for it.
 	decideBody := `{"action":"suspension","rule":"MOD-10:suspension","justification":"Stale high-impact attempt","expires_at":"2026-10-18T12:00:00Z"}`
 	recorder = httptest.NewRecorder()
 	harness.mux.ServeHTTP(recorder, modAuthenticatedRequest(http.MethodPost, casePath+"/decisions", modStaleSession, decideBody))

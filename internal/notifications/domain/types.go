@@ -1,6 +1,9 @@
 package domain
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Bounds of the domain. Every limit is a compile-time constant so a caller
 // cannot widen it at runtime; adapters re-check what they receive.
@@ -43,15 +46,40 @@ const (
 	TemplateVerification TemplateID = "verification"
 	// TemplatePasswordReset delivers a password reset code.
 	TemplatePasswordReset TemplateID = "password_reset"
+	// TemplatePasswordChanged announces that the password of the account
+	// changed (P16-T06).
+	//
+	// It is the one template with no runtime value at all: its message is the
+	// transition itself, and its whole purpose is that an owner who did not
+	// make the change finds out. It therefore carries no code to enter and no
+	// value to act on — a notice with a token in it would be a reset link
+	// arriving in a message about a change that already happened.
+	TemplatePasswordChanged TemplateID = "password_changed"
 )
 
 // TemplateIDs returns the closed set, sorted, for allowlists and tests.
 func TemplateIDs() []TemplateID {
-	return []TemplateID{TemplatePasswordReset, TemplateVerification}
+	return []TemplateID{TemplatePasswordChanged, TemplatePasswordReset, TemplateVerification}
 }
 
 // Valid reports whether the identifier belongs to the closed set.
 func (t TemplateID) Valid() bool {
+	switch t {
+	case TemplateVerification, TemplatePasswordReset, TemplatePasswordChanged:
+		return true
+	default:
+		return false
+	}
+}
+
+// CarriesCode reports whether the template delivers a one-time code.
+//
+// The distinction is part of the message contract, not a rendering detail:
+// the catalog block, the escape hatch of the payload and the renderer all read
+// it, so "this message has a code" is stated once and cannot be assumed by a
+// caller that happens to have one. An identifier outside the closed set
+// carries no code; validation refuses it before the question matters.
+func (t TemplateID) CarriesCode() bool {
 	switch t {
 	case TemplateVerification, TemplatePasswordReset:
 		return true
@@ -118,7 +146,9 @@ type TemplateValues struct {
 	// Name is the user's display name. Empty means "greeting without a
 	// name", which is a legitimate state (the account may not have one).
 	Name string
-	// Code is the one-time code the email delivers. It is never logged.
+	// Code is the one-time code the email delivers, and the empty string for
+	// the templates that deliver none (TemplateID.CarriesCode). It is never
+	// logged.
 	Code string
 }
 
@@ -137,6 +167,42 @@ func NewTemplateValues(name, code string) (TemplateValues, error) {
 		return TemplateValues{}, ErrInvalidTemplateValue
 	}
 	return values, nil
+}
+
+// NewNoticeValues validates the values of a template that carries no code.
+//
+// It exists so that "this message has no secret in it" is a request a caller
+// states rather than a code it passes empty by accident: a producer that has a
+// code and reaches for this constructor is refused by ValidateTemplateValues,
+// which checks the pair instead of trusting either side.
+func NewNoticeValues(name string) (TemplateValues, error) {
+	values := TemplateValues{Name: strings.TrimSpace(name)}
+	if len([]rune(values.Name)) > maxDisplayNameLength || hasControl(values.Name) {
+		return TemplateValues{}, ErrInvalidTemplateValue
+	}
+	return values, nil
+}
+
+// ValidateTemplateValues validates runtime values against the template that
+// will render them, and returns the closed pair.
+//
+// This is the one place the two rules meet, so the renderer, the producer and
+// the payload reader cannot disagree: a template that delivers a code requires
+// one, and a template that delivers none refuses a value it has no field to
+// render. The second half is the deliberate one — silently dropping a code a
+// caller passed would send a message that looks right and never delivers the
+// secret its sender believed it sent.
+func ValidateTemplateValues(templateID TemplateID, name, code string) (TemplateValues, error) {
+	if !templateID.Valid() {
+		return TemplateValues{}, ErrUnsupportedTemplate
+	}
+	if !templateID.CarriesCode() {
+		if strings.TrimSpace(code) != "" {
+			return TemplateValues{}, fmt.Errorf("%w: template %q carries no code", ErrInvalidTemplateValue, templateID)
+		}
+		return NewNoticeValues(name)
+	}
+	return NewTemplateValues(name, code)
 }
 
 // Body is one rendered representation of a template. Subject and Text are

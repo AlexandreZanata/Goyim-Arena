@@ -33,6 +33,18 @@ type AppAccountDeletionRequest struct {
 	UpdatedAt    pgtype.Timestamptz
 }
 
+// Second factor of one account: sealed TOTP secret and the last accepted time step (P16-T05)
+type AppAccountMfa struct {
+	AccountID pgtype.UUID
+	// AES-256-GCM ciphertext (nonce || sealed secret) bound to the account identifier as AAD; no plaintext secret is ever stored
+	SecretSealed []byte
+	ConfirmedAt  pgtype.Timestamptz
+	// Highest accepted TOTP time step; a code at or below it is refused as a replay
+	LastAcceptedStep int64
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
 // Minimal administrative assignments: one row per account, granted by an existing account, revocable with a dated revocation
 type AppAdminRole struct {
 	AccountID pgtype.UUID
@@ -332,6 +344,16 @@ type AppJob struct {
 	UpdatedAt       pgtype.Timestamptz
 }
 
+// One-time recovery codes of an MFA enrollment, stored hashed and spent exactly once (P16-T05)
+type AppMfaBackupCode struct {
+	ID        pgtype.UUID
+	AccountID pgtype.UUID
+	CodeHash  string
+	// Set by the single UPDATE that spends the code; NULL means the code is still usable
+	UsedAt    pgtype.Timestamptz
+	CreatedAt pgtype.Timestamptz
+}
+
 // Immutable sanction facts of a case: actor, applied rule, restricted justification and optional expiry; reversals are new rows, never edits
 type AppModerationAction struct {
 	ID         pgtype.UUID
@@ -520,6 +542,8 @@ type AppSession struct {
 	RevokedAt  pgtype.Timestamptz
 	IpAddress  pgtype.Text
 	UserAgent  pgtype.Text
+	// Instant the session presented a second factor; NULL means the session is not MFA-elevated (P16-T05)
+	MfaVerifiedAt pgtype.Timestamptz
 }
 
 // Mapping between a local account and its Stripe customer; the provider identifier is private and never leaves the billing module

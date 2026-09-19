@@ -100,15 +100,15 @@ WHERE id = $1 AND used_at IS NULL;
 -- name: CreateSession :one
 INSERT INTO app.sessions (account_id, token_hash, expires_at, ip_address, user_agent)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent;
+RETURNING id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at;
 
 -- name: GetActiveSessionByTokenHash :one
-SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 FROM app.sessions
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now();
 
 -- name: GetSessionByTokenHash :one
-SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 FROM app.sessions
 WHERE token_hash = $1;
 
@@ -135,3 +135,48 @@ WHERE account_id = $1 AND revoked_at IS NULL;
 -- name: DeleteExpiredSessions :execrows
 DELETE FROM app.sessions
 WHERE expires_at < now() OR revoked_at IS NOT NULL;
+
+-- ListActiveAccountSessions returns the sessions of one account that are
+-- still usable (P16-T06), newest activity first.
+--
+-- The three instants are the policy boundaries, not `now()`: the session
+-- policy lives in the domain, so the adapter states the same question the
+-- domain asks (`created_at + absolute`, `last_seen_at + idle`, the stored
+-- deadline) instead of re-deriving its own answer here. A row outside them is
+-- already refused by the evaluator, and listing it would show the owner a
+-- session that cannot accept a request.
+-- name: ListActiveAccountSessions :many
+SELECT id, created_at, last_seen_at, expires_at, ip_address, user_agent
+FROM app.sessions
+WHERE account_id = $1
+  AND revoked_at IS NULL
+  AND expires_at > $2
+  AND last_seen_at > $3
+  AND created_at > $4
+ORDER BY last_seen_at DESC, id
+LIMIT $5;
+
+-- RevokeAccountSessionByID ends one session of one account.
+--
+-- The account is part of the key on purpose: a revoke addressed by session
+-- identifier alone would let a caller end a session it does not own, and the
+-- single statement is what makes two concurrent revokes of the same row agree
+-- (one reports a change, the other reports none) without a read-modify-write.
+-- name: RevokeAccountSessionByID :execrows
+UPDATE app.sessions
+SET revoked_at = now()
+WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL;
+
+-- RevokeSessionsPastDeadline revokes every session that has passed its policy
+-- deadline (P16-T06).
+--
+-- It revokes, it never deletes: the rows of terminal sessions are the retention
+-- pass's to remove, under its own window and its holds, so this statement
+-- cannot shorten a retention floor. Marking the row terminal makes the
+-- refusal a state instead of an arithmetic comparison, which is the same
+-- defense in depth the rest of the module uses.
+-- name: RevokeSessionsPastDeadline :execrows
+UPDATE app.sessions
+SET revoked_at = now()
+WHERE revoked_at IS NULL
+  AND (expires_at <= $1 OR last_seen_at <= $2 OR created_at <= $3);

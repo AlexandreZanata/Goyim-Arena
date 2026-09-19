@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -157,6 +158,88 @@ func (r *inMemorySessionRepo) RevokeAllAccountSessions(ctx context.Context, acco
 		}
 	}
 	return nil
+}
+
+// ListActiveSessions answers the same question the storage statement does:
+// the three boundaries are compared, never re-derived, so the fake cannot be
+// more generous than the adapter it stands in for.
+func (r *inMemorySessionRepo) ListActiveSessions(ctx context.Context, accountID domain.AccountID, window application.SessionWindow) ([]application.SessionRecord, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	records := make([]application.SessionRecord, 0, len(r.sessions))
+	for _, sess := range r.sessions {
+		if sess.AccountID() != accountID || sess.IsRevoked() {
+			continue
+		}
+		if !sess.ExpiresAt().After(window.Now) ||
+			!sess.LastSeenAt().After(window.IdleCutoff) ||
+			!sess.CreatedAt().After(window.AbsoluteCutoff) {
+			continue
+		}
+		records = append(records, application.SessionRecord{
+			ID:         sess.ID(),
+			AccountID:  sess.AccountID(),
+			CreatedAt:  sess.CreatedAt(),
+			LastSeenAt: sess.LastSeenAt(),
+			ExpiresAt:  sess.ExpiresAt(),
+			IPAddress:  sess.IPAddress(),
+			UserAgent:  sess.UserAgent(),
+		})
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].LastSeenAt.Equal(records[j].LastSeenAt) {
+			return records[i].ID.String() < records[j].ID.String()
+		}
+		return records[i].LastSeenAt.After(records[j].LastSeenAt)
+	})
+	max := window.MaxRows
+	if max <= 0 {
+		max = application.DefaultSessionListingRows
+	}
+	if len(records) > max {
+		records = records[:max]
+	}
+	return records, nil
+}
+
+// RevokeSessionByID ends one session of one account, reporting whether an
+// active row changed, exactly as the statement does.
+func (r *inMemorySessionRepo) RevokeSessionByID(ctx context.Context, accountID domain.AccountID, sessionID domain.SessionID) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	sess, ok := r.sessions[sessionID.String()]
+	if !ok || sess.AccountID() != accountID || sess.IsRevoked() {
+		return false, nil
+	}
+	if err := sess.Revoke(time.Now().UTC()); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RevokeSessionsPastDeadline ends every session past its policy deadline and
+// never deletes one, which is the property the real statement keeps.
+func (r *inMemorySessionRepo) RevokeSessionsPastDeadline(ctx context.Context, window application.SessionWindow) (int64, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	var revoked int64
+	for _, sess := range r.sessions {
+		if sess.IsRevoked() {
+			continue
+		}
+		if sess.ExpiresAt().After(window.Now) &&
+			sess.LastSeenAt().After(window.IdleCutoff) &&
+			sess.CreatedAt().After(window.AbsoluteCutoff) {
+			continue
+		}
+		if err := sess.Revoke(time.Now().UTC()); err == nil {
+			revoked++
+		}
+	}
+	return revoked, nil
 }
 
 func (r *inMemorySessionRepo) TouchCount() int64 {

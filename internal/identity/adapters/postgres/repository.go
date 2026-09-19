@@ -397,6 +397,82 @@ func (r *Repository) RevokeAllAccountSessions(ctx context.Context, accountID dom
 	return nil
 }
 
+// ListActiveSessions returns the account's usable sessions, most recently seen
+// first (P16-T06).
+//
+// The statement does not select the token hash, so the listing cannot leak a
+// credential even by accident: what is not read cannot be returned.
+func (r *Repository) ListActiveSessions(ctx context.Context, accountID domain.AccountID, window application.SessionWindow) ([]application.SessionRecord, error) {
+	var pgUUID pgtype.UUID
+	if err := pgUUID.Scan(accountID.String()); err != nil {
+		return nil, fmt.Errorf("invalid account id format: %w", err)
+	}
+	maxRows := window.MaxRows
+	if maxRows <= 0 {
+		maxRows = application.DefaultSessionListingRows
+	}
+
+	rows, err := r.queries.ListActiveAccountSessions(ctx, platformpg.ListActiveAccountSessionsParams{
+		AccountID:  pgUUID,
+		ExpiresAt:  pgtype.Timestamptz{Time: window.Now, Valid: true},
+		LastSeenAt: pgtype.Timestamptz{Time: window.IdleCutoff, Valid: true},
+		CreatedAt:  pgtype.Timestamptz{Time: window.AbsoluteCutoff, Valid: true},
+		Limit:      int32(maxRows),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list active account sessions: %w", err)
+	}
+
+	sessions := make([]application.SessionRecord, 0, len(rows))
+	for _, row := range rows {
+		sessions = append(sessions, application.SessionRecord{
+			ID:         domain.SessionID(row.ID.String()),
+			AccountID:  accountID,
+			CreatedAt:  row.CreatedAt.Time.UTC(),
+			LastSeenAt: row.LastSeenAt.Time.UTC(),
+			ExpiresAt:  row.ExpiresAt.Time.UTC(),
+			IPAddress:  row.IpAddress.String,
+			UserAgent:  row.UserAgent.String,
+		})
+	}
+	return sessions, nil
+}
+
+// RevokeSessionByID revokes one session of one account, reporting whether an
+// active row changed (P16-T06).
+func (r *Repository) RevokeSessionByID(ctx context.Context, accountID domain.AccountID, sessionID domain.SessionID) (bool, error) {
+	var accountUUID, sessionUUID pgtype.UUID
+	if err := accountUUID.Scan(accountID.String()); err != nil {
+		return false, fmt.Errorf("invalid account id format: %w", err)
+	}
+	if err := sessionUUID.Scan(sessionID.String()); err != nil {
+		return false, fmt.Errorf("invalid session id format: %w", err)
+	}
+
+	changed, err := r.queries.RevokeAccountSessionByID(ctx, platformpg.RevokeAccountSessionByIDParams{
+		ID:        sessionUUID,
+		AccountID: accountUUID,
+	})
+	if err != nil {
+		return false, fmt.Errorf("revoke account session: %w", err)
+	}
+	return changed == 1, nil
+}
+
+// RevokeSessionsPastDeadline revokes every session past its policy deadline,
+// reporting how many rows changed (P16-T06).
+func (r *Repository) RevokeSessionsPastDeadline(ctx context.Context, window application.SessionWindow) (int64, error) {
+	changed, err := r.queries.RevokeSessionsPastDeadline(ctx, platformpg.RevokeSessionsPastDeadlineParams{
+		ExpiresAt:  pgtype.Timestamptz{Time: window.Now, Valid: true},
+		LastSeenAt: pgtype.Timestamptz{Time: window.IdleCutoff, Valid: true},
+		CreatedAt:  pgtype.Timestamptz{Time: window.AbsoluteCutoff, Valid: true},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("revoke sessions past deadline: %w", err)
+	}
+	return changed, nil
+}
+
 func mapAccountRow(row platformpg.AppAccount) (*domain.Account, error) {
 	email, err := domain.ParseEmail(row.Email)
 	if err != nil {

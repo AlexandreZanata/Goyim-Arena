@@ -22,6 +22,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/billing/domain"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 )
 
@@ -76,6 +77,7 @@ type BillingHandlerConfig struct {
 	GetSubscriptionStatus *application.GetSubscriptionStatusUseCase
 	GetBillingPortal      *application.GetBillingPortalUseCase
 	SecurityManager       *security.Manager
+	RateLimit             ratelimit.Protector
 }
 
 // BillingHandler serves the private billing API.
@@ -84,6 +86,7 @@ type BillingHandler struct {
 	subscription *application.GetSubscriptionStatusUseCase
 	portal       *application.GetBillingPortalUseCase
 	security     *security.Manager
+	rateLimit    ratelimit.Protector
 }
 
 // NewBillingHandler constructs the handler.
@@ -93,6 +96,7 @@ func NewBillingHandler(cfg BillingHandlerConfig) *BillingHandler {
 		subscription: cfg.GetSubscriptionStatus,
 		portal:       cfg.GetBillingPortal,
 		security:     cfg.SecurityManager,
+		rateLimit:    cfg.RateLimit,
 	}
 }
 
@@ -235,9 +239,12 @@ func writeBillingProblem(w http.ResponseWriter, r *http.Request, err error) {
 
 // RegisterBillingRoutes wires the private billing endpoints into the mux.
 func (h *BillingHandler) RegisterBillingRoutes(mux *http.ServeMux) {
-	mux.Handle("POST /api/v1/me/billing/checkout", withPrivateNoStore(h.privateBillingRoute(http.HandlerFunc(h.CreateCheckout))))
+	// Both writes call Stripe, so both carry a policy; the read does not, and
+	// the store's own idempotency is what makes a repeated checkout safe to
+	// serve rather than what makes it free to request.
+	mux.Handle("POST /api/v1/me/billing/checkout", withPrivateNoStore(h.privateBillingRoute(h.protect(ratelimit.ActionCheckoutCreate, http.HandlerFunc(h.CreateCheckout)))))
 	mux.Handle("GET /api/v1/me/billing/subscription", withPrivateNoStore(h.privateBillingRoute(http.HandlerFunc(h.GetSubscription))))
-	mux.Handle("POST /api/v1/me/billing/portal", withPrivateNoStore(h.privateBillingRoute(http.HandlerFunc(h.CreatePortal))))
+	mux.Handle("POST /api/v1/me/billing/portal", withPrivateNoStore(h.privateBillingRoute(h.protect(ratelimit.ActionBillingPortal, http.HandlerFunc(h.CreatePortal)))))
 }
 
 func (h *BillingHandler) privateBillingRoute(next http.Handler) http.Handler {
@@ -245,4 +252,13 @@ func (h *BillingHandler) privateBillingRoute(next http.Handler) http.Handler {
 		return next
 	}
 	return h.security.RequireAuthMiddleware()(next)
+}
+
+// protect applies the rate limit policy of one action, inside the
+// authentication middleware so the account dimension is available.
+func (h *BillingHandler) protect(action ratelimit.Action, next http.Handler) http.Handler {
+	if h.rateLimit == nil {
+		return next
+	}
+	return h.rateLimit.Protect(action, next)
 }

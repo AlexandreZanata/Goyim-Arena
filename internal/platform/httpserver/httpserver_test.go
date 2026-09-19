@@ -16,7 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httplimits"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/securityheaders"
 )
 
 // newTestLogger returns a logger that only prints its captured records when
@@ -59,6 +61,17 @@ func TestNewAppliesHardeningDefaults(t *testing.T) {
 	}
 	if got := server.HTTP.MaxHeaderBytes; got != 64<<10 {
 		t.Errorf("MaxHeaderBytes = %d, want 65536 (below the 1MiB default)", got)
+	}
+
+	// The per-route deadlines of P16-T02 have to fit inside the transport
+	// budget: a route that aims to finish after the server stops writing is a
+	// deadline that can never be honored, so the two are asserted together
+	// here, where both numbers are visible.
+	if longest := httplimits.LongestTimeout(); longest >= server.HTTP.WriteTimeout {
+		t.Errorf("longest route deadline = %v, want below the %v write timeout", longest, server.HTTP.WriteTimeout)
+	}
+	if longest := httplimits.LongestTimeout(); longest <= 0 {
+		t.Errorf("longest route deadline = %v, want a positive budget", longest)
 	}
 }
 
@@ -194,7 +207,7 @@ func TestReadyHandlerWithCheckers(t *testing.T) {
 	}
 
 	// 4. NewMux wires checkers
-	mux, err := httpserver.NewMux(stubIDs{value: "test-id"}, nil, failingChecker)
+	mux, err := httpserver.NewMux(stubIDs{value: "test-id"}, nil, securityheaders.Config{}, failingChecker)
 	if err != nil {
 		t.Fatalf("NewMux error: %v", err)
 	}
@@ -207,7 +220,7 @@ func TestReadyHandlerWithCheckers(t *testing.T) {
 func TestNewMuxRoutesAndCorrelates(t *testing.T) {
 	t.Parallel()
 
-	handler, err := httpserver.NewMux(stubIDs{value: "test-id-123"}, nil)
+	handler, err := httpserver.NewMux(stubIDs{value: "test-id-123"}, nil, securityheaders.Config{})
 	if err != nil {
 		t.Fatalf("NewMux() error = %v", err)
 	}
@@ -255,7 +268,7 @@ func TestListenFailsFastOnBusyPort(t *testing.T) {
 func TestGracefulShutdownLifecycle(t *testing.T) {
 	t.Parallel()
 
-	handler, err := httpserver.NewMux(stubIDs{value: "lifecycle-id"}, nil)
+	handler, err := httpserver.NewMux(stubIDs{value: "lifecycle-id"}, nil, securityheaders.Config{})
 	if err != nil {
 		t.Fatalf("NewMux() error = %v", err)
 	}

@@ -26,6 +26,27 @@
 
 Não implementar JWT como sessão principal no browser. JWT pode ser reavaliado para integração específica, não por conveniência.
 
+### Segundo fator administrativo (P16-T05)
+
+O mecanismo é TOTP nativo sobre RFC 4226/6238 (`internal/platform/mfa`), e a decisão está registrada na ADR-014: a biblioteca padrão do Go cobre todos os primitivos (HMAC, AES-GCM, comparação em tempo constante, `crypto/rand`), os vectores publicados pela RFC provam a correção do algoritmo em teste, e as partes que uma biblioteca genérica **não** decide — quanto skew de relógio é tolerado, que um passo aceito é gasto, sob que conta o segredo é selado — são exatamente as que aqui são política escrita. A superfície é `internal/identity` (casos de uso) sobre esse mecanismo por porta.
+
+O que existe e por quê:
+
+- **o segredo é selado, nunca hasheado.** Verificar um código exige o segredo em claro, então ele é cifrado com AES-256-GCM e o identificador da conta é o *additional authenticated data*: um valor selado copiado de outra linha não abre. A coluna guarda só criptografia, então um dump, uma réplica ou um backup não contêm um segundo fator utilizável. A chave (32 bytes) entra com a composição dos módulos, pelo mesmo critério que a T03 registrou para proxies confiáveis e a T04 para o Turnstile;
+- **um passo de tempo é de uso único.** O maior passo aceito vive na própria linha (`app.account_mfa.last_accepted_step`) e o avanço é uma única instrução (`WHERE last_accepted_step < $2`), então duas verificações concorrentes do mesmo código não podem ambas vencer. Um código dentro da janela que já foi gasto é recusado como `mfa_code_replayed`, separado de `mfa_code_invalid`: um é replay de um código correto, o outro é um palpite errado, e quem lê um incidente precisa distinguir os dois;
+- **skew limitado.** Um passo para cada lado é o default (tolerância a relógio dessincronizado por segundos); alargar a janela amplia a superfície de palpite e é decisão, não inferência. `Verify` caminha a janela inteira e compara em tempo constante, sem parar cedo de forma dependente do conteúdo;
+- **códigos de recuperação são de uso único e hasheados** com o mesmo Argon2id das senhas, e a forma do código é validada **antes** de qualquer hashing, para que o endpoint não seja oráculo nem gasto barato de CPU. A recusa de um código já gasto é a mesma de um código inexistente, pelo mesmo motivo da T04;
+- **elevação é propriedade da sessão**, não da conta: `app.sessions.mfa_verified_at` diz quando **aquela** sessão apresentou o fator. A conta pode ter matrícula confirmada e ainda assim uma sessão que nunca apresentou nada, e é essa sessão que o gate administrativo recusa;
+- **recuperação falha fechado.** A ordem é consumir o código, registrar o fato na trilha de auditoria e só então elevar a sessão. Uma recuperação que não pode ser atribuída **não** eleva ninguém (o código é gasto e o acesso não é concedido), que é a única direção que não pode ser abusada por repetição até a trilha ficar disponível. Os fatos registrados são `mfa.enrolled` e `mfa.backup_code_used`.
+
+O gate administrativo (`internal/moderation/adapters/http`) exige, além do papel, que a sessão tenha apresentado o fator dentro de `domain.StepUpWindow` (15 minutos) e recusa com `mfa_step_up_required` nas três rotas de triagem (fila, claim e decisão). A recusa não descreve o estado da matrícula: ela diz que falta um step-up, nunca se a conta tem fator, se ele está confirmado ou quando foi apresentado. As rotas de step-up e recuperação carregam o orçamento `mfa.verify` (endereço e conta) da política da T03, porque um código é um segredo adivinhável.
+
+Limites conhecidos, que precisam de decisão antes do beta:
+
+- **matrícula e confirmação não têm orçamento por ação.** Elas só são alcançáveis por sessão autenticada, cada chamada reescreve no máximo uma linha pendente e não há amplificação (nem envio de email); o custo é limitado pela camada de plataforma da T02. Se a fase 18 expuser o widget, vale revisitar: um oráculo de geração de segredo por conta é barato de limitar;
+- **a memória de passos gastos é a linha do banco**, então — ao contrário do que acontece com os tokens do Turnstile — ela é global e não por processo: duas instâncias respeitam o mesmo passo;
+- **o segredo é mostrado uma única vez**, na resposta de `POST /api/v1/me/mfa/enrollment`, e os códigos de recuperação também só existem em claro na resposta de confirmação; nenhuma outra resposta os repete (há teste que percorre as respostas).
+
 ## 3. Autorização
 
 - Toda ação possui verificação server-side de ator, recurso e permissão.
@@ -64,6 +85,49 @@ Camadas complementares:
 - detecção e revisão de padrões de Sybil, farming, brigading e reciprocidade.
 
 IP é sinal imperfeito e dado pessoal potencial. Nunca é prova isolada de abuso. A aplicação só confia em headers de IP recebidos de proxies explicitamente confiáveis.
+
+### Limites na aplicação (P16-T03)
+
+Implementados em `internal/platform/ratelimit`: uma tabela de políticas por ação (`auth.register`, `auth.login`, `auth.password_reset_request`, `auth.password_reset_confirm`, `position.confirm`, `position.change`, `argument.publish`, `report.file`, `checkout.create`, `billing.portal`) com orçamento por endereço de rede e, quando autenticado, também por conta. O orçamento por conta é mais apertado que o por endereço: o endereço é sinal bruto (NAT de operadora coloca milhares de pessoas atrás dele) e a conta é exata. Cada recusa é um problem RFC 9457 com `code: rate_limited` e `Retry-After` em delta-seconds arredondado para cima.
+
+Onde os headers de proxy entram: `internal/platform/clientip` só lê `X-Forwarded-For` quando o par imediato da conexão está num CIDR confiável configurado. Sem proxies confiáveis (o default), todo header de encaminhamento é ignorado e a chave é o endereço da conexão — um cliente que varia o header para parecer mil clientes continua sendo um. Com proxies confiáveis, a cadeia é percorrida da direita para a esquerda pulando endereços confiáveis, e a primeira entrada não confiável é o cliente. `X-Real-IP` e `CF-Connecting-IP` não são consultados: são valores únicos, sem cadeia, e a aplicação não tem como distinguir o que o proxy escreveu do que o cliente escreveu.
+
+Limites conhecidos destes limites, que precisam de decisão antes de escalar horizontalmente:
+
+- **o limitador é por processo e em memória.** Com N instâncias o orçamento efetivo é N vezes a tabela: o edge (Cloudflare) é quem limita entre instâncias hoje, e um store compartilhado (Redis) é o passo necessário para fechar a lacuna;
+- **a memória é limitada por eviction.** O mapa guarda no máximo `DefaultCapacity` chaves, descartando as menos recentemente usadas, e chaves ociosas expiram. O custo honesto dessa escolha é que eviction esquece um balde: quem inunda chaves distintas (botnet) pode zerar a contagem das chaves que força para fora. O limite absoluto de memória é a razão de aceitar isso; contra um botnet, quem limita é o edge;
+- **endereços em memória são dado pessoal potencial.** Não são persistidos, não entram em log, não entram em métrica, e uma decisão de recusa carrega apenas o tipo de dimensão que recusou, nunca o valor;
+- **as políticas são pontos de partida conservadores**, derivados do custo de servir uma requisição aceita (hash Argon2id, email enviado, chamada ao Stripe, atenção humana na fila). Ajuste real depende de tráfego real (fase 28); afrouxar uma linha é decisão registrada, não conveniência local.
+
+### Desafio anti-bot (P16-T04)
+
+Implementado em `internal/platform/turnstile`. O desafio é resolvido no browser pelo widget do provedor e **verificado apenas no servidor**: o browser recebe um token, nunca o segredo. O segredo (`ARENA_TURNSTILE_SECRET_KEY`) existe só no processo, é enviado apenas ao endpoint de verificação do provedor, e `Config.String`/`GoString` o redigem para que nenhuma linha de log o carregue; um teste percorre as respostas das rotas guardadas e reprova se o valor aparecer em corpo ou header de qualquer resposta.
+
+Política, em uma tabela única (`internal/platform/turnstile`, `requirements`):
+
+- `signup` (cadastro), `password_reset` (recuperação) e `arena_publish` (publicação de Arena) exigem desafio **em toda chamada** — são as ações que criam conta, disparam email e criam conteúdo público;
+- `login_elevated` exige desafio **sob risco elevado**, que é o sinal de falhas consecutivas de autenticação por endereço de rede (THR-AUTH-02): quem digita a senha errada algumas vezes não vê desafio, um laço de adivinhação vê. O sinal é contado por endereço, nunca por email, para não virar oráculo de existência de conta, e é zerado no primeiro sucesso;
+- uma ação não declarada na tabela resolve para **exigir desafio**, não para liberar: o silêncio de uma linha esquecida tem que falhar fechado.
+
+O que é verificado na resposta do provedor, e por quê:
+
+- `success`;
+- **hostname**: o token tem que ter sido resolvido para o hostname configurado (`ARENA_TURNSTILE_HOSTNAME`); um token cunhado para outro site não é gastável aqui;
+- **action**: o token tem que ter sido cunhado para a ação que o está gastando, então um token do widget de cadastro não vale numa publicação;
+- **uso único**: o token é reivindicado atomicamente antes da verificação, então um replay concorrente não é atendido; quando o provedor também recusa (`timeout-or-duplicate`, que ele não separa de expirado), a recusa é o mesmo `challenge_replayed`. A memória de tokens gastos guarda **fingerprint SHA-256**, nunca o token, e é limitada em tamanho e em tempo (a vida útil de um token do provedor);
+- **timeout**: a chamada de verificação tem deadline curto e o corpo da resposta é limitado, então um provedor lento não segura a requisição nem faz o processo ler sem limite.
+
+Política de falha, explícita e configurada (`ARENA_TURNSTILE_FAIL_POLICY`), nunca implícita: o default é **fechado** — um desafio que não pode ser verificado recusa a ação, porque o instante em que o provedor está inacessível é exatamente o instante em que um cliente automatizado gostaria de prosseguir. A política **aberta** existe para um operador que prefere manter o cadastro funcionando durante uma indisponibilidade do provedor; ela precisa ser pedida por nome, vale **somente** para a resposta "não conseguimos verificar" e nunca para um token inválido, replay ou configuração errada (segredo rejeitado pelo provedor é implantação quebrada, não indisponibilidade, e é recusada sob as duas políticas). Um token ausente também não é verificável: é recusado antes de qualquer chamada, sob as duas políticas.
+
+**Onde essa configuração entra:** ler o ambiente é responsabilidade do composition root (`internal/platform/config`, a única camada que toca o processo). Hoje `cmd/arena` monta apenas health, então os três nomes acima (`ARENA_TURNSTILE_SECRET_KEY`, `ARENA_TURNSTILE_HOSTNAME`, `ARENA_TURNSTILE_FAIL_POLICY`) ainda não estão em `Load`: o construtor recebe a configuração como parâmetro explícito e as variáveis entram junto com a composição dos módulos — o mesmo critério que a P16-T03 registrou para proxies confiáveis, para não criar configuração sem consumidor (e para não documentar uma variável que a validação de ambiente rejeitaria como desconhecida).
+
+O que acontece localmente também é explícito: sem segredo configurado em desenvolvimento ou teste, a composição instala um **fake local documentado** que aceita somente os tokens do widget de teste do provedor e não tem cliente HTTP, endpoint nem segredo (estruturalmente incapaz de falar com a rede); sem segredo em produção, a construção falha no boot em vez de rodar desprotegida.
+
+Limites conhecidos, que precisam de decisão antes de escalar ou antes do widget existir no browser:
+
+- **a memória de tokens gastos é por processo.** Com N instâncias, um replay pode ser reivindicado em outra instância; quem impede é o próprio uso único do provedor, que é a segunda linha por construção. Um store compartilhado é o passo necessário para tornar a garantia local global;
+- **o widget no browser ainda não existe** (fase 18). Quando ele existir, a política de CSP da P16-T01 (`script-src 'self'`) precisa permitir explicitamente o host do desafio, e o site key público entra no HTML; a secret continua nunca chegando ao browser. Não se antecipou essa permissão agora porque não há consumidor: afrouxar a CSP sem widget seria reduzir a proteção sem uso;
+- **o endpoint de verificação é uma dependência externa no caminho de um cadastro.** É o preço de fazer a pergunta ao provedor em vez de confiar no cliente, e é o motivo de a política de falha ser uma decisão registrada.
 
 ## 7. Wallet e concorrência
 

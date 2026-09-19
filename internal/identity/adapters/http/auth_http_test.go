@@ -3,10 +3,12 @@ package http_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,10 +18,13 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/postgres"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clientip"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbtest"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
 )
 
 type testHarness struct {
@@ -37,7 +42,16 @@ func mustEmail(s string) domain.Email {
 	return e
 }
 
-func setupTestHarness(t *testing.T, rateLimiter application.RateLimiter) *testHarness {
+func setupTestHarness(t *testing.T, rateLimit ratelimit.Protector) *testHarness {
+	t.Helper()
+	return setupHarness(t, rateLimit, nil)
+}
+
+// setupHarness builds the identity surface with the security layers the caller
+// asks for. The throttle and the challenge are parameters because the tests
+// that are *about* one of them must install it while the tests that are about
+// something else must not be forced through it.
+func setupHarness(t *testing.T, rateLimit ratelimit.Protector, challenge turnstile.Challenger) *testHarness {
 	t.Helper()
 	db := dbtest.New(t)
 	repo := postgres.NewRepository(db.Pool.Pool())
@@ -58,7 +72,7 @@ func setupTestHarness(t *testing.T, rateLimiter application.RateLimiter) *testHa
 	logUC := application.NewLoginUseCase(repo, repo, repo, hasher, clock, random, sPolicy)
 	loutUC := application.NewLogoutUseCase(repo)
 	reqResetUC := application.NewRequestPasswordResetUseCase(repo, repo, sender, clock, random, rPolicy)
-	compResetUC := application.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, clock)
+	compResetUC := application.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, sender, clock)
 	authSessUC := application.NewAuthenticateSessionUseCase(repo, repo, clock, sPolicy, 5*time.Minute)
 
 	secMgr, err := security.New(security.Options{
@@ -81,7 +95,8 @@ func setupTestHarness(t *testing.T, rateLimiter application.RateLimiter) *testHa
 		CompletePasswordResetUseCase: compResetUC,
 		AuthenticateSessionUseCase:   authSessUC,
 		SecurityManager:              secMgr,
-		RateLimiter:                  rateLimiter,
+		RateLimit:                    rateLimit,
+		Challenge:                    challenge,
 	})
 
 	mux := http.NewServeMux()
@@ -343,14 +358,29 @@ func TestBodyLimitEnforcement(t *testing.T) {
 	assertProblemContentType(t, w)
 }
 
-type blockingRateLimiter struct{}
-
-func (blockingRateLimiter) Allow(ctx context.Context, key string) (bool, error) {
-	return false, nil
+// refusingGuard refuses every action, recording which actions it was asked
+// about, so the test can prove the throttle runs before the use case.
+type refusingGuard struct {
+	mu      sync.Mutex
+	actions []ratelimit.Action
 }
 
-func TestRateLimiterHook(t *testing.T) {
-	harness := setupTestHarness(t, blockingRateLimiter{})
+func (guard *refusingGuard) Allow(_ context.Context, action ratelimit.Action, _ ...ratelimit.Subject) (ratelimit.Decision, error) {
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	guard.actions = append(guard.actions, action)
+	return ratelimit.Decision{Allowed: false, Refused: ratelimit.SubjectAddress, RetryAfter: 30 * time.Second, Limit: 10}, nil
+}
+
+func (guard *refusingGuard) seen() []ratelimit.Action {
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	return append([]ratelimit.Action(nil), guard.actions...)
+}
+
+func TestThrottledLoginIsRefusedBeforeTheUseCase(t *testing.T) {
+	guard := &refusingGuard{}
+	harness := setupTestHarness(t, ratelimit.New(guard, clientip.New(nil)))
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"email":"rate@example.com","password":"Pass"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -361,6 +391,7 @@ func TestRateLimiterHook(t *testing.T) {
 		t.Fatalf("expected 429 Too Many Requests, got %d", w.Code)
 	}
 	assertProblemContentType(t, w)
+	assertCacheControlPrivateNoStore(t, w)
 
 	var problem struct {
 		Code   string `json:"code"`
@@ -371,6 +402,49 @@ func TestRateLimiterHook(t *testing.T) {
 	}
 	if problem.Code != "rate_limited" {
 		t.Fatalf("expected code 'rate_limited', got %s", problem.Code)
+	}
+	if retryAfter := w.Header().Get("Retry-After"); retryAfter != "30" {
+		t.Errorf("Retry-After = %q, want the wait the guard reported", retryAfter)
+	}
+	// The use case never ran: a throttled login cannot authenticate anybody,
+	// so it cannot hand out a session.
+	if cookies := w.Result().Cookies(); len(cookies) != 0 {
+		t.Errorf("a refused login set %d cookies, want none", len(cookies))
+	}
+	if actions := guard.seen(); len(actions) != 1 || actions[0] != ratelimit.ActionAuthLogin {
+		t.Errorf("guard saw %v, want just %q", actions, ratelimit.ActionAuthLogin)
+	}
+}
+
+// TestSpoofedForwardedHeaderDoesNotMultiplyTheLoginBudget is the regression
+// test for the defect this task replaced: the previous hook keyed its bucket on
+// the first X-Forwarded-For entry, which the client writes, so rotating the
+// header bought unlimited login attempts. With the platform policy and no
+// trusted proxies configured, every one of those attempts is the same client.
+func TestSpoofedForwardedHeaderDoesNotMultiplyTheLoginBudget(t *testing.T) {
+	limiter := ratelimit.NewLimiter(ratelimit.Options{})
+	harness := setupTestHarness(t, ratelimit.New(limiter, clientip.New(nil)))
+
+	budget := 0
+	for attempt := 0; attempt < 64; attempt++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"email":"spoof@example.com","password":"Pass"}`))
+		req.Header.Set("Content-Type", "application/json")
+		// A different address every time, and a different peer port too.
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("203.0.113.%d", attempt+1))
+		req.RemoteAddr = fmt.Sprintf("198.51.100.7:%d", 40000+attempt)
+
+		w := httptest.NewRecorder()
+		harness.mux.ServeHTTP(w, req)
+
+		if w.Code == http.StatusTooManyRequests {
+			break
+		}
+		budget++
+	}
+
+	policy, _ := ratelimit.PolicyFor(ratelimit.ActionAuthLogin)
+	if budget != policy.Address.Burst {
+		t.Errorf("the spoofed header bought %d attempts, want the policy burst %d", budget, policy.Address.Burst)
 	}
 }
 

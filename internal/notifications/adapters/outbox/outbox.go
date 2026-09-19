@@ -114,7 +114,7 @@ func validateResolved(notification application.ResolvedNotification) error {
 	if err := domain.ValidateRecipient(notification.Recipient); err != nil {
 		return err
 	}
-	if _, err := domain.NewTemplateValues(notification.Values.Name, notification.Values.Code); err != nil {
+	if _, err := domain.ValidateTemplateValues(notification.Template, notification.Values.Name, notification.Values.Code); err != nil {
 		return err
 	}
 	return domain.ValidateEventKey(notification.EventKey)
@@ -139,7 +139,10 @@ func decodePayload(body []byte) (application.ResolvedNotification, error) {
 	if err != nil {
 		return application.ResolvedNotification{}, err
 	}
-	values, err := domain.NewTemplateValues(decoded.Name, decoded.Code)
+	// The values are validated against the template they were frozen with:
+	// a code-carrying payload whose code was lost and a notice payload that
+	// gained one are both refused here, before a provider sees either.
+	values, err := domain.ValidateTemplateValues(templateID, decoded.Name, decoded.Code)
 	if err != nil {
 		return application.ResolvedNotification{}, err
 	}

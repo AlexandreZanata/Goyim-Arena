@@ -63,6 +63,19 @@ func TestCatalogDefaultLocalesAgree(t *testing.T) {
 	}
 }
 
+// catalogFieldsOf lists the catalog fields one template asks for. It restates
+// the contract instead of importing the renderer's own list, because a test
+// that derives its expectations from the code under test cannot catch the code
+// forgetting a key. A template that carries no code has no code label to
+// miss (P16-T06), and demanding one would fail on a message whose catalog is
+// complete.
+func catalogFieldsOf(templateID domain.TemplateID) []string {
+	if templateID.CarriesCode() {
+		return []string{"subject", "lead", "code_label"}
+	}
+	return []string{"subject", "lead"}
+}
+
 // TestRendererVerifiesCatalogParityAtWiring is the "CI fails on a missing key"
 // rule: with fallback disabled, a string missing from any shipped locale is a
 // wiring failure, and every template is checked rather than the one a test
@@ -70,7 +83,7 @@ func TestCatalogDefaultLocalesAgree(t *testing.T) {
 func TestRendererVerifiesCatalogParityAtWiring(t *testing.T) {
 	for _, locale := range domain.Locales() {
 		for _, templateID := range domain.TemplateIDs() {
-			for _, field := range []string{"subject", "lead", "code_label"} {
+			for _, field := range catalogFieldsOf(templateID) {
 				key := "email." + templateID.String() + "." + field
 				t.Run(locale.String()+"."+key, func(t *testing.T) {
 					catalog := newTestCatalog(locale.String() + "|" + key)

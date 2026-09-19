@@ -20,6 +20,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arguments/domain"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 )
 
@@ -93,6 +94,7 @@ type HandlerConfig struct {
 	ListRepliesCase  *application.ListRepliesUseCase
 	GetPublicUseCase *application.GetPublicArgumentUseCase
 	SecurityManager  *security.Manager
+	RateLimit        ratelimit.Protector
 }
 
 // Handler serves the versioned arguments API.
@@ -103,6 +105,7 @@ type Handler struct {
 	listReplies *application.ListRepliesUseCase
 	getPublic   *application.GetPublicArgumentUseCase
 	security    *security.Manager
+	rateLimit   ratelimit.Protector
 }
 
 // NewHandler constructs an arguments HTTP handler.
@@ -114,6 +117,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		listReplies: cfg.ListRepliesCase,
 		getPublic:   cfg.GetPublicUseCase,
 		security:    cfg.SecurityManager,
+		rateLimit:   cfg.RateLimit,
 	}
 }
 
@@ -462,10 +466,24 @@ func (h *Handler) privateRoute(next http.Handler) http.Handler {
 	return h.security.RequireAuthMiddleware()(next)
 }
 
+// protect applies the rate limit policy of one action. It is applied inside
+// privateRoute so that the policy can bound the authenticated account as well
+// as the network address.
+func (h *Handler) protect(action ratelimit.Action, next http.Handler) http.Handler {
+	if h.rateLimit == nil {
+		return next
+	}
+	return h.rateLimit.Protect(action, next)
+}
+
 // RegisterRoutes wires the arguments endpoints into the provided ServeMux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("POST /api/v1/me/arenas/{id}/arguments", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.PublishArgument))))
-	mux.Handle("POST /api/v1/me/arenas/{id}/arguments/{argumentID}/replies", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.ReplyToArgument))))
+	// Publishing and replying share one policy: both create user-generated
+	// content, and the ledger already bounds what publishing costs in INK. The
+	// withdrawal route is deliberately not throttled: it removes content, and
+	// its state machine already rejects a second withdrawal.
+	mux.Handle("POST /api/v1/me/arenas/{id}/arguments", withPrivateNoStore(h.privateRoute(h.protect(ratelimit.ActionArgumentPublish, http.HandlerFunc(h.PublishArgument)))))
+	mux.Handle("POST /api/v1/me/arenas/{id}/arguments/{argumentID}/replies", withPrivateNoStore(h.privateRoute(h.protect(ratelimit.ActionArgumentPublish, http.HandlerFunc(h.ReplyToArgument)))))
 	mux.Handle("POST /api/v1/me/arguments/{id}/withdraw", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.WithdrawArgument))))
 
 	mux.HandleFunc("GET /api/v1/arenas/{id}/arguments", h.ListArenaArguments)

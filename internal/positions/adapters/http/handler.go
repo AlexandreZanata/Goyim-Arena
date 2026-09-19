@@ -18,6 +18,7 @@ import (
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/positions/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/positions/domain"
@@ -105,6 +106,7 @@ type HandlerConfig struct {
 	ListMineUseCase  *application.ListPositionChangesUseCase
 	AggregateUseCase *application.GetPositionAggregateUseCase
 	SecurityManager  *security.Manager
+	RateLimit        ratelimit.Protector
 }
 
 // Handler serves the positions API.
@@ -115,6 +117,7 @@ type Handler struct {
 	listMine  *application.ListPositionChangesUseCase
 	aggregate *application.GetPositionAggregateUseCase
 	security  *security.Manager
+	rateLimit ratelimit.Protector
 }
 
 // NewHandler constructs a positions HTTP handler.
@@ -126,6 +129,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		listMine:  cfg.ListMineUseCase,
 		aggregate: cfg.AggregateUseCase,
 		security:  cfg.SecurityManager,
+		rateLimit: cfg.RateLimit,
 	}
 }
 
@@ -430,11 +434,23 @@ func (h *Handler) privateRoute(next http.Handler) http.Handler {
 	return h.security.RequireAuthMiddleware()(next)
 }
 
+// protect applies the rate limit policy of one action.
+func (h *Handler) protect(action ratelimit.Action, next http.Handler) http.Handler {
+	if h.rateLimit == nil {
+		return next
+	}
+	return h.rateLimit.Protect(action, next)
+}
+
 // RegisterRoutes wires the positions endpoints into the provided ServeMux.
+//
+// The two writes carry a rate limit policy. It sits inside the authentication
+// middleware, because the policy bounds the account as well as the network
+// address and the account is only known after authentication.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("POST /api/v1/me/arenas/{id}/position", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.ConfirmPosition))))
+	mux.Handle("POST /api/v1/me/arenas/{id}/position", withPrivateNoStore(h.privateRoute(h.protect(ratelimit.ActionPositionConfirm, http.HandlerFunc(h.ConfirmPosition)))))
 	mux.Handle("GET /api/v1/me/arenas/{id}/position", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.GetMyPosition))))
-	mux.Handle("POST /api/v1/me/arenas/{id}/position/changes", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.ChangePosition))))
+	mux.Handle("POST /api/v1/me/arenas/{id}/position/changes", withPrivateNoStore(h.privateRoute(h.protect(ratelimit.ActionPositionChange, http.HandlerFunc(h.ChangePosition)))))
 	mux.Handle("GET /api/v1/me/arenas/{id}/position/changes", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.ListMyChanges))))
 
 	mux.HandleFunc("GET /api/v1/arenas/{id}/positions", h.GetAggregate)

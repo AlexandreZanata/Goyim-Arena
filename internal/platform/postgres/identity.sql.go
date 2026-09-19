@@ -115,7 +115,7 @@ func (q *Queries) CreatePasswordResetToken(ctx context.Context, arg CreatePasswo
 const createSession = `-- name: CreateSession :one
 INSERT INTO app.sessions (account_id, token_hash, expires_at, ip_address, user_agent)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+RETURNING id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 `
 
 type CreateSessionParams struct {
@@ -145,6 +145,7 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) (A
 		&i.RevokedAt,
 		&i.IpAddress,
 		&i.UserAgent,
+		&i.MfaVerifiedAt,
 	)
 	return i, err
 }
@@ -264,7 +265,7 @@ func (q *Queries) GetActivePasswordResetToken(ctx context.Context, tokenHash []b
 }
 
 const getActiveSessionByTokenHash = `-- name: GetActiveSessionByTokenHash :one
-SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 FROM app.sessions
 WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > now()
 `
@@ -282,6 +283,7 @@ func (q *Queries) GetActiveSessionByTokenHash(ctx context.Context, tokenHash []b
 		&i.RevokedAt,
 		&i.IpAddress,
 		&i.UserAgent,
+		&i.MfaVerifiedAt,
 	)
 	return i, err
 }
@@ -347,7 +349,7 @@ func (q *Queries) GetPasswordResetTokenByHash(ctx context.Context, tokenHash []b
 }
 
 const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
-SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent
+SELECT id, account_id, token_hash, created_at, expires_at, last_seen_at, revoked_at, ip_address, user_agent, mfa_verified_at
 FROM app.sessions
 WHERE token_hash = $1
 `
@@ -365,6 +367,7 @@ func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (
 		&i.RevokedAt,
 		&i.IpAddress,
 		&i.UserAgent,
+		&i.MfaVerifiedAt,
 	)
 	return i, err
 }
@@ -389,6 +392,77 @@ WHERE account_id = $1 AND used_at IS NULL
 func (q *Queries) InvalidateActivePasswordResetTokens(ctx context.Context, accountID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, invalidateActivePasswordResetTokens, accountID)
 	return err
+}
+
+const listActiveAccountSessions = `-- name: ListActiveAccountSessions :many
+SELECT id, created_at, last_seen_at, expires_at, ip_address, user_agent
+FROM app.sessions
+WHERE account_id = $1
+  AND revoked_at IS NULL
+  AND expires_at > $2
+  AND last_seen_at > $3
+  AND created_at > $4
+ORDER BY last_seen_at DESC, id
+LIMIT $5
+`
+
+type ListActiveAccountSessionsParams struct {
+	AccountID  pgtype.UUID
+	ExpiresAt  pgtype.Timestamptz
+	LastSeenAt pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+	Limit      int32
+}
+
+type ListActiveAccountSessionsRow struct {
+	ID         pgtype.UUID
+	CreatedAt  pgtype.Timestamptz
+	LastSeenAt pgtype.Timestamptz
+	ExpiresAt  pgtype.Timestamptz
+	IpAddress  pgtype.Text
+	UserAgent  pgtype.Text
+}
+
+// ListActiveAccountSessions returns the sessions of one account that are
+// still usable (P16-T06), newest activity first.
+//
+// The three instants are the policy boundaries, not `now()`: the session
+// policy lives in the domain, so the adapter states the same question the
+// domain asks (`created_at + absolute`, `last_seen_at + idle`, the stored
+// deadline) instead of re-deriving its own answer here. A row outside them is
+// already refused by the evaluator, and listing it would show the owner a
+// session that cannot accept a request.
+func (q *Queries) ListActiveAccountSessions(ctx context.Context, arg ListActiveAccountSessionsParams) ([]ListActiveAccountSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveAccountSessions,
+		arg.AccountID,
+		arg.ExpiresAt,
+		arg.LastSeenAt,
+		arg.CreatedAt,
+		arg.Limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveAccountSessionsRow{}
+	for rows.Next() {
+		var i ListActiveAccountSessionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.CreatedAt,
+			&i.LastSeenAt,
+			&i.ExpiresAt,
+			&i.IpAddress,
+			&i.UserAgent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markEmailVerificationTokenUsed = `-- name: MarkEmailVerificationTokenUsed :execrows
@@ -419,6 +493,31 @@ func (q *Queries) MarkPasswordResetTokenUsed(ctx context.Context, id pgtype.UUID
 	return result.RowsAffected(), nil
 }
 
+const revokeAccountSessionByID = `-- name: RevokeAccountSessionByID :execrows
+UPDATE app.sessions
+SET revoked_at = now()
+WHERE id = $1 AND account_id = $2 AND revoked_at IS NULL
+`
+
+type RevokeAccountSessionByIDParams struct {
+	ID        pgtype.UUID
+	AccountID pgtype.UUID
+}
+
+// RevokeAccountSessionByID ends one session of one account.
+//
+// The account is part of the key on purpose: a revoke addressed by session
+// identifier alone would let a caller end a session it does not own, and the
+// single statement is what makes two concurrent revokes of the same row agree
+// (one reports a change, the other reports none) without a read-modify-write.
+func (q *Queries) RevokeAccountSessionByID(ctx context.Context, arg RevokeAccountSessionByIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeAccountSessionByID, arg.ID, arg.AccountID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const revokeAllAccountSessions = `-- name: RevokeAllAccountSessions :exec
 UPDATE app.sessions
 SET revoked_at = now()
@@ -439,6 +538,35 @@ WHERE token_hash = $1 AND revoked_at IS NULL
 func (q *Queries) RevokeSession(ctx context.Context, tokenHash []byte) error {
 	_, err := q.db.Exec(ctx, revokeSession, tokenHash)
 	return err
+}
+
+const revokeSessionsPastDeadline = `-- name: RevokeSessionsPastDeadline :execrows
+UPDATE app.sessions
+SET revoked_at = now()
+WHERE revoked_at IS NULL
+  AND (expires_at <= $1 OR last_seen_at <= $2 OR created_at <= $3)
+`
+
+type RevokeSessionsPastDeadlineParams struct {
+	ExpiresAt  pgtype.Timestamptz
+	LastSeenAt pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+}
+
+// RevokeSessionsPastDeadline revokes every session that has passed its policy
+// deadline (P16-T06).
+//
+// It revokes, it never deletes: the rows of terminal sessions are the retention
+// pass's to remove, under its own window and its holds, so this statement
+// cannot shorten a retention floor. Marking the row terminal makes the
+// refusal a state instead of an arithmetic comparison, which is the same
+// defense in depth the rest of the module uses.
+func (q *Queries) RevokeSessionsPastDeadline(ctx context.Context, arg RevokeSessionsPastDeadlineParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeSessionsPastDeadline, arg.ExpiresAt, arg.LastSeenAt, arg.CreatedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setEmailVerified = `-- name: SetEmailVerified :one

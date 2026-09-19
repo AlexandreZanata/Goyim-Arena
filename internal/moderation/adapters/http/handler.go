@@ -18,6 +18,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/moderation/domain"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
 )
@@ -117,6 +118,7 @@ type HandlerConfig struct {
 	QueueCodec      *application.QueueCursorCodec
 	SecurityManager *security.Manager
 	Clock           ports.Clock
+	RateLimit       ratelimit.Protector
 }
 
 // Handler serves the moderation API.
@@ -131,6 +133,7 @@ type Handler struct {
 	codec      *application.QueueCursorCodec
 	security   *security.Manager
 	clock      ports.Clock
+	rateLimit  ratelimit.Protector
 }
 
 // NewHandler constructs a moderation HTTP handler.
@@ -146,6 +149,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 		codec:      cfg.QueueCodec,
 		security:   cfg.SecurityManager,
 		clock:      cfg.Clock,
+		rateLimit:  cfg.RateLimit,
 	}
 }
 
@@ -328,6 +332,42 @@ func (h *Handler) requireAdminGate(w http.ResponseWriter, r *http.Request, ident
 		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindForbidden, "forbidden", "account lacks moderation capability"))
 		return false
 	}
+
+	return h.requireRecentSecondFactor(w, r, identity)
+}
+
+// requireRecentSecondFactor enforces the step-up rule of the administrative
+// surface (P16-T05): holding the capability is not enough, the session must
+// have presented a second factor recently.
+//
+// The rule is stated here rather than inside the assignment lookup because the
+// two facts are different: the assignment says who may, and the session's
+// elevation says which session proved it holds the factor. A session that
+// never presented one is refused, so an operator whose account has a confirmed
+// enrollment but whose session predates it is sent to the step-up endpoint
+// instead of being served the queue.
+func (h *Handler) requireRecentSecondFactor(w http.ResponseWriter, r *http.Request, identity security.AuthIdentity) bool {
+	if h.sessions == nil || h.clock == nil {
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindInternal, "server_error", "second factor freshness unavailable"))
+		return false
+	}
+
+	verifiedAt, elevated, err := h.sessions.MFAVerifiedAt(r.Context(), identity.SessionID)
+	if err != nil {
+		writeModerationProblem(w, r, err)
+		return false
+	}
+	if !elevated {
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindForbidden, "mfa_step_up_required", "administrative access requires a recent second factor"))
+		return false
+	}
+
+	// The window is the module's own step-up window, so the second factor and
+	// the high-impact actions expire together instead of drifting apart.
+	if h.clock.Now().UTC().Sub(verifiedAt) > domain.StepUpWindow {
+		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindForbidden, "mfa_step_up_required", "administrative access requires a recent second factor"))
+		return false
+	}
 	return true
 }
 
@@ -501,9 +541,22 @@ func (h *Handler) DecideCase(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// protect applies the rate limit policy of one action, inside the
+// authentication middleware so the account dimension is available.
+func (h *Handler) protect(action ratelimit.Action, next http.Handler) http.Handler {
+	if h.rateLimit == nil {
+		return next
+	}
+	return h.rateLimit.Protect(action, next)
+}
+
 // RegisterRoutes wires the moderation endpoints into the provided ServeMux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.Handle("POST /api/v1/me/moderation/reports", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.FileReport))))
+	// Filing a report spends a moderator's attention, so it carries a policy.
+	// Filing an appeal does not need one: an appeal is bound to a moderation
+	// action against the caller, and the use case already rejects a second
+	// appeal for the same action, which bounds the volume at its source.
+	mux.Handle("POST /api/v1/me/moderation/reports", withPrivateNoStore(h.privateRoute(h.protect(ratelimit.ActionReportFile, http.HandlerFunc(h.FileReport)))))
 	mux.Handle("POST /api/v1/me/moderation/appeals", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.FileAppeal))))
 	mux.Handle("GET /api/v1/moderation/cases", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.GetQueue))))
 	mux.Handle("POST /api/v1/moderation/cases/{id}/claim", withPrivateNoStore(h.privateRoute(http.HandlerFunc(h.ClaimCase))))
