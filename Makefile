@@ -9,7 +9,7 @@ GOFMT ?= gofmt
 NPM ?= npm
 SQLC ?= $(shell which sqlc 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/sqlc")
 
-.PHONY: fmt fmt-check test-unit test-integration typecheck build-web test-contract generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security typecheck build-web test-contract generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -75,13 +75,20 @@ generate-check:
 	$(SQLC) diff
 	@echo "generate-check: ok"
 
+# test-security executa as regressões críticas do threat model: cache leak,
+# IDOR/ownership, CSRF, replay de webhook, double spend e bypass administrativo.
+# A matriz estrutural em internal/security também exige evidência para cada THR-*.
+test-security:
+	$(GO) test -count=1 ./internal/security/... ./internal/platform/security/... ./internal/arguments/adapters/http/... ./internal/arguments/adapters/postgres/... ./internal/billing/adapters/stripe/... ./internal/billing/application/... ./internal/moderation/adapters/http/... ./internal/moderation/application/... ./internal/positions/adapters/http/... ./internal/transparency/adapters/http/... ./internal/wallet/adapters/http/... ./internal/wallet/adapters/postgres/...
+	@echo "test-security: ok"
+
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-contract typecheck build-web
+verify: fmt-check generate-check test-unit test-integration test-contract test-security typecheck build-web
 	@echo "verify: gates presentes, porém não implementados (falham explicitamente ao serem invocados):"
 	@echo "verify: gates ainda não criados:"
-	@for gate in lint test-security test-e2e test-race test-load-smoke vuln; do \
+	@for gate in lint test-e2e test-race test-load-smoke vuln; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."
