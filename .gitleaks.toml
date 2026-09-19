@@ -1,0 +1,9 @@
+# Test fixtures intentionally use the literal marker REDACTED. It is not a
+# credential and is used to prove redaction behavior; all other matches remain
+# findings, including values that merely resemble this marker.
+[allowlist]
+description = "Literal redaction marker used by security tests"
+regexTarget = "match"
+regexes = [
+  '''REDACTED''',
+]
