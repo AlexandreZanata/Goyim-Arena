@@ -1104,6 +1104,48 @@
         }
       }
     },
+    "/api/v1/search/arenas": {
+      "get": {
+        "operationId": "searchArenas",
+        "summary": "Search public Arenas",
+        "description": "Language-aware PostgreSQL full-text search over public Arenas. Drafts, removed Arenas and private moderation content are excluded; the cursor is signed and keyset-paginated.",
+        "tags": ["search"],
+        "parameters": [
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 200 } },
+          { "name": "language", "in": "query", "required": false, "schema": { "type": "string", "enum": ["pt-BR", "en-US"] } },
+          { "name": "cursor", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 } },
+          { "name": "If-None-Match", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Relevant public Arenas.", "headers": { "ETag": { "schema": { "type": "string" } }, "Cache-Control": { "schema": { "type": "string" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SearchArenaPage" } } } },
+          "304": { "description": "Not modified." },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        }
+      }
+    },
+    "/api/v1/search/arguments": {
+      "get": {
+        "operationId": "searchArguments",
+        "summary": "Search public arguments",
+        "description": "Language-aware PostgreSQL full-text search over published arguments attached to public Arenas. Withdrawn, removed and moderated content is excluded.",
+        "tags": ["search"],
+        "parameters": [
+          { "name": "q", "in": "query", "required": true, "schema": { "type": "string", "minLength": 1, "maxLength": 200 } },
+          { "name": "language", "in": "query", "required": false, "schema": { "type": "string", "enum": ["pt-BR", "en-US"] } },
+          { "name": "cursor", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20 } },
+          { "name": "If-None-Match", "in": "header", "required": false, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Relevant published arguments.", "headers": { "ETag": { "schema": { "type": "string" } }, "Cache-Control": { "schema": { "type": "string" } } }, "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SearchArgumentPage" } } } },
+          "304": { "description": "Not modified." },
+          "400": { "$ref": "#/components/responses/Validation" },
+          "500": { "$ref": "#/components/responses/Internal" }
+        }
+      }
+    },
     "/api/v1/arenas": {
       "get": {
         "operationId": "getArenaFeed",
@@ -3053,6 +3095,36 @@
           "next_cursor": { "type": ["string", "null"], "description": "Opaque signed cursor of the next page; null on the last page." }
         }
       },
+      "SearchArenaPage": {
+        "type": "object",
+        "required": ["items", "next_cursor"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/SearchArenaResult" } },
+          "next_cursor": { "type": ["string", "null"] }
+        }
+      },
+      "SearchArenaResult": {
+        "type": "object",
+        "required": ["id", "slug", "statement", "category", "language", "published_at", "score"],
+        "properties": {
+          "id": { "type": "string" }, "slug": { "type": "string" }, "statement": { "type": "string" }, "category": { "type": "string" }, "language": { "type": "string", "enum": ["pt-BR", "en-US"] }, "published_at": { "type": "string", "format": "date-time" }, "score": { "type": "number", "format": "double", "minimum": 0 }
+        }
+      },
+      "SearchArgumentPage": {
+        "type": "object",
+        "required": ["items", "next_cursor"],
+        "properties": {
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/SearchArgumentResult" } },
+          "next_cursor": { "type": ["string", "null"] }
+        }
+      },
+      "SearchArgumentResult": {
+        "type": "object",
+        "required": ["id", "arena_id", "relation", "content", "language", "created_at", "score"],
+        "properties": {
+          "id": { "type": "string" }, "arena_id": { "type": "string" }, "relation": { "type": "string", "enum": ["support", "oppose", "context"] }, "content": { "type": "string" }, "language": { "type": "string", "enum": ["pt-BR", "en-US"] }, "created_at": { "type": "string", "format": "date-time" }, "score": { "type": "number", "format": "double", "minimum": 0 }
+        }
+      },
       "PositionRequest": {
         "type": "object",
         "description": "The chosen position: the closed vocabulary agree, disagree or undecided. No plan, payment or reputation weight is attached.",
@@ -3457,6 +3529,7 @@
     { "name": "passes", "description": "Authenticated Arena Pass summary and consumption history." },
     { "name": "arenas", "description": "Arena drafts, publication, closing and the public feed." },
     { "name": "arguments", "description": "Argument publication, replies, withdrawal and the public reads." },
+    { "name": "search", "description": "Language-aware PostgreSQL full-text search over public Arenas and arguments." },
     { "name": "persuasion", "description": "Private influence attribution and the public factual counts it feeds." }
   ]
 }
