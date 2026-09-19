@@ -24,6 +24,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/profiling"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/securityheaders"
 )
 
@@ -124,6 +125,27 @@ func runServer(args []string, stdout *os.File) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	var adminServer *httpserver.Server
+	if adminAddr := cfg.AdminAddr(); adminAddr != "" {
+		adminServer, err = httpserver.New(httpserver.Options{
+			Addr:    adminAddr,
+			Handler: profiling.Handler(),
+			Logger:  logger,
+		})
+		if err != nil {
+			return fmt.Errorf("initialize profiling server: %w", err)
+		}
+		if err := adminServer.Listen(); err != nil {
+			return fmt.Errorf("listen profiling server: %w", err)
+		}
+		go func() {
+			if err := adminServer.Run(ctx); err != nil && ctx.Err() == nil {
+				logger.Error("profiling server stopped", slog.String("error", err.Error()))
+			}
+		}()
+		logger.Info("profiling server: listening", slog.String("addr", adminServer.Addr()))
+	}
 
 	if err := server.Listen(); err != nil {
 		return err

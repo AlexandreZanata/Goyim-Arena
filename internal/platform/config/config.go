@@ -14,6 +14,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -27,6 +28,7 @@ import (
 type Config struct {
 	env               Env
 	addr              string
+	adminAddr         string
 	databaseURL       Secret
 	logLevel          LogLevel
 	dbMaxConns        int32
@@ -154,6 +156,7 @@ func Load(environ []string) (Config, error) {
 	known := map[string]bool{
 		"ARENA_ENV":                   true,
 		"ARENA_ADDR":                  true,
+		"ARENA_ADMIN_ADDR":            true,
 		"ARENA_DATABASE_URL":          true,
 		"ARENA_LOG_LEVEL":             true,
 		"ARENA_DB_MAX_CONNS":          true,
@@ -210,6 +213,13 @@ func Load(environ []string) (Config, error) {
 				Variable: "ARENA_ADDR",
 				Problem:  problem,
 			})
+		}
+	}
+
+	if raw, present := values["ARENA_ADMIN_ADDR"]; present {
+		config.adminAddr = raw
+		if problem := validateAdminAddr(raw); problem != "" {
+			validationErrors = append(validationErrors, ValidationError{Variable: "ARENA_ADMIN_ADDR", Problem: problem})
 		}
 	}
 
@@ -397,6 +407,10 @@ func (config Config) IsProduction() bool { return config.env == EnvProduction }
 // Addr returns the HTTP listen address.
 func (config Config) Addr() string { return config.addr }
 
+// AdminAddr returns the optional loopback-only administrative listener address.
+// An empty value disables profiling and other administrative endpoints.
+func (config Config) AdminAddr() string { return config.adminAddr }
+
 // DatabaseURL returns the redacted database DSN.
 func (config Config) DatabaseURL() Secret { return config.databaseURL }
 
@@ -439,6 +453,27 @@ func sameOrigin(left, right string) bool {
 }
 
 // validateAddr enforces a host:port TCP address with a numeric port.
+func validateAdminAddr(raw string) string {
+	host, port, err := net.SplitHostPort(raw)
+	if err != nil || host == "" || port == "" {
+		return fmt.Sprintf("invalid value %q (want a loopback host:port address)", raw)
+	}
+	if host != "localhost" && net.ParseIP(host) == nil {
+		return fmt.Sprintf("invalid host %q (administrative listener must be loopback)", host)
+	}
+	if host != "localhost" {
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			return fmt.Sprintf("invalid host %q (administrative listener must be loopback)", host)
+		}
+	}
+	portNumber, err := strconv.ParseUint(port, 10, 16)
+	if err != nil || portNumber == 0 {
+		return fmt.Sprintf("invalid port %q (want a number between 1 and 65535)", port)
+	}
+	return ""
+}
+
 func validateAddr(raw string) string {
 	host, port, found := strings.Cut(raw, ":")
 	if !found || host == "" {
