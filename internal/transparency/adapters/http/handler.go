@@ -18,6 +18,7 @@ import (
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/i18n"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/transparency/application"
@@ -378,8 +379,7 @@ func writeCacheableJSON(w http.ResponseWriter, r *http.Request, facts, body []by
 	sum := sha256.Sum256(facts)
 	etag := `W/"` + hex.EncodeToString(sum[:]) + `"`
 
-	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(metricsCacheSeconds))
-	w.Header().Set("Vary", "Accept-Encoding")
+	httpcache.Public(w, metricsCacheSeconds)
 	w.Header().Set("ETag", etag)
 
 	if etagMatches(r.Header.Get("If-None-Match"), etag) {

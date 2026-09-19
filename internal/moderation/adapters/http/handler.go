@@ -17,6 +17,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/moderation/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/moderation/domain"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
@@ -156,8 +157,7 @@ func NewHandler(cfg HandlerConfig) *Handler {
 // setPrivateNoStoreHeaders enforces THR-CACHE-01 on moderation routes:
 // everything here is authenticated or restricted.
 func setPrivateNoStoreHeaders(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "private, no-store, no-cache, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
+	httpcache.Private(w)
 }
 
 // withPrivateNoStore guarantees the cache headers even for rejections

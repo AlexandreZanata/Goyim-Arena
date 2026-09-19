@@ -7,8 +7,6 @@
 package http
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -19,6 +17,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
@@ -156,14 +155,12 @@ func NewHandler(cfg HandlerConfig) *Handler {
 
 // setPrivateNoStoreHeaders enforces THR-CACHE-01 on authenticated routes.
 func setPrivateNoStoreHeaders(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "private, no-store, no-cache, must-revalidate")
-	w.Header().Set("Pragma", "no-cache")
+	httpcache.Private(w)
 }
 
 // setPublicCacheHeaders marks a public read as cacheable and revalidatable.
 func setPublicCacheHeaders(w http.ResponseWriter) {
-	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(publicCacheSeconds))
-	w.Header().Set("Vary", "Accept-Encoding")
+	httpcache.Public(w, publicCacheSeconds)
 }
 
 // withPrivateNoStore guarantees the private cache headers even for
@@ -191,13 +188,12 @@ func writePublicJSON(w http.ResponseWriter, r *http.Request, status int, documen
 		return
 	}
 
-	sum := sha256.Sum256(body)
-	etag := `"` + hex.EncodeToString(sum[:]) + `"`
+	etag := httpcache.Validator(body)
 
 	setPublicCacheHeaders(w)
 	w.Header().Set("ETag", etag)
 
-	if etagMatches(r.Header.Get("If-None-Match"), etag) {
+	if httpcache.Matches(r.Header.Get("If-None-Match"), etag) {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}

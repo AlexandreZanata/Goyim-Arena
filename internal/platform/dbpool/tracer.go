@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbbudget"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
 	"github.com/jackc/pgx/v5"
@@ -38,6 +39,9 @@ func newTracer(logger *slog.Logger, clock ports.Clock) *tracer {
 
 // TraceQueryStart records the query metadata and start instant in the context.
 func (t *tracer) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if tracker := dbbudget.FromContext(ctx); tracker != nil {
+		tracker.Start()
+	}
 	state := queryTraceState{
 		sql:       data.SQL,
 		argsCount: len(data.Args),
@@ -71,6 +75,9 @@ func (t *tracer) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, data pgx.Tra
 	var duration time.Duration
 	if t.clock != nil && !state.start.IsZero() {
 		duration = t.clock.Now().Sub(state.start)
+	}
+	if tracker := dbbudget.FromContext(ctx); tracker != nil {
+		tracker.Observe(duration)
 	}
 
 	redactedSQL := sanitizeSQL(state.sql)

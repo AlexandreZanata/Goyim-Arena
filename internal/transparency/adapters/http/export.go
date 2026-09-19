@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/transparency/application"
 )
@@ -235,8 +236,7 @@ func writeExportJSON(w http.ResponseWriter, r *http.Request, body []byte) {
 	sum := sha256.Sum256(body)
 	etag := `"` + hex.EncodeToString(sum[:]) + `"`
 
-	w.Header().Set("Cache-Control", "public, max-age="+strconv.Itoa(exportCacheSeconds))
-	w.Header().Set("Vary", "Accept-Encoding")
+	httpcache.Public(w, exportCacheSeconds)
 	w.Header().Set("ETag", etag)
 
 	if etagMatches(r.Header.Get("If-None-Match"), etag) {

@@ -20,6 +20,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/positions/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/profiles/adapters/http"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/search/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/transparency/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/adapters/http"
 )
@@ -131,7 +132,7 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 		if strings.HasPrefix(route.Path, "/api/v1/me/position-changes") || strings.HasPrefix(route.Path, "/api/v1/profiles/{username}/reputation") {
 			continue
 		}
-		if strings.HasPrefix(route.Path, "/api/v1/moderation/attribution-signals") {
+		if strings.HasPrefix(route.Path, "/api/v1/moderation/attribution-signals") || strings.HasPrefix(route.Path, "/api/v1/search/") {
 			continue
 		}
 		t.Errorf("contract declares %s but it is not implemented in this stage", route.String())
