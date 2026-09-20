@@ -11,6 +11,10 @@ K6 ?= k6
 SQLC ?= $(shell which sqlc 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/sqlc")
 ASSETGEN := $(GO) run ./cmd/assetgen
 
+# Gerador de contratos TypeScript (P18-T02): lê o subconjunto versionado do
+# OpenAPI e emite web/src/contracts/generated.ts (nunca editado à mão).
+CONTRACTGEN := $(GO) run ./tools/contractgen
+
 .PHONY: fmt fmt-check test-unit test-integration test-security typecheck build-web test-contract test-load-smoke generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
@@ -65,17 +69,21 @@ test-contract:
 	$(GO) test ./internal/contract/...
 	@echo "test-contract: ok"
 
-# generate valida os catálogos i18n, reescreve os artefatos gerados
-# e executa a geração de código SQL tipado com sqlc para o adapter PostgreSQL.
+# generate valida os catálogos i18n, reescreve os artefatos gerados, emite os
+# contratos TypeScript do OpenAPI e executa a geração de código SQL tipado com
+# sqlc para o adapter PostgreSQL.
 generate:
 	$(I18NGEN)
+	$(CONTRACTGEN)
 	$(SQLC) generate
 	@echo "generate: ok"
 
-# generate-check valida os catálogos i18n e a ausência de drift no código SQL
-# gerado pelo sqlc, falhando caso os artefatos gerados estejam desatualizados.
+# generate-check valida os catálogos i18n, a ausência de drift nos contratos
+# TypeScript e no código SQL gerado pelo sqlc, falhando caso os artefatos
+# gerados estejam desatualizados.
 generate-check:
 	$(I18NGEN) -check
+	$(CONTRACTGEN) -check
 	$(SQLC) diff
 	@echo "generate-check: ok"
 
