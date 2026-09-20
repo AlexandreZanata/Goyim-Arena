@@ -15,7 +15,7 @@ ASSETGEN := $(GO) run ./cmd/assetgen
 # OpenAPI e emite web/src/contracts/generated.ts (nunca editado à mão).
 CONTRACTGEN := $(GO) run ./tools/contractgen
 
-.PHONY: fmt fmt-check test-unit test-integration test-security typecheck build-web test-contract test-load-smoke generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web test-contract test-load-smoke generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -45,6 +45,14 @@ test-unit:
 test-integration:
 	$(GO) test -v -race ./internal/platform/dbpool/... ./internal/platform/dbtest/... ./internal/platform/postgres/...
 	@echo "test-integration: ok"
+
+# test-web compila o frontend e seus testes com o tsc oficial (strict) e os
+# executa no runner nativo do Node. Nenhuma dependência nova: o runtime
+# entregue ao browser continua sem terceiros, e o harness vive fora de web/src.
+test-web:
+	$(NPM) ci --prefix web
+	$(NPM) --prefix web run test
+	@echo "test-web: ok"
 
 # typecheck roda a checagem estrita de tipos do frontend (tsc --noEmit).
 # npm ci garante instalação reprodutível a partir do package-lock.json.
@@ -110,7 +118,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-contract test-security typecheck build-web
+verify: fmt-check generate-check test-unit test-integration test-contract test-security test-web typecheck build-web
 	@echo "verify: gates presentes, porém não implementados (falham explicitamente ao serem invocados):"
 	@echo "verify: gates ainda não criados:"
 	@for gate in lint test-e2e test-race test-load-smoke vuln; do \

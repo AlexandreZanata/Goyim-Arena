@@ -1,0 +1,47 @@
+/**
+ * Minimal ambient declarations for the frontend test harness (P18-T03).
+ *
+ * The browser runtime has zero third-party dependencies and the build keeps
+ * `typescript` as its only package, so `@types/node` is not available. The
+ * unit tests run on Node's built-in test runner and file system, and only the
+ * exact surface used below is declared. Nothing here reaches `web/src`: these
+ * declarations are compiled solely by `web/tsconfig.test.json`.
+ */
+
+declare module "node:test" {
+  export function test(name: string, fn: () => void | Promise<void>): Promise<void>;
+  export function describe(name: string, fn: () => void): void;
+}
+
+declare module "node:assert/strict" {
+  interface Assert {
+    (value: unknown, message?: string): void;
+    ok(value: unknown, message?: string): void;
+    equal(actual: unknown, expected: unknown, message?: string): void;
+    notEqual(actual: unknown, expected: unknown, message?: string): void;
+    deepEqual(actual: unknown, expected: unknown, message?: string): void;
+    match(value: string, pattern: RegExp, message?: string): void;
+    throws(fn: () => unknown, message?: string): void;
+    rejects(action: Promise<unknown> | (() => Promise<unknown>), message?: string): Promise<void>;
+  }
+  const assert: Assert;
+  export default assert;
+}
+
+declare module "node:fs" {
+  export interface GlobOptions {
+    readonly cwd?: string;
+  }
+  export function globSync(pattern: string, options?: GlobOptions): string[];
+  export function readFileSync(path: string, encoding: "utf8"): string;
+}
+
+declare module "node:path" {
+  export function join(...parts: string[]): string;
+}
+
+/** Node exposes its own module directory on `import.meta`. */
+interface ImportMeta {
+  readonly dirname: string;
+  readonly filename: string;
+}
