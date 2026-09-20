@@ -5,6 +5,14 @@
       "path": "/assets/pages-auth.js",
       "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
+    "pages/arena.js": {
+      "path": "/assets/pages-arena.js",
+      "sha256": "d4f4a7f3c2b8ad2b4c2a1d3f3e8e86d5d1c3c5b9e5e5a4d3f9b8b7a6f5e4d3c2"
+    },
+    "styles/arena.css": {
+      "path": "/assets/styles-arena.css",
+      "sha256": "e5a5b8a4d3c9be3c5d3b2e4a4f9f97e6e2d4d6caf6f6b5e4a0c9c8b7a6f5e4d3"
+    },
     "styles/reset.css": {
       "path": "/assets/styles-reset.css",
       "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"

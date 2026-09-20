@@ -38,6 +38,42 @@ func TestLoadReadsTheAssetDirectory(t *testing.T) {
 	}
 }
 
+// TestLoadReadsTheCursorSecret covers P18-T07B: the key that signs the
+// pagination cursors of the public lists is configuration, it is never
+// printed, and a key too short to be a key is refused at boot instead of
+// failing inside a use case constructor.
+func TestLoadReadsTheCursorSecret(t *testing.T) {
+	t.Parallel()
+
+	unset, err := Load(environ())
+	if err != nil {
+		t.Fatalf("load with no ARENA_* variables: %v", err)
+	}
+	if unset.CursorSecret().IsSet() {
+		t.Error("the cursor secret should be unset without configuration")
+	}
+
+	secret := strings.Repeat("k", 32)
+	configured, err := Load(environ("ARENA_CURSOR_SECRET=" + secret))
+	if err != nil {
+		t.Fatalf("load with ARENA_CURSOR_SECRET: %v", err)
+	}
+	if !configured.CursorSecret().IsSet() {
+		t.Error("the cursor secret was not read from the environment")
+	}
+	if rendered := fmt.Sprintf("%v %#v", configured.CursorSecret(), configured); strings.Contains(rendered, secret) {
+		t.Fatalf("the configured secret leaked into a printable rendering: %s", rendered)
+	}
+
+	_, err = Load(environ("ARENA_CURSOR_SECRET=" + strings.Repeat("k", minCursorSecretLength-1)))
+	if err == nil {
+		t.Fatal("a cursor secret below the minimum key size was accepted")
+	}
+	if !strings.Contains(err.Error(), "ARENA_CURSOR_SECRET") || !strings.Contains(err.Error(), "at least") {
+		t.Errorf("the refusal must name the variable and the key size: %v", err)
+	}
+}
+
 func environ(entries ...string) []string {
 	return append([]string{
 		"HOME=/home/operator",

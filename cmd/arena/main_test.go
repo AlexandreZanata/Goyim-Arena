@@ -412,6 +412,9 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 		"ARENA_ENV=development",
 		"ARENA_DATABASE_URL=" + dsn,
 		"ARENA_ASSETS_DIR=" + assetsDir,
+		// The participation journey (P18-T07B) signs its pagination
+		// cursors; without this key it is deliberately not mounted.
+		"ARENA_CURSOR_SECRET=arena-boot-test-cursor-secret-32b",
 		"PATH=" + os.Getenv("PATH"),
 	}
 	if err := cmdHealthy.Start(); err != nil {
@@ -474,6 +477,42 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 		if contentType := pageResponse.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
 			t.Errorf("GET %s Content-Type = %q, want text/html", page, contentType)
 		}
+	}
+
+	// The transitions of the Arena participation journey are mounted by the
+	// composed binary too (P18-T07B). They are asked without a session, so the
+	// answer is a refusal — what matters is that it is not the 404 of a route
+	// nobody mounted: a declared route whose module is not composed answers
+	// exactly that, and it is indistinguishable from a working journey until
+	// someone tries to use it.
+	for _, transition := range []string{"position", "position/change", "arguments", "attributions"} {
+		path := "/arenas/qualquer-arena/" + transition
+		request, err := http.NewRequest(http.MethodPost, baseURL+path, strings.NewReader(""))
+		if err != nil {
+			t.Fatalf("build POST %s: %v", path, err)
+		}
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode == http.StatusNotFound {
+			t.Errorf("POST %s status = 404: the participation transition is not mounted (body: %.200s)", path, body)
+		}
+	}
+	// The page itself resolves the Arena it names, so an unknown slug is a
+	// not-found answer of the application — HTML, not the plain-text 404 of an
+	// uncomposed route.
+	pageResponse, err := client.Get(baseURL + "/arenas/qualquer-arena")
+	if err != nil {
+		t.Fatalf("GET /arenas/qualquer-arena: %v", err)
+	}
+	body, _ = io.ReadAll(pageResponse.Body)
+	_ = pageResponse.Body.Close()
+	if contentType := pageResponse.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+		t.Errorf("GET /arenas/qualquer-arena Content-Type = %q, want the refusal page of the journey (body: %.200s)", contentType, body)
 	}
 
 	// Terminate healthy server

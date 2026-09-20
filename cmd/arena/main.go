@@ -27,6 +27,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/profiling"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/securityheaders"
 )
 
@@ -132,19 +133,63 @@ func runServer(args []string, stdout *os.File) error {
 		if err != nil {
 			return fmt.Errorf("compose the account journey: %w (run 'make build-web' or point ARENA_ASSETS_DIR at an existing build)", err)
 		}
+
+		// One security boundary for every surface of the process: the CSRF
+		// cookie belongs to the origin, not to a journey, so a person moving
+		// between the account pages and an Arena page must not be refused by
+		// two managers that cannot verify each other's tokens.
+		manager, err := security.New(security.Options{Env: cfg.Env(), Clock: clock, Random: random})
+		if err != nil {
+			return fmt.Errorf("compose the security boundary: %w", err)
+		}
+
 		account, err := bootstrap.ComposeAccount(bootstrap.Options{
-			Env:    cfg.Env(),
-			Logger: logger,
-			Pool:   pool.Pool(),
-			Clock:  clock,
-			Random: random,
-			Assets: manifest,
+			Env:      cfg.Env(),
+			Logger:   logger,
+			Pool:     pool.Pool(),
+			Clock:    clock,
+			Random:   random,
+			Assets:   manifest,
+			Security: manager,
 		})
 		if err != nil {
 			return err
 		}
 		surfaces = append(surfaces, account.Surface())
 		logger.Info("http server: account journey mounted", slog.Int("routes", len(account.Routes())))
+
+		// The participation journey charges INK, so it is composed where the
+		// wallet is: in the same process, over the same pool. Without the
+		// cursor signing secret it cannot paginate a list honestly, so it is
+		// not mounted — and production, which is expected to serve the Arena,
+		// refuses the boot instead of shipping the gap silently.
+		if cfg.CursorSecret().IsSet() {
+			participation, err := bootstrap.ComposeParticipation(bootstrap.Options{
+				Env:          cfg.Env(),
+				Logger:       logger,
+				Pool:         pool.Pool(),
+				Clock:        clock,
+				Random:       random,
+				Assets:       manifest,
+				CursorSecret: []byte(cfg.CursorSecret().Unredacted()),
+				Security:     manager,
+			})
+			if err != nil {
+				return err
+			}
+			surfaces = append(surfaces, participation.Surface())
+			logger.Info("http server: participation journey mounted", slog.Int("routes", len(participation.Routes())))
+		} else if cfg.IsProduction() {
+			return fmt.Errorf(
+				"compose the participation journey: %s is not set, and without a cursor signing secret the Arena pages cannot paginate their lists",
+				config.CursorSecretVariable,
+			)
+		} else {
+			logger.Warn(
+				"http server: participation journey not mounted (ARENA_CURSOR_SECRET is not set); the account pages and the health routes are served",
+				slog.String("variable", config.CursorSecretVariable),
+			)
+		}
 	} else {
 		logger.Warn("http server: account journey not mounted (ARENA_DATABASE_URL is not set); only the health routes are served")
 	}

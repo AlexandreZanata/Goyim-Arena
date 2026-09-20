@@ -30,6 +30,7 @@ type Config struct {
 	addr              string
 	adminAddr         string
 	assetsDir         string
+	cursorSecret      Secret
 	databaseURL       Secret
 	logLevel          LogLevel
 	dbMaxConns        int32
@@ -159,6 +160,7 @@ func Load(environ []string) (Config, error) {
 		"ARENA_ADDR":                  true,
 		"ARENA_ADMIN_ADDR":            true,
 		"ARENA_ASSETS_DIR":            true,
+		"ARENA_CURSOR_SECRET":         true,
 		"ARENA_DATABASE_URL":          true,
 		"ARENA_LOG_LEVEL":             true,
 		"ARENA_DB_MAX_CONNS":          true,
@@ -234,6 +236,18 @@ func Load(environ []string) (Config, error) {
 			})
 		} else {
 			config.assetsDir = raw
+		}
+	}
+
+	if raw, present := values[CursorSecretVariable]; present {
+		problem := validateCursorSecret(raw)
+		if problem == "" {
+			config.cursorSecret = NewSecret(raw)
+		} else {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: CursorSecretVariable,
+				Problem:  problem,
+			})
 		}
 	}
 
@@ -434,6 +448,31 @@ const DefaultAssetsDir = "web/dist"
 // the server resolves through its templates.
 func (config Config) AssetsDir() string { return config.assetsDir }
 
+// CursorSecretVariable signs the pagination cursors of the public lists
+// (P18-T07B). It enters configuration together with the composition that
+// consumes it: a cursor signed with an ephemeral key would stop resolving
+// after a restart, which a person experiences as a page that broke rather
+// than as a security property.
+const CursorSecretVariable = "ARENA_CURSOR_SECRET"
+
+// minCursorSecretLength is the key size the cursor codecs of the modules
+// require. It is repeated here so that a short secret is refused at boot, with
+// the variable named, instead of failing later inside a use case constructor.
+const minCursorSecretLength = 32
+
+// validateCursorSecret enforces the key size of the cursor signing secret.
+func validateCursorSecret(raw string) string {
+	if len(raw) < minCursorSecretLength {
+		return fmt.Sprintf("must be at least %d bytes of entropy (got %d)", minCursorSecretLength, len(raw))
+	}
+	return ""
+}
+
+// CursorSecret returns the redacted signing secret of the pagination cursors.
+// It is unset when nothing configures it, and the composition that needs it
+// refuses to build rather than minting one of its own.
+func (config Config) CursorSecret() Secret { return config.cursorSecret }
+
 // DatabaseURL returns the redacted database DSN.
 func (config Config) DatabaseURL() Secret { return config.databaseURL }
 
@@ -454,6 +493,13 @@ func (config Config) DBMaxConnIdleTime() time.Duration { return config.dbMaxConn
 
 // DBAcquireTimeout returns the timeout for acquiring a connection from the pool.
 func (config Config) DBAcquireTimeout() time.Duration { return config.dbAcquireTimeout }
+
+// GoString implements fmt.GoStringer on the Config itself, because %#v walks
+// the struct fields and would render the secret fields through reflection
+// without consulting their own redacting methods (P18-T07B).
+func (config Config) GoString() string {
+	return config.String()
+}
 
 // String implements fmt.Stringer with a fully redacted representation, so a
 // Config can be safely logged without leaking any value.

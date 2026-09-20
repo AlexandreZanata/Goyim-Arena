@@ -73,6 +73,15 @@ type Options struct {
 	// reference the hashed files through it, so a surface mounted without one
 	// would render links to files that do not exist.
 	Assets assets.Manifest
+	// CursorSecret signs the pagination cursors of the public lists the
+	// participation journey renders. It is required by the journeys that
+	// paginate and ignored by the ones that do not.
+	CursorSecret []byte
+	// Security is the security boundary shared by every surface of the process
+	// (cookies, CSRF, identity in the request context). When nil, a surface
+	// composes its own: correct for a process that serves one journey, and the
+	// reason `arena server` hands the same one to all of them.
+	Security *security.Manager
 }
 
 // AccountSurface is the composed browser journey of the account, ready to be
@@ -94,7 +103,7 @@ type AccountSurface struct {
 // It returns ErrIncompleteComposition — naming what is missing — rather than a
 // surface that would answer some requests and fail others.
 func ComposeAccount(options Options) (*AccountSurface, error) {
-	if err := options.validate(); err != nil {
+	if err := options.validate("account journey"); err != nil {
 		return nil, err
 	}
 
@@ -110,11 +119,7 @@ func ComposeAccount(options Options) (*AccountSurface, error) {
 		return nil, fmt.Errorf("bootstrap: account journey: password hasher: %w", err)
 	}
 
-	manager, err := security.New(security.Options{
-		Env:    options.Env,
-		Clock:  options.Clock,
-		Random: options.Random,
-	})
+	manager, err := options.securityManager()
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: account journey: security manager: %w", err)
 	}
@@ -226,7 +231,10 @@ func (surface *AccountSurface) LocalSink() *fakeemail.Sender {
 
 // validate reports every missing dependency at once, sorted by name, because
 // an operator fixing a boot failure should not discover them one per attempt.
-func (options Options) validate() error {
+// The journey name is a parameter because the same edges compose more than one
+// surface, and a refusal that named the wrong one would send the operator to
+// the wrong part of the configuration.
+func (options Options) validate(journey string) error {
 	missing := make([]string, 0, 5)
 	if options.Logger == nil {
 		missing = append(missing, "logger")
@@ -245,14 +253,14 @@ func (options Options) validate() error {
 	}
 	if len(missing) > 0 {
 		sort.Strings(missing)
-		return fmt.Errorf("%w: account journey: missing %s", ErrIncompleteComposition, strings.Join(missing, ", "))
+		return fmt.Errorf("%w: %s: missing %s", ErrIncompleteComposition, journey, strings.Join(missing, ", "))
 	}
 
 	switch options.Env {
 	case config.EnvDevelopment, config.EnvTest, config.EnvProduction:
 		return nil
 	default:
-		return fmt.Errorf("%w: account journey: environment %q is not one of development, test, production", ErrIncompleteComposition, options.Env)
+		return fmt.Errorf("%w: %s: environment %q is not one of development, test, production", ErrIncompleteComposition, journey, options.Env)
 	}
 }
 
