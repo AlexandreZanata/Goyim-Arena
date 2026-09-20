@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
 )
 
 func runForTest(t *testing.T, args ...string) (string, string, error) {
@@ -518,6 +520,60 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 	_ = pageResponse.Body.Close()
 	if contentType := pageResponse.Header.Get("Content-Type"); strings.HasPrefix(contentType, "text/plain") {
 		t.Errorf("GET /arenas/qualquer-arena answered the placeholder of an uncomposed route (Content-Type %q, body %.200s)", contentType, body)
+	}
+
+	// The build the pages reference is served by the same process (P18-T07C):
+	// the published address of the manifest is immutable for a year, the stable
+	// address of the module graph is revalidated every time, and an address the
+	// manifest never published is not reachable — which is what keeps a broken
+	// stylesheet from being a page that loads nothing.
+	frontend, err := assets.LoadFile(assetsDir)
+	if err != nil {
+		t.Fatalf("read the build manifest: %v", err)
+	}
+	publishedStylesheet, err := frontend.URL("styles/reset.css")
+	if err != nil {
+		t.Fatalf("resolve the published stylesheet: %v", err)
+	}
+	publishedModule, err := frontend.URL("pages/auth.js")
+	if err != nil {
+		t.Fatalf("resolve the published module: %v", err)
+	}
+
+	for _, want := range []struct {
+		target      string
+		contentType string
+		cache       string
+	}{
+		{target: publishedStylesheet, contentType: "text/css; charset=utf-8", cache: assets.CacheHashed},
+		{target: "/assets/styles/reset.css", contentType: "text/css; charset=utf-8", cache: assets.CacheStable},
+		{target: publishedModule, contentType: "text/javascript; charset=utf-8", cache: assets.CacheHashed},
+	} {
+		response, err := client.Get(baseURL + want.target)
+		if err != nil {
+			t.Fatalf("GET %s: %v", want.target, err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200 (body: %.200s)", want.target, response.StatusCode, body)
+			continue
+		}
+		if contentType := response.Header.Get("Content-Type"); contentType != want.contentType {
+			t.Errorf("GET %s Content-Type = %q, want %q", want.target, contentType, want.contentType)
+		}
+		if cache := response.Header.Get("Cache-Control"); cache != want.cache {
+			t.Errorf("GET %s Cache-Control = %q, want %q", want.target, cache, want.cache)
+		}
+	}
+
+	undeclared, err := client.Get(baseURL + "/assets/styles/private.css")
+	if err != nil {
+		t.Fatalf("GET an undeclared asset: %v", err)
+	}
+	_ = undeclared.Body.Close()
+	if undeclared.StatusCode != http.StatusNotFound {
+		t.Errorf("GET an address the manifest does not declare = %d, want 404", undeclared.StatusCode)
 	}
 
 	// Terminate healthy server

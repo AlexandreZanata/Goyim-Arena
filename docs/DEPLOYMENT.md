@@ -56,7 +56,7 @@ Nunca copiar banco de produção integral para desenvolvimento. Fixtures e dados
 7. Smoke tests exercitam leitura, autenticação e dependências críticas.
 8. Falha faz rollback da aplicação; migration destrutiva nunca depende de `down` automático.
 
-### Requisitos de boot do `arena server` (P18-T07A, P18-T07B)
+### Requisitos de boot do `arena server` (P18-T07A, P18-T07B, P18-T07C)
 
 O processo compõe as jornadas que serve a partir da configuração, e recusa o boot quando falta o que elas exigem:
 
@@ -64,6 +64,8 @@ O processo compõe as jornadas que serve a partir da configuração, e recusa o 
 - a jornada de participação da Arena (`/arenas/{slug}` e as quatro transições) entra junto, sobre o mesmo pool: é ela que cobra INK, e a publicação de um argumento debita a carteira na mesma transação em que grava o argumento. Ela exige `ARENA_CURSOR_SECRET` (mínimo de 32 bytes) porque assina os cursores das listas públicas; um cursor assinado com chave efêmera deixaria de resolver depois de um reinício, o que a pessoa vive como uma página que quebrou. Em desenvolvimento e teste, sem a variável a jornada **não** é montada e o log diz exatamente isso; em produção o boot é recusado, porque o Arena é o produto;
 - sem a DSN o processo serve somente as rotas de health e registra isso no log: um processo que responde 404 em toda página enquanto se declara pronto é pior que uma sonda que diz o que é;
 - em produção, a jornada de conta recusa a composição enquanto não existir um adapter de entrega de email (a P15 compôs a fila durável; a entrega pelo provedor ainda é um trabalho pendente), porque um cadastro cujo link de confirmação não sai não é uma jornada. Em desenvolvimento e teste a composição instala o sink local do módulo de identidade e avisa no log que as mensagens são registradas e não entregues.
+
+- o build referenciado pelas páginas é servido pelo **mesmo processo**, a partir do manifest que ele já lê: a superfície publica exatamente os endereços que o build declarou e nada mais. É conteúdo, não operação: ela não entra no registro de rotas nem no contrato OpenAPI (um CSS não é um endpoint), e a política de cache é a da seção 9 — nome com hash `immutable` por um ano, caminho estável do grafo ESM com revalidação. Um endereço que o manifest não publicou responde 404, não há listagem de diretório e um caminho que tente sair do diretório do build não é filtrado, é irrepresentável: a lista de endereços é montada na composição a partir do manifest, e um manifest que descreva algo fora do build recusa o boot.
 
 As rotas que o registro declara e nenhuma superfície monta continuam respondendo como placeholder: o processo declara o contrato inteiro e serve o que foi composto.
 

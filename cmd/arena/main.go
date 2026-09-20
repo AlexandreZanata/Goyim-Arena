@@ -83,19 +83,23 @@ func run(args []string, stdout *os.File) error {
 	return nil
 }
 
-// runServer boots the hardened HTTP server (P02-T05) and composes the module
-// surfaces it serves (P18-T07A): typed configuration from the environment, the
-// structured JSON logger, request ID correlation, the account browser journey
-// mounted on the platform mux, and a graceful shutdown on SIGTERM/SIGINT. It
-// is the process edge — the only place allowed to own signals and the real
+// runServer boots the hardened HTTP server (P02-T05) and composes the surfaces
+// it serves (P18-T07A, P18-T07B, P18-T07C): typed configuration from the
+// environment, the structured JSON logger, request ID correlation, the account
+// and participation browser journeys, the frontend build they reference, all
+// mounted on the platform mux, and a graceful shutdown on SIGTERM/SIGINT. It is
+// the process edge — the only place allowed to own signals and the real
 // clock/randomness sources.
 //
-// With ARENA_DATABASE_URL set, the account journey is composed and served; the
-// frontend build named by ARENA_ASSETS_DIR is required for it, because a page
-// mounted without its manifest would render links to files that do not exist.
-// Without the DSN the process serves the health routes only and says so in the
-// log: an application that answers 404 on every page while reporting itself
-// ready is worse than a probe that declares what it is.
+// With ARENA_DATABASE_URL set, the account and participation journeys are
+// composed and served, and so is the frontend build named by ARENA_ASSETS_DIR:
+// the pages reference hashed addresses and the process publishes exactly the
+// ones its manifest declares (P18-T07C). A page mounted without its manifest
+// would render links to files that do not exist, and a build without the
+// process that serves it is a page that loads nothing. Without the DSN the
+// process serves the health routes only and says so in the log: an application
+// that answers 404 on every page while reporting itself ready is worse than a
+// probe that declares what it is.
 func runServer(args []string, stdout *os.File) error {
 	if len(args) > 0 {
 		return fmt.Errorf("server takes no arguments\n\nUsage: arena server")
@@ -133,6 +137,21 @@ func runServer(args []string, stdout *os.File) error {
 		if err != nil {
 			return fmt.Errorf("compose the account journey: %w (run 'make build-web' or point ARENA_ASSETS_DIR at an existing build)", err)
 		}
+
+		// The build the pages reference is served by this same process, from
+		// the manifest that was just read: a page whose stylesheet and module
+		// answer 404 is a broken page, and no deployment step should have to
+		// guess which addresses the build published (P18-T07C).
+		frontend, err := assets.NewServer(assets.Config{
+			Directory: cfg.AssetsDir(),
+			Manifest:  manifest,
+			Logger:    logger,
+		})
+		if err != nil {
+			return fmt.Errorf("compose the frontend build: %w", err)
+		}
+		surfaces = append(surfaces, httpserver.Surface{Static: true, Register: frontend.Mount})
+		logger.Info("http server: frontend build served", slog.String("prefix", frontend.Prefix()))
 
 		// One security boundary for every surface of the process: the CSRF
 		// cookie belongs to the origin, not to a journey, so a person moving

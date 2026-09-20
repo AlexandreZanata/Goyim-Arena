@@ -323,6 +323,11 @@ func TestNewMuxWithRefusesSurfacesItCannotServe(t *testing.T) {
 			want:     "declares no routes",
 		},
 		{
+			name:     "a static surface that claims a route of the registry",
+			surfaces: []httpserver.Surface{{Routes: surface, Register: ok, Static: true}},
+			want:     "is static and declares",
+		},
+		{
 			name:     "a route the registry does not declare",
 			surfaces: []httpserver.Surface{{Routes: undeclared, Register: ok}},
 			want:     "does not declare",
@@ -362,6 +367,53 @@ func TestNewMuxWithRefusesSurfacesItCannotServe(t *testing.T) {
 				t.Errorf("NewMuxWith() error = %q, want it to report %q", err, testCase.want)
 			}
 		})
+	}
+}
+
+// TestNewMuxWithServesAStaticSurface covers P18-T07C: the frontend build is
+// content, not an operation, so it is mounted inside the platform stack without
+// entering the registry the contract is compared with — the router knows the
+// address space because the surface registers it, not because a route declares
+// it.
+func TestNewMuxWithServesAStaticSurface(t *testing.T) {
+	t.Parallel()
+
+	const prefix = "/assets"
+	handler, err := httpserver.NewMuxWith(
+		stubIDs{value: "static-id"}, nil, securityheaders.Config{},
+		[]httpserver.Surface{{
+			Static: true,
+			Register: func(mux *http.ServeMux) error {
+				mux.HandleFunc("GET "+prefix+"/", func(writer http.ResponseWriter, request *http.Request) {
+					writer.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					_, _ = writer.Write([]byte("/* build */"))
+				})
+				return nil
+			},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewMuxWith() error = %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, prefix+"/styles/arena-abc123.css", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET an address of the static surface = %d, want 200", recorder.Code)
+	}
+	if recorder.Header().Get("X-Request-Id") == "" {
+		t.Error("the static surface answered outside the platform middleware: no request id")
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Errorf("Cache-Control = %q, want the policy the surface set", got)
+	}
+
+	// A route the registry declares is still answered by the placeholder when
+	// no module surface claims it: the static surface declares nothing.
+	placeholder := httptest.NewRecorder()
+	handler.ServeHTTP(placeholder, httptest.NewRequest(http.MethodGet, surfacePath, nil))
+	if placeholder.Code != http.StatusNotFound {
+		t.Errorf("GET %s = %d, want the placeholder of an uncomposed route", surfacePath, placeholder.Code)
 	}
 }
 

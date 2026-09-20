@@ -298,11 +298,18 @@ func NewMux(ids ports.IDGenerator, locales *locale.Resolver, security securityhe
 // mounting on top of them.
 type Surface struct {
 	// Routes is the surface route list, in the same vocabulary the registry
-	// and the contract use.
+	// and the contract use. A static surface declares none: its addresses are
+	// published by the asset manifest, not by the registry.
 	Routes []Route
 	// Register installs the surface on the mux. A registration that fails
 	// aborts the composition.
 	Register func(mux *http.ServeMux) error
+	// Static marks a surface that serves content a build declares — today the
+	// hashed frontend build (P18-T07C) — instead of application endpoints. It
+	// is mounted inside the same middleware stack, but it takes no part in the
+	// registry/contract comparison, because a stylesheet is not an operation of
+	// the API. Declaring a route beside Static is contradictory and refused.
+	Static bool
 }
 
 // NewMuxWith composes the same router as NewMux and additionally mounts the
@@ -334,6 +341,12 @@ func NewMuxWith(ids ports.IDGenerator, locales *locale.Resolver, security securi
 	for index, surface := range surfaces {
 		if surface.Register == nil {
 			return nil, fmt.Errorf("httpserver: surface %d registers nothing", index)
+		}
+		if surface.Static {
+			if len(surface.Routes) != 0 {
+				return nil, fmt.Errorf("httpserver: surface %d is static and declares %d routes; static content is published by its build, not by the registry", index, len(surface.Routes))
+			}
+			continue
 		}
 		if len(surface.Routes) == 0 {
 			return nil, fmt.Errorf("httpserver: surface %d declares no routes", index)
