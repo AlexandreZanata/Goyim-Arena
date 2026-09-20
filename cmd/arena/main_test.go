@@ -502,17 +502,22 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 			t.Errorf("POST %s status = 404: the participation transition is not mounted (body: %.200s)", path, body)
 		}
 	}
-	// The page itself resolves the Arena it names, so an unknown slug is a
-	// not-found answer of the application — HTML, not the plain-text 404 of an
-	// uncomposed route.
+	// The page is the same claim for the read: it is answered by the composed
+	// surface instead of by the placeholder of an uncomposed module. What the
+	// surface answers depends on the database this process was pointed at — the
+	// refusal page when the schema is there, an RFC 9457 problem document when
+	// it is not — and both are documents of the journey, while the placeholder
+	// answers net/http's plain-text 404. The rendered page over a migrated
+	// database is asserted where it can be set up: internal/bootstrap composes
+	// the journey against a disposable one.
 	pageResponse, err := client.Get(baseURL + "/arenas/qualquer-arena")
 	if err != nil {
 		t.Fatalf("GET /arenas/qualquer-arena: %v", err)
 	}
 	body, _ = io.ReadAll(pageResponse.Body)
 	_ = pageResponse.Body.Close()
-	if contentType := pageResponse.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
-		t.Errorf("GET /arenas/qualquer-arena Content-Type = %q, want the refusal page of the journey (body: %.200s)", contentType, body)
+	if contentType := pageResponse.Header.Get("Content-Type"); strings.HasPrefix(contentType, "text/plain") {
+		t.Errorf("GET /arenas/qualquer-arena answered the placeholder of an uncomposed route (Content-Type %q, body %.200s)", contentType, body)
 	}
 
 	// Terminate healthy server
