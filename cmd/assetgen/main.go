@@ -101,12 +101,24 @@ func generate(inputs []string, output, manifestPath string) error {
 		digest := sha256.Sum256(body)
 		hexDigest := hex.EncodeToString(digest[:])
 		hashedPath := hashedName(key, hexDigest[:12])
-		destination := filepath.Join(output, filepath.FromSlash(hashedPath))
-		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-			return fmt.Errorf("assetgen: create asset directory: %w", err)
-		}
-		if err := os.WriteFile(destination, body, 0o644); err != nil {
-			return fmt.Errorf("assetgen: write %s: %w", hashedPath, err)
+		for _, destination := range []string{hashedPath, key} {
+			// Two names of the same bytes, for two different readers.
+			//
+			// The manifest publishes the hashed one, and that is the address
+			// the server-rendered pages reference: immutable, one year. The
+			// stable one is what an ES module graph needs, because a module
+			// resolves its own imports by relative path and cannot know a hash
+			// that changes with the content (P18-T05 is the first consumer of
+			// the pipeline that imports another module). The stable names are
+			// served with revalidation rather than immutability, which
+			// docs/DEPLOYMENT.md section 9 records.
+			path := filepath.Join(output, filepath.FromSlash(destination))
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				return fmt.Errorf("assetgen: create asset directory: %w", err)
+			}
+			if err := os.WriteFile(path, body, 0o644); err != nil {
+				return fmt.Errorf("assetgen: write %s: %w", destination, err)
+			}
 		}
 		result.Assets[key] = asset{Path: "/assets/" + hashedPath, SHA256: hexDigest}
 	}

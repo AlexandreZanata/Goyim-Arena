@@ -100,6 +100,7 @@ Adicionar uma stack própria de métricas só quando a solução do provedor dei
 Ponto de partida a validar:
 
 - assets com hash: um ano, `immutable`;
+- o grafo de módulos ESM também sob o caminho estável (`/assets/pages/auth.js` importa `./submission.js`): o hash não serve para imports relativos, então o caminho estável é servido com revalidação curta (`no-cache`) em vez de imutabilidade; a entrada referenciada pelo HTML é sempre a com hash;
 - home e categorias: aproximadamente 10–30 segundos no edge;
 - Arena e fragmentos públicos: aproximadamente 30 segundos no edge;
 - exportações públicas: TTL curto com ETag;

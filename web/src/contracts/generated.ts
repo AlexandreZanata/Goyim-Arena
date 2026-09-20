@@ -179,6 +179,34 @@ export interface AttributionSignals {
   readonly window_seconds: number;
 }
 
+export interface AuthCodeForm {
+  readonly csrf_token: string;
+  readonly token: string;
+}
+
+export interface AuthLoginForm {
+  readonly csrf_token: string;
+  readonly email: string;
+  readonly password: string;
+}
+
+export interface AuthPasswordResetForm {
+  readonly csrf_token: string;
+  readonly password: string;
+  readonly token: string;
+}
+
+export interface AuthRecoveryRequestForm {
+  readonly csrf_token: string;
+  readonly email: string;
+}
+
+export interface AuthRegisterForm {
+  readonly csrf_token: string;
+  readonly email: string;
+  readonly password: string;
+}
+
 export interface BillingCheckout {
   readonly amount_minor: number;
   readonly currency: "BRL" | "USD";

@@ -14,6 +14,7 @@ import (
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/arguments/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/http"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/contract"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/html"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/moderation/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/persuasion/adapters/http"
@@ -24,6 +25,20 @@ import (
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/transparency/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/adapters/http"
 )
+
+// browserJourney are the HTML routes of the account surface (P18-T05). They are
+// declared in the contract like every other route, and the table exists so the
+// "implemented in this stage" scan can tell a page that serves documents to a
+// person from an API route the contract declares but the binary does not mount
+// yet.
+var browserJourney = map[string]bool{
+	"/register":      true,
+	"/verify":        true,
+	"/login":         true,
+	"/logout":        true,
+	"/reset":         true,
+	"/reset/confirm": true,
+}
 
 // repoRoot locates the checkout root from this package's directory.
 func repoRoot(t *testing.T) string {
@@ -121,6 +136,9 @@ func TestContractRoutesMatchRegisteredRoutes(t *testing.T) {
 			continue
 		}
 		if route.Path == "/d/{slug}" {
+			continue
+		}
+		if browserJourney[route.Path] {
 			continue
 		}
 		if route.Path == "/api/v1/public/transparency" || route.Path == "/transparency" {
@@ -618,6 +636,93 @@ func TestContractArenaDocumentRoute(t *testing.T) {
 	} {
 		if !strings.Contains(operation, marker) {
 			t.Errorf("/d/{slug} operation must document %q", marker)
+		}
+	}
+}
+
+// TestContractBrowserAuthJourneyStaysPrivate is the contract-level proof of
+// P18-T05: the six paths of the browser journey declare both operations, the
+// pages are never publicly cacheable, the double submit is documented as a body
+// field (a browser form cannot set the CSRF header), and the two transitions
+// that must not answer questions about accounts — registration and the recovery
+// request — are documented as uniform.
+func TestContractBrowserAuthJourneyStaysPrivate(t *testing.T) {
+	t.Parallel()
+
+	document := loadContract(t)
+
+	for path := range browserJourney {
+		operations, ok := document.Paths[path]
+		if !ok {
+			t.Fatalf("contract is missing %s", path)
+		}
+		for _, method := range []string{"get", "post"} {
+			operation, ok := operations[method]
+			if !ok {
+				t.Errorf("%s is missing the %s operation", path, strings.ToUpper(method))
+				continue
+			}
+			text := string(operation)
+			// A read always answers a document; a mutation may answer one, and
+			// the two transitions answer a redirect instead.
+			if method == "get" && !strings.Contains(text, "text/html") {
+				t.Errorf("GET %s must answer a document", path)
+			}
+			if method == "post" && !strings.Contains(text, "text/html") && !strings.Contains(text, `"303"`) {
+				t.Errorf("POST %s must answer a document or a redirect", path)
+			}
+			if strings.Contains(text, "public, max-age") {
+				t.Errorf("%s %s must never be publicly cacheable", path, strings.ToUpper(method))
+			}
+		}
+	}
+
+	// The mutations that accept a submitted document declare the form body and
+	// its CSRF field: that is the double submit this surface can perform.
+	for path, schema := range map[string]string{
+		"/register":      "AuthRegisterForm",
+		"/login":         "AuthLoginForm",
+		"/verify":        "AuthCodeForm",
+		"/reset":         "AuthRecoveryRequestForm",
+		"/reset/confirm": "AuthPasswordResetForm",
+	} {
+		operation := string(document.Paths[path]["post"])
+		if !strings.Contains(operation, "application/x-www-form-urlencoded") {
+			t.Errorf("POST %s must declare the form body it accepts", path)
+		}
+		if !strings.Contains(operation, "#/components/schemas/"+schema) {
+			t.Errorf("POST %s must declare the %s schema", path, schema)
+		}
+		raw, ok := document.Components.Schemas[schema]
+		if !ok {
+			t.Fatalf("components.schemas.%s is missing", schema)
+		}
+		if !strings.Contains(string(raw), `"required": [`) || !strings.Contains(string(raw), `"csrf_token"`) {
+			t.Errorf("%s must require the csrf_token field", schema)
+		}
+	}
+
+	// Signing out and confirming are transitions, not documents: the answers are
+	// redirects, so a reload cannot resubmit credentials or end a second time.
+	signOut := string(document.Paths["/logout"]["post"])
+	for _, marker := range []string{`"303"`, "/login"} {
+		if !strings.Contains(signOut, marker) {
+			t.Errorf("POST /logout must document %q", marker)
+		}
+	}
+	signIn := string(document.Paths["/login"]["post"])
+	for _, marker := range []string{`"303"`, `"401"`, "uniform"} {
+		if !strings.Contains(signIn, marker) {
+			t.Errorf("POST /login must document %q", marker)
+		}
+	}
+
+	// The two answers that must not tell the two cases apart are documented as
+	// uniform, which is the property that keeps the page from becoming an
+	// account-existence oracle.
+	for _, path := range []string{"/register", "/reset"} {
+		if operation := string(document.Paths[path]["post"]); !strings.Contains(operation, "uniform") {
+			t.Errorf("POST %s must document the uniform answer", path)
 		}
 	}
 }

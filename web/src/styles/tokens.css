@@ -72,6 +72,10 @@
 
     /* Component sizing */
     --ga-control-max-inline-size: 28rem;
+
+    /* Reading measure: the widest a column of prose and a form may grow before
+     * the line length stops being readable (P18-T05, the account journey). */
+    --ga-measure-max-inline-size: 34rem;
   }
 
   @media (prefers-reduced-motion: reduce) {

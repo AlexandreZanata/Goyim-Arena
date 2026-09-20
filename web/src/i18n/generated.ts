@@ -13,6 +13,72 @@ export const messageKeys = {
     "arenas.document.status.published",
     "arenas.document.status.restricted",
   ] as const,
+  auth: [
+    "auth.brand",
+    "auth.errors.csrf_detail",
+    "auth.errors.csrf_title",
+    "auth.errors.invalid_code",
+    "auth.errors.invalid_credentials",
+    "auth.errors.invalid_email",
+    "auth.errors.required",
+    "auth.errors.summary_title",
+    "auth.errors.weak_password",
+    "auth.field.code_hint",
+    "auth.field.code_label",
+    "auth.field.email_hint",
+    "auth.field.email_label",
+    "auth.field.new_password_label",
+    "auth.field.password_hint",
+    "auth.field.password_label",
+    "auth.login.busy",
+    "auth.login.heading",
+    "auth.login.intro",
+    "auth.login.page_title",
+    "auth.login.reset_action",
+    "auth.login.submit",
+    "auth.logout.busy",
+    "auth.logout.heading",
+    "auth.logout.intro",
+    "auth.logout.page_title",
+    "auth.logout.submit",
+    "auth.nav.label",
+    "auth.nav.login",
+    "auth.nav.register",
+    "auth.nav.reset",
+    "auth.nav.verify",
+    "auth.register.busy",
+    "auth.register.heading",
+    "auth.register.intro",
+    "auth.register.notice_action",
+    "auth.register.notice_detail",
+    "auth.register.notice_heading",
+    "auth.register.page_title",
+    "auth.register.submit",
+    "auth.reset.busy",
+    "auth.reset.confirm_busy",
+    "auth.reset.confirm_heading",
+    "auth.reset.confirm_intro",
+    "auth.reset.confirm_page_title",
+    "auth.reset.confirm_submit",
+    "auth.reset.confirm_success_action",
+    "auth.reset.confirm_success_detail",
+    "auth.reset.confirm_success_heading",
+    "auth.reset.heading",
+    "auth.reset.intro",
+    "auth.reset.notice_action",
+    "auth.reset.notice_detail",
+    "auth.reset.notice_heading",
+    "auth.reset.page_title",
+    "auth.reset.submit",
+    "auth.verify.busy",
+    "auth.verify.heading",
+    "auth.verify.intro",
+    "auth.verify.page_title",
+    "auth.verify.submit",
+    "auth.verify.success_action",
+    "auth.verify.success_detail",
+    "auth.verify.success_heading",
+  ] as const,
   email: [
     "email.greeting",
     "email.password_changed.lead",
@@ -62,6 +128,70 @@ export type MessageKey =
   | "arenas.document.status.closed"
   | "arenas.document.status.published"
   | "arenas.document.status.restricted"
+  | "auth.brand"
+  | "auth.errors.csrf_detail"
+  | "auth.errors.csrf_title"
+  | "auth.errors.invalid_code"
+  | "auth.errors.invalid_credentials"
+  | "auth.errors.invalid_email"
+  | "auth.errors.required"
+  | "auth.errors.summary_title"
+  | "auth.errors.weak_password"
+  | "auth.field.code_hint"
+  | "auth.field.code_label"
+  | "auth.field.email_hint"
+  | "auth.field.email_label"
+  | "auth.field.new_password_label"
+  | "auth.field.password_hint"
+  | "auth.field.password_label"
+  | "auth.login.busy"
+  | "auth.login.heading"
+  | "auth.login.intro"
+  | "auth.login.page_title"
+  | "auth.login.reset_action"
+  | "auth.login.submit"
+  | "auth.logout.busy"
+  | "auth.logout.heading"
+  | "auth.logout.intro"
+  | "auth.logout.page_title"
+  | "auth.logout.submit"
+  | "auth.nav.label"
+  | "auth.nav.login"
+  | "auth.nav.register"
+  | "auth.nav.reset"
+  | "auth.nav.verify"
+  | "auth.register.busy"
+  | "auth.register.heading"
+  | "auth.register.intro"
+  | "auth.register.notice_action"
+  | "auth.register.notice_detail"
+  | "auth.register.notice_heading"
+  | "auth.register.page_title"
+  | "auth.register.submit"
+  | "auth.reset.busy"
+  | "auth.reset.confirm_busy"
+  | "auth.reset.confirm_heading"
+  | "auth.reset.confirm_intro"
+  | "auth.reset.confirm_page_title"
+  | "auth.reset.confirm_submit"
+  | "auth.reset.confirm_success_action"
+  | "auth.reset.confirm_success_detail"
+  | "auth.reset.confirm_success_heading"
+  | "auth.reset.heading"
+  | "auth.reset.intro"
+  | "auth.reset.notice_action"
+  | "auth.reset.notice_detail"
+  | "auth.reset.notice_heading"
+  | "auth.reset.page_title"
+  | "auth.reset.submit"
+  | "auth.verify.busy"
+  | "auth.verify.heading"
+  | "auth.verify.intro"
+  | "auth.verify.page_title"
+  | "auth.verify.submit"
+  | "auth.verify.success_action"
+  | "auth.verify.success_detail"
+  | "auth.verify.success_heading"
   | "email.greeting"
   | "email.password_changed.lead"
   | "email.password_changed.subject"
@@ -105,6 +235,70 @@ export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = 
   "arenas.document.status.closed": [],
   "arenas.document.status.published": [],
   "arenas.document.status.restricted": [],
+  "auth.brand": [],
+  "auth.errors.csrf_detail": [],
+  "auth.errors.csrf_title": [],
+  "auth.errors.invalid_code": [],
+  "auth.errors.invalid_credentials": [],
+  "auth.errors.invalid_email": [],
+  "auth.errors.required": [],
+  "auth.errors.summary_title": [],
+  "auth.errors.weak_password": ["min"],
+  "auth.field.code_hint": [],
+  "auth.field.code_label": [],
+  "auth.field.email_hint": [],
+  "auth.field.email_label": [],
+  "auth.field.new_password_label": [],
+  "auth.field.password_hint": ["min"],
+  "auth.field.password_label": [],
+  "auth.login.busy": [],
+  "auth.login.heading": [],
+  "auth.login.intro": [],
+  "auth.login.page_title": [],
+  "auth.login.reset_action": [],
+  "auth.login.submit": [],
+  "auth.logout.busy": [],
+  "auth.logout.heading": [],
+  "auth.logout.intro": [],
+  "auth.logout.page_title": [],
+  "auth.logout.submit": [],
+  "auth.nav.label": [],
+  "auth.nav.login": [],
+  "auth.nav.register": [],
+  "auth.nav.reset": [],
+  "auth.nav.verify": [],
+  "auth.register.busy": [],
+  "auth.register.heading": [],
+  "auth.register.intro": [],
+  "auth.register.notice_action": [],
+  "auth.register.notice_detail": [],
+  "auth.register.notice_heading": [],
+  "auth.register.page_title": [],
+  "auth.register.submit": [],
+  "auth.reset.busy": [],
+  "auth.reset.confirm_busy": [],
+  "auth.reset.confirm_heading": [],
+  "auth.reset.confirm_intro": [],
+  "auth.reset.confirm_page_title": [],
+  "auth.reset.confirm_submit": [],
+  "auth.reset.confirm_success_action": [],
+  "auth.reset.confirm_success_detail": [],
+  "auth.reset.confirm_success_heading": [],
+  "auth.reset.heading": [],
+  "auth.reset.intro": [],
+  "auth.reset.notice_action": [],
+  "auth.reset.notice_detail": [],
+  "auth.reset.notice_heading": [],
+  "auth.reset.page_title": [],
+  "auth.reset.submit": [],
+  "auth.verify.busy": [],
+  "auth.verify.heading": [],
+  "auth.verify.intro": [],
+  "auth.verify.page_title": [],
+  "auth.verify.submit": [],
+  "auth.verify.success_action": [],
+  "auth.verify.success_detail": [],
+  "auth.verify.success_heading": [],
   "email.greeting": [],
   "email.password_changed.lead": [],
   "email.password_changed.subject": [],
@@ -149,6 +343,70 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "arenas.document.status.closed": "Closed",
     "arenas.document.status.published": "Published",
     "arenas.document.status.restricted": "Restricted",
+    "auth.brand": "Goyim Arena",
+    "auth.errors.csrf_detail": "The form protection expired. Reload the page and submit it again.",
+    "auth.errors.csrf_title": "The page is no longer valid",
+    "auth.errors.invalid_code": "The code is invalid, expired or already used.",
+    "auth.errors.invalid_credentials": "Invalid email or password.",
+    "auth.errors.invalid_email": "Enter a valid email address.",
+    "auth.errors.required": "Fill in this field.",
+    "auth.errors.summary_title": "Fix the fields below",
+    "auth.errors.weak_password": "The password must be at least {min} characters long.",
+    "auth.field.code_hint": "Paste the code we sent by email.",
+    "auth.field.code_label": "Code",
+    "auth.field.email_hint": "We use this address to confirm the account and to tell you when it changes.",
+    "auth.field.email_label": "Email",
+    "auth.field.new_password_label": "New password",
+    "auth.field.password_hint": "At least {min} characters.",
+    "auth.field.password_label": "Password",
+    "auth.login.busy": "Signing in…",
+    "auth.login.heading": "Sign in",
+    "auth.login.intro": "Use the email and the password of your account.",
+    "auth.login.page_title": "Sign in — Goyim Arena",
+    "auth.login.reset_action": "Forgot my password",
+    "auth.login.submit": "Sign in",
+    "auth.logout.busy": "Ending the session…",
+    "auth.logout.heading": "End session",
+    "auth.logout.intro": "Ending the session in this browser ends the access until you sign in again.",
+    "auth.logout.page_title": "End session — Goyim Arena",
+    "auth.logout.submit": "End session",
+    "auth.nav.label": "Account navigation",
+    "auth.nav.login": "Sign in",
+    "auth.nav.register": "Create account",
+    "auth.nav.reset": "Recover access",
+    "auth.nav.verify": "Confirm email",
+    "auth.register.busy": "Creating the account…",
+    "auth.register.heading": "Create account",
+    "auth.register.intro": "Create your account to take part in the Arenas. We will send a code to confirm your email.",
+    "auth.register.notice_action": "Confirm email",
+    "auth.register.notice_detail": "If this address does not already have a confirmed account, we sent a verification code. Use the code on the confirmation page.",
+    "auth.register.notice_heading": "Check your email",
+    "auth.register.page_title": "Create account — Goyim Arena",
+    "auth.register.submit": "Create account",
+    "auth.reset.busy": "Sending the code…",
+    "auth.reset.confirm_busy": "Saving the new password…",
+    "auth.reset.confirm_heading": "Set a new password",
+    "auth.reset.confirm_intro": "Enter the recovery code and the new password. Every older session will be ended.",
+    "auth.reset.confirm_page_title": "Set a new password — Goyim Arena",
+    "auth.reset.confirm_submit": "Save the new password",
+    "auth.reset.confirm_success_action": "Sign in",
+    "auth.reset.confirm_success_detail": "Your password was changed and every older session was ended.",
+    "auth.reset.confirm_success_heading": "Password changed",
+    "auth.reset.heading": "Recover access",
+    "auth.reset.intro": "Enter the email of your account to receive a recovery code.",
+    "auth.reset.notice_action": "I already have the code",
+    "auth.reset.notice_detail": "If an account exists for this address, we sent a recovery code. Use the code to set a new password.",
+    "auth.reset.notice_heading": "Check your email",
+    "auth.reset.page_title": "Recover access — Goyim Arena",
+    "auth.reset.submit": "Send code",
+    "auth.verify.busy": "Checking the code…",
+    "auth.verify.heading": "Confirm email",
+    "auth.verify.intro": "Enter the code we sent to your email to activate the account.",
+    "auth.verify.page_title": "Confirm email — Goyim Arena",
+    "auth.verify.submit": "Confirm",
+    "auth.verify.success_action": "Sign in",
+    "auth.verify.success_detail": "Your account is active and you can sign in.",
+    "auth.verify.success_heading": "Email confirmed",
     "email.greeting": "Hi,",
     "email.password_changed.lead": "Your account password was changed and every older session was ended. If this was not you, reset your password now and review the active sessions.",
     "email.password_changed.subject": "Your Goyim Arena password was changed",
@@ -190,6 +448,70 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "arenas.document.status.closed": "Fechada",
     "arenas.document.status.published": "Publicada",
     "arenas.document.status.restricted": "Restrita",
+    "auth.brand": "Goyim Arena",
+    "auth.errors.csrf_detail": "A proteção do formulário expirou. Recarregue a página e envie novamente.",
+    "auth.errors.csrf_title": "A página perdeu a validade",
+    "auth.errors.invalid_code": "O código é inválido, expirou ou já foi usado.",
+    "auth.errors.invalid_credentials": "Email ou senha inválidos.",
+    "auth.errors.invalid_email": "Informe um endereço de email válido.",
+    "auth.errors.required": "Preencha este campo.",
+    "auth.errors.summary_title": "Corrija os campos indicados",
+    "auth.errors.weak_password": "A senha deve ter pelo menos {min} caracteres.",
+    "auth.field.code_hint": "Cole o código que enviamos por email.",
+    "auth.field.code_label": "Código",
+    "auth.field.email_hint": "Usamos este endereço para confirmar a conta e avisar sobre mudanças nela.",
+    "auth.field.email_label": "Email",
+    "auth.field.new_password_label": "Nova senha",
+    "auth.field.password_hint": "Mínimo de {min} caracteres.",
+    "auth.field.password_label": "Senha",
+    "auth.login.busy": "Entrando…",
+    "auth.login.heading": "Entrar",
+    "auth.login.intro": "Use o email e a senha da sua conta.",
+    "auth.login.page_title": "Entrar — Goyim Arena",
+    "auth.login.reset_action": "Esqueci minha senha",
+    "auth.login.submit": "Entrar",
+    "auth.logout.busy": "Encerrando a sessão…",
+    "auth.logout.heading": "Encerrar sessão",
+    "auth.logout.intro": "Encerrar a sessão neste navegador termina o acesso até você entrar novamente.",
+    "auth.logout.page_title": "Encerrar sessão — Goyim Arena",
+    "auth.logout.submit": "Encerrar sessão",
+    "auth.nav.label": "Navegação da conta",
+    "auth.nav.login": "Entrar",
+    "auth.nav.register": "Criar conta",
+    "auth.nav.reset": "Recuperar acesso",
+    "auth.nav.verify": "Confirmar email",
+    "auth.register.busy": "Criando a conta…",
+    "auth.register.heading": "Criar conta",
+    "auth.register.intro": "Crie sua conta para participar das Arenas. Enviaremos um código para confirmar seu email.",
+    "auth.register.notice_action": "Confirmar email",
+    "auth.register.notice_detail": "Se este endereço ainda não tiver uma conta confirmada, enviamos um código de verificação. Use o código na página de confirmação.",
+    "auth.register.notice_heading": "Confira seu email",
+    "auth.register.page_title": "Criar conta — Goyim Arena",
+    "auth.register.submit": "Criar conta",
+    "auth.reset.busy": "Enviando o código…",
+    "auth.reset.confirm_busy": "Salvando a nova senha…",
+    "auth.reset.confirm_heading": "Definir nova senha",
+    "auth.reset.confirm_intro": "Informe o código de recuperação e a nova senha. Todas as sessões anteriores serão encerradas.",
+    "auth.reset.confirm_page_title": "Definir nova senha — Goyim Arena",
+    "auth.reset.confirm_submit": "Salvar nova senha",
+    "auth.reset.confirm_success_action": "Entrar",
+    "auth.reset.confirm_success_detail": "Sua senha foi alterada e todas as sessões anteriores foram encerradas.",
+    "auth.reset.confirm_success_heading": "Senha alterada",
+    "auth.reset.heading": "Recuperar acesso",
+    "auth.reset.intro": "Informe o email da sua conta para receber um código de recuperação.",
+    "auth.reset.notice_action": "Já tenho o código",
+    "auth.reset.notice_detail": "Se existir uma conta para este endereço, enviamos um código de recuperação. Use o código para definir uma nova senha.",
+    "auth.reset.notice_heading": "Confira seu email",
+    "auth.reset.page_title": "Recuperar acesso — Goyim Arena",
+    "auth.reset.submit": "Enviar código",
+    "auth.verify.busy": "Confirmando o código…",
+    "auth.verify.heading": "Confirmar email",
+    "auth.verify.intro": "Informe o código que enviamos para o seu email para ativar a conta.",
+    "auth.verify.page_title": "Confirmar email — Goyim Arena",
+    "auth.verify.submit": "Confirmar",
+    "auth.verify.success_action": "Entrar",
+    "auth.verify.success_detail": "Sua conta está ativa e você já pode entrar.",
+    "auth.verify.success_heading": "Email confirmado",
     "email.greeting": "Olá,",
     "email.password_changed.lead": "A senha da sua conta foi alterada e todas as sessões antigas foram encerradas. Se não foi você, redefina a senha agora e revise as sessões ativas.",
     "email.password_changed.subject": "Sua senha do Goyim Arena foi alterada",

@@ -13,12 +13,15 @@ package securityheaders_test
 import (
 	"bytes"
 	"encoding/xml"
+	"fmt"
 	"html/template"
 	"io"
 	"strings"
 	"testing"
 
 	arenashtml "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/adapters/html"
+	identityhtml "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/html"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
 	transparencyhttp "github.com/AlexandreZanata/Goyim-Arena/internal/transparency/adapters/http"
 )
 
@@ -39,6 +42,25 @@ const hostileValue = `<script>alert(1)</script> javascript:alert(2) onerror=aler
 func scanPage(t *testing.T, surface, document string) (dataBlocks, elements int) {
 	t.Helper()
 
+	problems, dataBlocks, elements := scanPageProblems(document)
+	if problems == nil {
+		return dataBlocks, elements
+	}
+	for _, problem := range problems {
+		t.Errorf("%s: %s", surface, problem)
+	}
+	return dataBlocks, elements
+}
+
+// scanPageProblems is the scanner itself, returning what it found instead of
+// failing a test: the branches that must speak — an inline script, an inline
+// style, an inline handler and a refused scheme — are then provable by feeding
+// it hostile markup, rather than taken on trust.
+//
+// A document that is not well-formed markup cannot be walked, and that is a
+// problem like any other: a page the scanner cannot read is a page nobody
+// proved anything about.
+func scanPageProblems(document string) (problems []string, dataBlocks, elements int) {
 	decoder := xml.NewDecoder(strings.NewReader(document))
 	for {
 		token, err := decoder.Token()
@@ -46,7 +68,8 @@ func scanPage(t *testing.T, surface, document string) (dataBlocks, elements int)
 			break
 		}
 		if err != nil {
-			t.Fatalf("%s: the rendered document is not well-formed markup, so it cannot be scanned: %v", surface, err)
+			problems = append(problems, fmt.Sprintf("the document is not well-formed markup, so it cannot be scanned: %v", err))
+			return problems, dataBlocks, elements
 		}
 
 		start, ok := token.(xml.StartElement)
@@ -57,12 +80,19 @@ func scanPage(t *testing.T, surface, document string) (dataBlocks, elements int)
 
 		switch strings.ToLower(start.Name.Local) {
 		case "style":
-			t.Errorf("%s: an inline <style> element would require style-src 'unsafe-inline'", surface)
+			problems = append(problems, "an inline <style> element would require style-src 'unsafe-inline'")
 		case "script":
-			if scriptType := attribute(start, "type"); !strings.EqualFold(scriptType, dataBlockType) {
-				t.Errorf("%s: inline <script type=%q> is executable; the policy has no 'unsafe-inline' and no nonce", surface, scriptType)
-			} else {
+			switch {
+			case strings.EqualFold(attribute(start, "type"), dataBlockType):
+				// A data block is never prepared for execution.
 				dataBlocks++
+			case attribute(start, "src") == "":
+				problems = append(problems, fmt.Sprintf("inline <script type=%q> is executable; the policy has no 'unsafe-inline' and no nonce", attribute(start, "type")))
+			default:
+				// A script element with a `src` is not inline: the browser fetches
+				// it, and `script-src 'self'` is exactly the directive that
+				// allows the origin's own module. The attribute loop below still
+				// refuses a `src` carrying a scheme the policy does not allow.
 			}
 		}
 
@@ -71,15 +101,91 @@ func scanPage(t *testing.T, surface, document string) (dataBlocks, elements int)
 			value := strings.ToLower(strings.TrimSpace(attributeValue.Value))
 			switch {
 			case name == "style":
-				t.Errorf("%s: inline style attribute %q would require style-src 'unsafe-inline'", surface, attributeValue.Value)
+				problems = append(problems, fmt.Sprintf("inline style attribute %q would require style-src 'unsafe-inline'", attributeValue.Value))
 			case len(name) > 2 && strings.HasPrefix(name, "on"):
-				t.Errorf("%s: inline event handler %s would require script-src 'unsafe-inline'", surface, name)
+				problems = append(problems, fmt.Sprintf("inline event handler %s would require script-src 'unsafe-inline'", name))
 			case strings.HasPrefix(value, "javascript:"), strings.HasPrefix(value, "vbscript:"), strings.HasPrefix(value, "data:"):
-				t.Errorf("%s: attribute %s carries a scheme the policy does not allow: %q", surface, name, attributeValue.Value)
+				problems = append(problems, fmt.Sprintf("attribute %s carries a scheme the policy does not allow: %q", name, attributeValue.Value))
 			}
 		}
 	}
-	return dataBlocks, elements
+	return problems, dataBlocks, elements
+}
+
+// TestScanPageRefusesInlineCodeAndAllowsTheOriginsOwnModule proves the scanner
+// speaks on every branch, so a green run over the real pages means the pages are
+// clean rather than the scanner being mute.
+func TestScanPageRefusesInlineCodeAndAllowsTheOriginsOwnModule(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		body     string
+		problems int
+		blocks   int
+	}{
+		{
+			name:     "an inline script is refused",
+			body:     `<script>alert(1)</script>`,
+			problems: 1,
+		},
+		{
+			name:     "an inline module is refused",
+			body:     `<script type="module">alert(1)</script>`,
+			problems: 1,
+		},
+		{
+			name:     "the origin's own module is allowed",
+			body:     `<script type="module" src="/assets/pages/auth-abc.js"></script>`,
+			problems: 0,
+		},
+		{
+			name:     "an external script with a forbidden scheme is refused",
+			body:     `<script src="data:text/javascript,alert(1)"></script>`,
+			problems: 1,
+		},
+		{
+			name:     "a JSON-LD data block is allowed and counted",
+			body:     `<script type="application/ld+json">{}</script>`,
+			problems: 0,
+			blocks:   1,
+		},
+		{
+			name:     "an inline style element is refused",
+			body:     `<style>body { color: red; }</style>`,
+			problems: 1,
+		},
+		{
+			name:     "an inline style attribute is refused",
+			body:     `<p style="color: red">text</p>`,
+			problems: 1,
+		},
+		{
+			name:     "an inline event handler is refused",
+			body:     `<button onclick="alert(1)">go</button>`,
+			problems: 1,
+		},
+		{
+			name:     "markup that cannot be walked is a problem",
+			body:     `<p>unclosed`,
+			problems: 1,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			problems, blocks, elements := scanPageProblems(`<html><body>` + testCase.body + `</body></html>`)
+			if len(problems) != testCase.problems {
+				t.Fatalf("scanPageProblems() reported %v, want %d problems", problems, testCase.problems)
+			}
+			if blocks != testCase.blocks {
+				t.Errorf("scanPageProblems() counted %d data blocks, want %d", blocks, testCase.blocks)
+			}
+			if elements == 0 {
+				t.Error("the scanner read no element, so it is not reading the document")
+			}
+		})
+	}
 }
 
 // attribute returns the value of one attribute, or the empty string.
@@ -155,6 +261,104 @@ func TestArenaDocumentCarriesOnlyItsJSONLDDataBlock(t *testing.T) {
 		}
 		if elements < 3 {
 			t.Errorf("arena %s page scan read %d elements; it is not reading the document", name, elements)
+		}
+	}
+}
+
+// pageManifest resolves the assets the account journey loads, so the templates
+// compile in a test the way they compile in a build.
+func pageManifest() assets.Manifest {
+	records := make(map[string]assets.Record)
+	for _, name := range []string{
+		"pages/auth.js",
+		"styles/reset.css",
+		"styles/tokens.css",
+		"styles/base.css",
+		"styles/primitives.css",
+		"styles/auth.css",
+	} {
+		records[name] = assets.Record{Path: "/assets/" + strings.ReplaceAll(name, "/", "-"), SHA256: strings.Repeat("b", 64)}
+	}
+	return assets.Manifest{Version: 1, Assets: records}
+}
+
+// TestAccountJourneyCarriesOnlyItsOwnExternalAssets scans the browser account
+// surface (P18-T05): every page of the journey must render without a single
+// inline style, inline script or event handler, and the two external things it
+// may load — the sheets and the module — must come from the manifest.
+//
+// The journey is the surface where this matters most, because it is the one
+// that carries a CSRF token and a submitted address: a policy widened to
+// 'unsafe-inline' for its sake would weaken every other page too.
+func TestAccountJourneyCarriesOnlyItsOwnExternalAssets(t *testing.T) {
+	t.Parallel()
+
+	templates, err := identityhtml.NewTemplates(pageManifest())
+	if err != nil {
+		t.Fatalf("NewTemplates() error = %v", err)
+	}
+
+	field := identityhtml.FieldData{
+		Name:        "email",
+		Type:        "email",
+		Label:       hostileValue,
+		Hint:        hostileValue,
+		Error:       hostileValue,
+		Value:       hostileValue,
+		ControlID:   "email-control",
+		HintID:      "email-hint",
+		ErrorID:     "email-error",
+		DescribedBy: "email-hint email-error",
+		Required:    true,
+	}
+
+	var form bytes.Buffer
+	err = templates.RenderForm(&form, identityhtml.FormPageData{
+		DocumentData: identityhtml.DocumentData{
+			Lang:      "pt-BR",
+			PageTitle: hostileValue,
+			Brand:     hostileValue,
+			NavLabel:  hostileValue,
+			Nav:       []identityhtml.ActionLink{{Label: hostileValue, Href: "/login"}},
+		},
+		Heading:      hostileValue,
+		Intro:        hostileValue,
+		Action:       "/register",
+		Method:       "POST",
+		CSRFName:     "csrf_token",
+		CSRFToken:    "token.signature",
+		SummaryTitle: hostileValue,
+		Summary:      []identityhtml.SummaryItem{{Target: "email-control", Message: hostileValue}},
+		Fields:       []identityhtml.FieldData{field},
+		SubmitLabel:  hostileValue,
+		BusyLabel:    hostileValue,
+		After:        &identityhtml.ActionLink{Label: hostileValue, Href: "/reset"},
+	})
+	if err != nil {
+		t.Fatalf("RenderForm() error = %v", err)
+	}
+
+	var notice bytes.Buffer
+	err = templates.RenderNotice(&notice, identityhtml.NoticePageData{
+		DocumentData: identityhtml.DocumentData{Lang: "en-US", PageTitle: hostileValue, Brand: hostileValue, NavLabel: hostileValue},
+		Heading:      hostileValue,
+		Detail:       hostileValue,
+		Actions:      []identityhtml.ActionLink{{Label: hostileValue, Href: "/login"}},
+	})
+	if err != nil {
+		t.Fatalf("RenderNotice() error = %v", err)
+	}
+
+	for name, document := range map[string]string{"form": form.String(), "notice": notice.String()} {
+		if !strings.Contains(document, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+			t.Fatalf("the account %s page did not render the hostile value escaped, so the scan is not reading the real document:\n%s", name, document)
+		}
+		blocks, elements := scanPage(t, "account "+name+" page", document)
+		if blocks != 0 {
+			t.Errorf("the account %s page carries %d script data blocks, want none", name, blocks)
+		}
+		if elements < 8 {
+			t.Errorf("the account %s page scan read %d elements; it is not reading the document", name, elements)
 		}
 	}
 }

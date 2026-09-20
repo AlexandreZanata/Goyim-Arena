@@ -17,6 +17,7 @@ const SHEETS: readonly string[] = [
   "src/styles/tokens.css",
   "src/styles/base.css",
   "src/styles/primitives.css",
+  "src/styles/auth.css",
 ];
 
 /** Cascade order fixed by docs/STACK.md. */

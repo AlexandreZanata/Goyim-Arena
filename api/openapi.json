@@ -2238,6 +2238,272 @@
           "429": { "$ref": "#/components/responses/RateLimited" }
         }
       }
+    },
+    "/register": {
+      "get": {
+        "operationId": "showRegisterPage",
+        "summary": "Registration page (HTML)",
+        "description": "Renders the browser registration form: the fields with their labels, the platform CSRF token as a hidden field and the client module that only adds the busy state to a submission. The page is a document a person fills in and it works with JavaScript switched off, so it is private and never stored. The double submit travels in the form body because a browser form cannot set the CSRF header.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Registration form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitRegisterPage",
+        "summary": "Registration submission (HTML form)",
+        "description": "Creates the account from the submitted form. The answer is uniform: an address that already has an account and a fresh address both reach the confirmation page, so the surface cannot be asked whether an address is registered (the same guarantee the JSON route gives with its uniform 201). A submission whose email or password the domain refuses is answered with the same form, the field's message and a summary of what to fix.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthRegisterForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Uniform confirmation page: the registration was accepted.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "400": {
+            "description": "The form does not satisfy the rules; the page is re-rendered with the field messages.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/verify": {
+      "get": {
+        "operationId": "showVerifyPage",
+        "summary": "Email confirmation page (HTML)",
+        "description": "Renders the form that redeems the single-use confirmation code delivered by email. The code is carried by the email as a code rather than a link, so the page is reachable from the site itself.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Confirmation form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitVerifyPage",
+        "summary": "Email confirmation submission (HTML form)",
+        "description": "Consumes the single-use confirmation code and activates the account. Every rejection is one refusal — a code that is wrong, expired or already spent produces the same message — exactly as the JSON route answers.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthCodeForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmation page: the email is verified.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "400": {
+            "description": "The code is invalid, expired or already used; the page is re-rendered with the refusal.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/login": {
+      "get": {
+        "operationId": "showLoginPage",
+        "summary": "Sign-in page (HTML)",
+        "description": "Renders the browser sign-in form with its labels, the CSRF hidden field and the link to the recovery journey.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Sign-in form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitLoginPage",
+        "summary": "Sign-in submission (HTML form)",
+        "description": "Verifies credentials and opens the session, then answers a 303 redirect so a reload never resubmits the credentials. A refusal is one uniform message for every cause — wrong password, unknown address, suspended account — because the page must not become the oracle the JSON route refuses to be. The session cookie is rotated together with the CSRF token (post-login rotation), and the attempt is reported to the risk signal that gates the next hard challenge, exactly as the JSON route reports it.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthLoginForm" }
+            }
+          }
+        },
+        "responses": {
+          "303": {
+            "description": "Signed in: the browser is sent to the authenticated root with the new session cookie.",
+            "headers": {
+              "Location": {
+                "description": "The authenticated root (/).",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "401": {
+            "description": "Uniform credential refusal; the form is re-rendered without saying which part was wrong.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/logout": {
+      "get": {
+        "operationId": "showLogoutPage",
+        "summary": "Sign-out confirmation page (HTML)",
+        "description": "Renders the confirmation whose form ends the session, so a plain navigation to the address never ends a session by itself.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Sign-out confirmation.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitLogoutPage",
+        "summary": "Sign-out submission (HTML form)",
+        "description": "Revokes the session of the presented cookie and clears both the session and the CSRF cookies, then answers a 303 redirect to the sign-in page. The cookies are cleared even when the revocation fails, because a person who asked to end the session must not be left inside it by a transient storage fault; the failure is logged, not silently accepted.",
+        "tags": ["auth"],
+        "responses": {
+          "303": {
+            "description": "Session ended: the browser is sent to the sign-in page.",
+            "headers": {
+              "Location": {
+                "description": "The sign-in page (/login).",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/reset": {
+      "get": {
+        "operationId": "showPasswordResetRequestPage",
+        "summary": "Recovery request page (HTML)",
+        "description": "Renders the form that asks for a recovery code, with the CSRF hidden field and the link to the page that redeems the code.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Recovery request form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitPasswordResetRequestPage",
+        "summary": "Recovery request submission (HTML form)",
+        "description": "Asks for a recovery code and answers the uniform notice for every outcome, including a sending failure: the answer is where the existence of the account would leak, so a mailer that is down is not a reason to start answering questions about accounts (the same non-enumeration rule the JSON route follows).",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthRecoveryRequestForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Uniform notice: a code was sent when the address has an account.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "400": {
+            "description": "The email field is empty; the page is re-rendered with the message.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/reset/confirm": {
+      "get": {
+        "operationId": "showPasswordResetConfirmPage",
+        "summary": "New password page (HTML)",
+        "description": "Renders the form that redeems the recovery code and sets the new password in one submission.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "New password form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitPasswordResetConfirmPage",
+        "summary": "New password submission (HTML form)",
+        "description": "Consumes the recovery code, sets the new password and ends every older session of the account. Two failures are told apart on purpose and only these two: a password below the minimum is about the person's own input and must be actionable, while a code that is wrong, expired or already spent is one refusal. Nothing about the account is revealed either way.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthPasswordResetForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmation page: the password was changed.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "400": {
+            "description": "The code or the password is refused; the page is re-rendered with the message.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
     }
   },
   "components": {
@@ -2339,6 +2605,49 @@
         "required": ["status"],
         "properties": {
           "status": { "type": "string", "enum": ["pending_verification"] }
+        }
+      },
+      "AuthRegisterForm": {
+        "type": "object",
+        "required": ["email", "password", "csrf_token"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 },
+          "csrf_token": { "type": "string", "description": "Double-submit token rendered by the form and read from the body, because a browser form cannot set the CSRF header." }
+        }
+      },
+      "AuthLoginForm": {
+        "type": "object",
+        "required": ["email", "password", "csrf_token"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string" },
+          "csrf_token": { "type": "string" }
+        }
+      },
+      "AuthCodeForm": {
+        "type": "object",
+        "required": ["token", "csrf_token"],
+        "properties": {
+          "token": { "type": "string", "description": "Single-use code delivered by email; it is never echoed back into the form." },
+          "csrf_token": { "type": "string" }
+        }
+      },
+      "AuthRecoveryRequestForm": {
+        "type": "object",
+        "required": ["email", "csrf_token"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "csrf_token": { "type": "string" }
+        }
+      },
+      "AuthPasswordResetForm": {
+        "type": "object",
+        "required": ["token", "password", "csrf_token"],
+        "properties": {
+          "token": { "type": "string" },
+          "password": { "type": "string", "minLength": 8 },
+          "csrf_token": { "type": "string" }
         }
       },
       "LoginRequest": {
