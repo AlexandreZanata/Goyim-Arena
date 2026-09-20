@@ -1,6 +1,7 @@
-/* Goyim Arena — base styles. Imports native layers in cascade order. */
+/* Goyim Arena — base styles. The cascade order is declared in reset.css
+   (loaded first) and restated here so the intended layers are greppable. */
 
-@layer reset, tokens, base;
+@layer reset, tokens, base, layout, components, utilities, overrides;
 
 @layer base {
   body {

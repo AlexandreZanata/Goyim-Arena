@@ -1,0 +1,146 @@
+/* Goyim Arena — UI primitives (P18-T04). Component layer, tokens only.
+   No colour, spacing, radius or duration is written by hand here: everything
+   comes from tokens.css, so a theme change never touches this sheet. Sizing is
+   rem-based and every offset uses logical properties, which is what keeps the
+   primitives usable under 200% zoom and a future right-to-left direction. */
+
+@layer components {
+  /* Every rule that sets `display` is scoped with :not([hidden]) on purpose:
+     an author declaration would otherwise outrank the user-agent rule for
+     [hidden] and the primitive would stay visible when it is meant to be
+     hidden (the primitives toggle the attribute, never inline styles). */
+  :where(ga-field, ga-error-summary, ga-busy, ga-toast):not([hidden]) {
+    display: block;
+    inline-size: 100%;
+  }
+
+  :where(.ga-field__label):not([hidden]) {
+    display: block;
+    margin-block-end: var(--ga-space-1);
+    font-weight: var(--ga-font-weight-medium);
+  }
+
+  :where(.ga-field__control):not([hidden]) {
+    display: block;
+    inline-size: 100%;
+    max-inline-size: var(--ga-control-max-inline-size);
+    min-inline-size: 0;
+    padding-block: var(--ga-space-2);
+    padding-inline: var(--ga-space-3);
+    border: 1px solid var(--ga-color-border);
+    border-radius: var(--ga-radius-sm);
+    background-color: var(--ga-color-surface);
+    color: var(--ga-color-text);
+  }
+
+  :where(.ga-field__control[aria-invalid="true"]) {
+    border-color: var(--ga-color-critical);
+  }
+
+  :where(.ga-field__hint, .ga-field__error) {
+    max-inline-size: var(--ga-control-max-inline-size);
+    margin-block-start: var(--ga-space-1);
+    font-size: var(--ga-font-size-sm);
+  }
+
+  :where(.ga-field__hint) {
+    color: var(--ga-color-text-muted);
+  }
+
+  :where(.ga-field__error) {
+    color: var(--ga-color-critical);
+  }
+
+  :where(ga-error-summary) {
+    margin-block-end: var(--ga-space-4);
+    padding-block: var(--ga-space-3);
+    padding-inline: var(--ga-space-4);
+    border: 1px solid var(--ga-color-critical);
+    border-radius: var(--ga-radius-md);
+    background-color: var(--ga-color-surface-muted);
+  }
+
+  :where(ga-error-summary:focus-visible) {
+    outline: 2px solid var(--ga-color-critical);
+    outline-offset: 2px;
+  }
+
+  :where(.ga-error-summary__list) {
+    margin-block-start: var(--ga-space-2);
+    padding-inline-start: var(--ga-space-4);
+  }
+
+  :where(.ga-error-summary__item + .ga-error-summary__item) {
+    margin-block-start: var(--ga-space-1);
+  }
+
+  :where(ga-busy):not([hidden]) {
+    display: flex;
+    align-items: center;
+    gap: var(--ga-space-2);
+  }
+
+  :where(.ga-busy__indicator):not([hidden]) {
+    display: inline-block;
+    flex: 0 0 auto;
+    inline-size: var(--ga-font-size-md);
+    block-size: var(--ga-font-size-md);
+    border: 2px solid var(--ga-color-border);
+    border-block-start-color: var(--ga-color-action);
+    border-radius: 50%;
+    animation: ga-primitives-spin var(--ga-duration-normal) linear infinite;
+  }
+
+  :where(.ga-busy__status) {
+    font-size: var(--ga-font-size-sm);
+    color: var(--ga-color-text-muted);
+  }
+
+  :where(ga-toast) {
+    position: fixed;
+    inset-block-end: var(--ga-space-4);
+    inset-inline-start: var(--ga-space-4);
+    z-index: var(--ga-z-toast);
+    max-inline-size: min(var(--ga-control-max-inline-size), calc(100% - var(--ga-space-8)));
+    padding-block: var(--ga-space-3);
+    padding-inline: var(--ga-space-4);
+    border: 1px solid var(--ga-color-border);
+    border-radius: var(--ga-radius-md);
+    background-color: var(--ga-color-surface);
+    box-shadow: var(--ga-shadow-2);
+    overflow-wrap: anywhere;
+  }
+
+  :where(ga-toast.ga-toast--warning, ga-toast.ga-toast--error) {
+    border-color: var(--ga-color-critical);
+  }
+
+  :where(ga-toast.ga-toast--success) {
+    border-color: var(--ga-color-positive);
+  }
+
+  :where(.ga-toast__dismiss) {
+    margin-inline-start: var(--ga-space-3);
+  }
+
+
+  @media (prefers-reduced-motion: reduce) {
+    :where(.ga-busy__indicator) {
+      animation: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    :where(ga-error-summary),
+    :where(ga-toast),
+    :where(.ga-field__control) {
+      border-color: CanvasText;
+    }
+  }
+}
+
+@keyframes ga-primitives-spin {
+  to {
+    transform: rotate(1turn);
+  }
+}

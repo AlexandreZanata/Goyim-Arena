@@ -1,52 +1,54 @@
-/* Goyim Arena — native CSS reset. No preprocessor, no bundler. */
+/* Goyim Arena — native CSS reset. No preprocessor, no bundler.
+   The canonical cascade order is declared here because this sheet is loaded
+   first; every other sheet only adds rules to the layer it owns. Without this,
+   the reset would sit unlayered and outrank every component rule. */
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
+@layer reset, tokens, base, layout, components, utilities, overrides;
 
-* {
-  margin: 0;
-}
+@layer reset {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
 
-html {
-  -webkit-text-size-adjust: 100%;
-}
+  * {
+    margin: 0;
+  }
 
-body {
-  min-height: 100svh;
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-}
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
 
-img,
-picture,
-video,
-canvas,
-svg {
-  display: block;
-  max-width: 100%;
-}
+  body {
+    min-height: 100svh;
+    line-height: var(--ga-line-height-normal);
+    -webkit-font-smoothing: antialiased;
+  }
 
-input,
-button,
-textarea,
-select {
-  font: inherit;
-}
+  img,
+  picture,
+  video,
+  canvas,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
 
-p,
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-  overflow-wrap: break-word;
-}
+  input,
+  button,
+  textarea,
+  select {
+    font: inherit;
+  }
 
-#root,
-#__next {
-  isolation: isolate;
+  p,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    overflow-wrap: break-word;
+  }
 }
