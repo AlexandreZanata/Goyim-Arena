@@ -265,17 +265,19 @@ func TestArenaDocumentCarriesOnlyItsJSONLDDataBlock(t *testing.T) {
 	}
 }
 
-// pageManifest resolves the assets the account journey loads, so the templates
-// compile in a test the way they compile in a build.
+// pageManifest resolves the assets the server-rendered journeys load, so the
+// templates compile in a test the way they compile in a build.
 func pageManifest() assets.Manifest {
 	records := make(map[string]assets.Record)
 	for _, name := range []string{
 		"pages/auth.js",
+		"pages/arena.js",
 		"styles/reset.css",
 		"styles/tokens.css",
 		"styles/base.css",
 		"styles/primitives.css",
 		"styles/auth.css",
+		"styles/arena.css",
 	} {
 		records[name] = assets.Record{Path: "/assets/" + strings.ReplaceAll(name, "/", "-"), SHA256: strings.Repeat("b", 64)}
 	}
@@ -359,6 +361,135 @@ func TestAccountJourneyCarriesOnlyItsOwnExternalAssets(t *testing.T) {
 		}
 		if elements < 8 {
 			t.Errorf("the account %s page scan read %d elements; it is not reading the document", name, elements)
+		}
+	}
+}
+
+// TestArenaParticipationCarriesOnlyItsOwnExternalAssets scans the browser
+// participation surface (P18-T06): the page a person acts on must render without
+// a single inline style, inline script or event handler, with every dynamic
+// value — the statement, the categories, the argument contents, the labels of
+// the counted choices — escaped by html/template.
+//
+// It is the second page of the product that carries a CSRF token and a person's
+// own state, so it is the second place where a policy widened for convenience
+// would weaken every other document too.
+func TestArenaParticipationCarriesOnlyItsOwnExternalAssets(t *testing.T) {
+	t.Parallel()
+
+	templates, err := arenashtml.NewParticipationTemplates(pageManifest())
+	if err != nil {
+		t.Fatalf("NewParticipationTemplates() error = %v", err)
+	}
+
+	choice := arenashtml.ChoiceData{Name: "position", Value: "agree", Label: hostileValue, ControlID: "position-agree"}
+
+	var page bytes.Buffer
+	err = templates.RenderPage(&page, arenashtml.ParticipationPageData{
+		ParticipationChrome: arenashtml.ParticipationChrome{
+			Lang:      "pt-BR",
+			PageTitle: hostileValue,
+			Brand:     hostileValue,
+			NavLabel:  hostileValue,
+			Nav:       []arenashtml.ParticipationLink{{Label: hostileValue, Href: "/login"}},
+			SignOut:   &arenashtml.SignOutData{Action: "/logout", Field: "csrf_token", Token: "token.signature", Label: hostileValue},
+		},
+		ArenaID:          "00000000-0000-0000-0000-0000000000a1",
+		Statement:        hostileValue,
+		Context:          hostileValue,
+		StatusLabel:      hostileValue,
+		CategoryLabel:    hostileValue,
+		LanguageLabel:    hostileValue,
+		PublishedAt:      "2026-09-18T12:00:00Z",
+		PublishedLabel:   hostileValue,
+		Notices:          []string{hostileValue},
+		AggregateHeading: hostileValue,
+		RevealLabel:      hostileValue,
+		RevealHref:       "/arenas/exemplo?reveal=1",
+		Aggregate: &arenashtml.AggregateData{
+			Heading:        hostileValue,
+			TotalLabel:     hostileValue,
+			CurrentHeading: hostileValue,
+			InitialHeading: hostileValue,
+			CheckedLabel:   hostileValue,
+			SuppressedNote: hostileValue,
+			Current:        []arenashtml.DistributionRow{{Label: hostileValue, Count: 3}},
+			Initial:        []arenashtml.DistributionRow{{Label: hostileValue, Count: 2}},
+		},
+		PositionHeading: hostileValue,
+		Anonymous: &arenashtml.AnonymousPositionData{
+			Text:    hostileValue,
+			Heading: hostileValue,
+			Hint:    hostileValue,
+			Choices: []arenashtml.ChoiceData{choice},
+			Links:   []arenashtml.ParticipationLink{{Label: hostileValue, Href: "/register"}},
+		},
+		State: &arenashtml.PositionStateData{Heading: hostileValue, Initial: hostileValue, Current: hostileValue},
+		Confirm: &arenashtml.PositionFormData{
+			FormData: arenashtml.FormData{
+				Action:       "/arenas/exemplo/position",
+				Heading:      hostileValue,
+				Intro:        hostileValue,
+				Field:        "csrf_token",
+				Token:        "token.signature",
+				SummaryTitle: hostileValue,
+				Summary:      []arenashtml.SummaryData{{Target: "position-agree", Message: hostileValue}},
+				Error:        hostileValue,
+				ErrorID:      "position-form-error",
+				SubmitLabel:  hostileValue,
+				BusyLabel:    hostileValue,
+			},
+			Group: arenashtml.FieldGroupData{Name: "position", Legend: hostileValue, Hint: hostileValue, Error: hostileValue, ControlID: "position", HintID: "position-hint", ErrorID: "position-error", Choices: []arenashtml.ChoiceData{choice}},
+		},
+		Change: &arenashtml.PositionFormData{
+			FormData: arenashtml.FormData{Action: "/arenas/exemplo/position/change", Heading: hostileValue, Intro: hostileValue, Field: "csrf_token", Token: "token.signature", SubmitLabel: hostileValue, BusyLabel: hostileValue},
+			Group:    arenashtml.FieldGroupData{Name: "position", Legend: hostileValue, ControlID: "position"},
+		},
+		Arguments: []arenashtml.RelationGroupData{{
+			Heading:   hostileValue,
+			Empty:     hostileValue,
+			Arguments: []arenashtml.ArgumentData{{ID: "argument-1", RelationLabel: hostileValue, Content: hostileValue, CreatedAt: "2026-09-20T07:00:00Z", RepliesLabel: hostileValue, OptionLabel: hostileValue}},
+		}},
+		Publish: &arenashtml.PublishFormData{
+			FormData:      arenashtml.FormData{Action: "/arenas/exemplo/arguments", Heading: hostileValue, Intro: hostileValue, Field: "csrf_token", Token: "token.signature", Hidden: []arenashtml.HiddenData{{Name: "attempt", Value: "attempt-1"}}, SubmitLabel: hostileValue, BusyLabel: hostileValue},
+			Relations:     arenashtml.FieldGroupData{Name: "relation", Legend: hostileValue, ControlID: "relation"},
+			ContentName:   "content",
+			ContentLabel:  hostileValue,
+			ContentHint:   hostileValue,
+			ContentValue:  hostileValue,
+			ContentID:     "content-control",
+			ContentHintID: "content-hint",
+		},
+		Attribution: &arenashtml.AttributionFormData{
+			FormData: arenashtml.FormData{Action: "/arenas/exemplo/attributions", Heading: hostileValue, Intro: hostileValue, Field: "csrf_token", Token: "token.signature", Hidden: []arenashtml.HiddenData{{Name: "change_id", Value: "change-1"}}, SubmitLabel: hostileValue, BusyLabel: hostileValue},
+			Options:  arenashtml.FieldGroupData{Name: "argument_ids", Legend: hostileValue, Hint: hostileValue, ControlID: "argument_ids", HintID: "argument_ids-hint", ErrorID: "argument_ids-error", Limit: 3, Choices: []arenashtml.ChoiceData{{Name: "argument_ids", Value: "argument-1", Label: hostileValue, ControlID: "argument_ids-argument-1"}}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RenderPage() error = %v", err)
+	}
+
+	var notice bytes.Buffer
+	err = templates.RenderNotice(&notice, arenashtml.NoticeData{
+		ParticipationChrome: arenashtml.ParticipationChrome{Lang: "en-US", PageTitle: hostileValue, Brand: hostileValue, NavLabel: hostileValue},
+		Heading:             hostileValue,
+		Detail:              hostileValue,
+		Actions:             []arenashtml.ParticipationLink{{Label: hostileValue, Href: "/arenas/exemplo"}},
+	})
+	if err != nil {
+		t.Fatalf("RenderNotice() error = %v", err)
+	}
+
+	for name, document := range map[string]string{"participation": page.String(), "notice": notice.String()} {
+		if !strings.Contains(document, "&lt;script&gt;alert(1)&lt;/script&gt;") {
+			t.Fatalf("the Arena %s page did not render the hostile value escaped, so the scan is not reading the real document:\n%s", name, document)
+		}
+		blocks, elements := scanPage(t, "arena "+name+" page", document)
+		if blocks != 0 {
+			t.Errorf("the Arena %s page carries %d script data blocks, want none", name, blocks)
+		}
+		if elements < 10 {
+			t.Errorf("the Arena %s page scan read %d elements; it is not reading the document", name, elements)
 		}
 	}
 }

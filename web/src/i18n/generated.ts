@@ -12,6 +12,78 @@ export const messageKeys = {
     "arenas.document.status.closed",
     "arenas.document.status.published",
     "arenas.document.status.restricted",
+    "arenas.participation.aggregate.checked",
+    "arenas.participation.aggregate.current",
+    "arenas.participation.aggregate.heading",
+    "arenas.participation.aggregate.initial",
+    "arenas.participation.aggregate.reveal",
+    "arenas.participation.aggregate.suppressed",
+    "arenas.participation.aggregate.total",
+    "arenas.participation.arguments.empty",
+    "arenas.participation.arguments.publish_busy",
+    "arenas.participation.arguments.publish_heading",
+    "arenas.participation.arguments.publish_intro",
+    "arenas.participation.arguments.publish_submit",
+    "arenas.participation.arguments.replies",
+    "arenas.participation.attribution.busy",
+    "arenas.participation.attribution.heading",
+    "arenas.participation.attribution.intro",
+    "arenas.participation.attribution.option",
+    "arenas.participation.attribution.submit",
+    "arenas.participation.brand",
+    "arenas.participation.choice.agree",
+    "arenas.participation.choice.disagree",
+    "arenas.participation.choice.undecided",
+    "arenas.participation.errors.argument_not_found",
+    "arenas.participation.errors.change_not_found",
+    "arenas.participation.errors.csrf_detail",
+    "arenas.participation.errors.csrf_title",
+    "arenas.participation.errors.immutable_position",
+    "arenas.participation.errors.insufficient_ink",
+    "arenas.participation.errors.invalid_choice",
+    "arenas.participation.errors.invalid_content",
+    "arenas.participation.errors.invalid_relation",
+    "arenas.participation.errors.required",
+    "arenas.participation.errors.summary_title",
+    "arenas.participation.errors.too_many_attributions",
+    "arenas.participation.errors.version_conflict",
+    "arenas.participation.field.content_hint",
+    "arenas.participation.field.content_label",
+    "arenas.participation.field.position_label",
+    "arenas.participation.field.relation_label",
+    "arenas.participation.local.heading",
+    "arenas.participation.local.hint",
+    "arenas.participation.meta.category",
+    "arenas.participation.meta.language",
+    "arenas.participation.meta.published",
+    "arenas.participation.meta.status",
+    "arenas.participation.nav.arena",
+    "arenas.participation.nav.document",
+    "arenas.participation.nav.label",
+    "arenas.participation.nav.login",
+    "arenas.participation.nav.register",
+    "arenas.participation.nav.signout",
+    "arenas.participation.notice.argument_published",
+    "arenas.participation.notice.attribution_recorded",
+    "arenas.participation.notice.position_changed",
+    "arenas.participation.notice.position_confirmed",
+    "arenas.participation.page_title",
+    "arenas.participation.position.anonymous",
+    "arenas.participation.position.change_busy",
+    "arenas.participation.position.change_heading",
+    "arenas.participation.position.change_intro",
+    "arenas.participation.position.change_submit",
+    "arenas.participation.position.confirm_busy",
+    "arenas.participation.position.confirm_heading",
+    "arenas.participation.position.confirm_intro",
+    "arenas.participation.position.confirm_submit",
+    "arenas.participation.position.current",
+    "arenas.participation.position.heading",
+    "arenas.participation.position.initial",
+    "arenas.participation.refusal_page_title",
+    "arenas.participation.relation.context",
+    "arenas.participation.relation.oppose",
+    "arenas.participation.relation.support",
   ] as const,
   auth: [
     "auth.brand",
@@ -128,6 +200,78 @@ export type MessageKey =
   | "arenas.document.status.closed"
   | "arenas.document.status.published"
   | "arenas.document.status.restricted"
+  | "arenas.participation.aggregate.checked"
+  | "arenas.participation.aggregate.current"
+  | "arenas.participation.aggregate.heading"
+  | "arenas.participation.aggregate.initial"
+  | "arenas.participation.aggregate.reveal"
+  | "arenas.participation.aggregate.suppressed"
+  | "arenas.participation.aggregate.total"
+  | "arenas.participation.arguments.empty"
+  | "arenas.participation.arguments.publish_busy"
+  | "arenas.participation.arguments.publish_heading"
+  | "arenas.participation.arguments.publish_intro"
+  | "arenas.participation.arguments.publish_submit"
+  | "arenas.participation.arguments.replies"
+  | "arenas.participation.attribution.busy"
+  | "arenas.participation.attribution.heading"
+  | "arenas.participation.attribution.intro"
+  | "arenas.participation.attribution.option"
+  | "arenas.participation.attribution.submit"
+  | "arenas.participation.brand"
+  | "arenas.participation.choice.agree"
+  | "arenas.participation.choice.disagree"
+  | "arenas.participation.choice.undecided"
+  | "arenas.participation.errors.argument_not_found"
+  | "arenas.participation.errors.change_not_found"
+  | "arenas.participation.errors.csrf_detail"
+  | "arenas.participation.errors.csrf_title"
+  | "arenas.participation.errors.immutable_position"
+  | "arenas.participation.errors.insufficient_ink"
+  | "arenas.participation.errors.invalid_choice"
+  | "arenas.participation.errors.invalid_content"
+  | "arenas.participation.errors.invalid_relation"
+  | "arenas.participation.errors.required"
+  | "arenas.participation.errors.summary_title"
+  | "arenas.participation.errors.too_many_attributions"
+  | "arenas.participation.errors.version_conflict"
+  | "arenas.participation.field.content_hint"
+  | "arenas.participation.field.content_label"
+  | "arenas.participation.field.position_label"
+  | "arenas.participation.field.relation_label"
+  | "arenas.participation.local.heading"
+  | "arenas.participation.local.hint"
+  | "arenas.participation.meta.category"
+  | "arenas.participation.meta.language"
+  | "arenas.participation.meta.published"
+  | "arenas.participation.meta.status"
+  | "arenas.participation.nav.arena"
+  | "arenas.participation.nav.document"
+  | "arenas.participation.nav.label"
+  | "arenas.participation.nav.login"
+  | "arenas.participation.nav.register"
+  | "arenas.participation.nav.signout"
+  | "arenas.participation.notice.argument_published"
+  | "arenas.participation.notice.attribution_recorded"
+  | "arenas.participation.notice.position_changed"
+  | "arenas.participation.notice.position_confirmed"
+  | "arenas.participation.page_title"
+  | "arenas.participation.position.anonymous"
+  | "arenas.participation.position.change_busy"
+  | "arenas.participation.position.change_heading"
+  | "arenas.participation.position.change_intro"
+  | "arenas.participation.position.change_submit"
+  | "arenas.participation.position.confirm_busy"
+  | "arenas.participation.position.confirm_heading"
+  | "arenas.participation.position.confirm_intro"
+  | "arenas.participation.position.confirm_submit"
+  | "arenas.participation.position.current"
+  | "arenas.participation.position.heading"
+  | "arenas.participation.position.initial"
+  | "arenas.participation.refusal_page_title"
+  | "arenas.participation.relation.context"
+  | "arenas.participation.relation.oppose"
+  | "arenas.participation.relation.support"
   | "auth.brand"
   | "auth.errors.csrf_detail"
   | "auth.errors.csrf_title"
@@ -235,6 +379,78 @@ export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = 
   "arenas.document.status.closed": [],
   "arenas.document.status.published": [],
   "arenas.document.status.restricted": [],
+  "arenas.participation.aggregate.checked": ["instant"],
+  "arenas.participation.aggregate.current": [],
+  "arenas.participation.aggregate.heading": [],
+  "arenas.participation.aggregate.initial": [],
+  "arenas.participation.aggregate.reveal": [],
+  "arenas.participation.aggregate.suppressed": [],
+  "arenas.participation.aggregate.total": ["total"],
+  "arenas.participation.arguments.empty": [],
+  "arenas.participation.arguments.publish_busy": [],
+  "arenas.participation.arguments.publish_heading": [],
+  "arenas.participation.arguments.publish_intro": [],
+  "arenas.participation.arguments.publish_submit": [],
+  "arenas.participation.arguments.replies": ["count"],
+  "arenas.participation.attribution.busy": [],
+  "arenas.participation.attribution.heading": [],
+  "arenas.participation.attribution.intro": ["max"],
+  "arenas.participation.attribution.option": ["excerpt", "relation"],
+  "arenas.participation.attribution.submit": [],
+  "arenas.participation.brand": [],
+  "arenas.participation.choice.agree": [],
+  "arenas.participation.choice.disagree": [],
+  "arenas.participation.choice.undecided": [],
+  "arenas.participation.errors.argument_not_found": [],
+  "arenas.participation.errors.change_not_found": [],
+  "arenas.participation.errors.csrf_detail": [],
+  "arenas.participation.errors.csrf_title": [],
+  "arenas.participation.errors.immutable_position": [],
+  "arenas.participation.errors.insufficient_ink": [],
+  "arenas.participation.errors.invalid_choice": [],
+  "arenas.participation.errors.invalid_content": ["max"],
+  "arenas.participation.errors.invalid_relation": [],
+  "arenas.participation.errors.required": [],
+  "arenas.participation.errors.summary_title": [],
+  "arenas.participation.errors.too_many_attributions": ["max"],
+  "arenas.participation.errors.version_conflict": [],
+  "arenas.participation.field.content_hint": ["max"],
+  "arenas.participation.field.content_label": [],
+  "arenas.participation.field.position_label": [],
+  "arenas.participation.field.relation_label": [],
+  "arenas.participation.local.heading": [],
+  "arenas.participation.local.hint": [],
+  "arenas.participation.meta.category": ["category"],
+  "arenas.participation.meta.language": ["language"],
+  "arenas.participation.meta.published": ["instant"],
+  "arenas.participation.meta.status": ["status"],
+  "arenas.participation.nav.arena": [],
+  "arenas.participation.nav.document": [],
+  "arenas.participation.nav.label": [],
+  "arenas.participation.nav.login": [],
+  "arenas.participation.nav.register": [],
+  "arenas.participation.nav.signout": [],
+  "arenas.participation.notice.argument_published": [],
+  "arenas.participation.notice.attribution_recorded": [],
+  "arenas.participation.notice.position_changed": [],
+  "arenas.participation.notice.position_confirmed": [],
+  "arenas.participation.page_title": ["subject"],
+  "arenas.participation.position.anonymous": [],
+  "arenas.participation.position.change_busy": [],
+  "arenas.participation.position.change_heading": [],
+  "arenas.participation.position.change_intro": [],
+  "arenas.participation.position.change_submit": [],
+  "arenas.participation.position.confirm_busy": [],
+  "arenas.participation.position.confirm_heading": [],
+  "arenas.participation.position.confirm_intro": [],
+  "arenas.participation.position.confirm_submit": [],
+  "arenas.participation.position.current": ["position"],
+  "arenas.participation.position.heading": [],
+  "arenas.participation.position.initial": ["position"],
+  "arenas.participation.refusal_page_title": [],
+  "arenas.participation.relation.context": [],
+  "arenas.participation.relation.oppose": [],
+  "arenas.participation.relation.support": [],
   "auth.brand": [],
   "auth.errors.csrf_detail": [],
   "auth.errors.csrf_title": [],
@@ -343,6 +559,78 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "arenas.document.status.closed": "Closed",
     "arenas.document.status.published": "Published",
     "arenas.document.status.restricted": "Restricted",
+    "arenas.participation.aggregate.checked": "Derived at {instant}",
+    "arenas.participation.aggregate.current": "Current position",
+    "arenas.participation.aggregate.heading": "Aggregate result",
+    "arenas.participation.aggregate.initial": "Initial position",
+    "arenas.participation.aggregate.reveal": "Reveal aggregate result",
+    "arenas.participation.aggregate.suppressed": "The sample is too small to publish the result.",
+    "arenas.participation.aggregate.total": "Eligible participants: {total}",
+    "arenas.participation.arguments.empty": "No argument has been published under this relation yet.",
+    "arenas.participation.arguments.publish_busy": "Publishing…",
+    "arenas.participation.arguments.publish_heading": "Publish an argument",
+    "arenas.participation.arguments.publish_intro": "Publishing debits INK from your balance according to the length of the text.",
+    "arenas.participation.arguments.publish_submit": "Publish",
+    "arenas.participation.arguments.replies": "Replies: {count}",
+    "arenas.participation.attribution.busy": "Recording…",
+    "arenas.participation.attribution.heading": "What influenced your change",
+    "arenas.participation.attribution.intro": "Choose up to {max} arguments that influenced the change.",
+    "arenas.participation.attribution.option": "{relation}: {excerpt}",
+    "arenas.participation.attribution.submit": "Record influence",
+    "arenas.participation.brand": "Goyim Arena",
+    "arenas.participation.choice.agree": "Agree",
+    "arenas.participation.choice.disagree": "Disagree",
+    "arenas.participation.choice.undecided": "Undecided",
+    "arenas.participation.errors.argument_not_found": "One of the chosen arguments is no longer available.",
+    "arenas.participation.errors.change_not_found": "This change is no longer available for attribution.",
+    "arenas.participation.errors.csrf_detail": "Reload the page and submit the form again.",
+    "arenas.participation.errors.csrf_title": "Form expired",
+    "arenas.participation.errors.immutable_position": "The initial position was already confirmed with another value.",
+    "arenas.participation.errors.insufficient_ink": "Your INK balance does not cover this publication.",
+    "arenas.participation.errors.invalid_choice": "Choose one of the listed positions.",
+    "arenas.participation.errors.invalid_content": "Write an argument of up to {max} graphemes.",
+    "arenas.participation.errors.invalid_relation": "Choose one of the listed relations.",
+    "arenas.participation.errors.required": "Provide a value for this field.",
+    "arenas.participation.errors.summary_title": "Fix the highlighted fields",
+    "arenas.participation.errors.too_many_attributions": "Choose at most {max} arguments.",
+    "arenas.participation.errors.version_conflict": "Your position changed elsewhere. Reload the page and submit again.",
+    "arenas.participation.field.content_hint": "Up to {max} graphemes — the same limit the server enforces.",
+    "arenas.participation.field.content_label": "Argument",
+    "arenas.participation.field.position_label": "Position",
+    "arenas.participation.field.relation_label": "Relation to the statement",
+    "arenas.participation.local.heading": "Where would you stand?",
+    "arenas.participation.local.hint": "Your choice stays in this browser only: nothing is sent until you sign in and confirm it.",
+    "arenas.participation.meta.category": "Category: {category}",
+    "arenas.participation.meta.language": "Content language: {language}",
+    "arenas.participation.meta.published": "Published on {instant}",
+    "arenas.participation.meta.status": "Status: {status}",
+    "arenas.participation.nav.arena": "Arena",
+    "arenas.participation.nav.document": "Public document",
+    "arenas.participation.nav.label": "Navigation",
+    "arenas.participation.nav.login": "Sign in",
+    "arenas.participation.nav.register": "Create account",
+    "arenas.participation.nav.signout": "Sign out",
+    "arenas.participation.notice.argument_published": "Argument published.",
+    "arenas.participation.notice.attribution_recorded": "Influence recorded.",
+    "arenas.participation.notice.position_changed": "Position changed.",
+    "arenas.participation.notice.position_confirmed": "Initial position confirmed.",
+    "arenas.participation.page_title": "Take part — {subject}",
+    "arenas.participation.position.anonymous": "Confirming a position requires an account.",
+    "arenas.participation.position.change_busy": "Changing position…",
+    "arenas.participation.position.change_heading": "Change position",
+    "arenas.participation.position.change_intro": "The change enters the history and cannot be undone.",
+    "arenas.participation.position.change_submit": "Change position",
+    "arenas.participation.position.confirm_busy": "Confirming position…",
+    "arenas.participation.position.confirm_heading": "Confirm initial position",
+    "arenas.participation.position.confirm_intro": "The initial position is immutable; later changes are recorded in the history.",
+    "arenas.participation.position.confirm_submit": "Confirm position",
+    "arenas.participation.position.current": "Current position: {position}",
+    "arenas.participation.position.heading": "Your position",
+    "arenas.participation.position.initial": "Initial position: {position}",
+    "arenas.participation.refusal_page_title": "Participation — Goyim Arena",
+    "arenas.participation.relation.context": "Context",
+    "arenas.participation.relation.oppose": "Oppose",
+    "arenas.participation.relation.support": "Support",
     "auth.brand": "Goyim Arena",
     "auth.errors.csrf_detail": "The form protection expired. Reload the page and submit it again.",
     "auth.errors.csrf_title": "The page is no longer valid",
@@ -448,6 +736,78 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "arenas.document.status.closed": "Fechada",
     "arenas.document.status.published": "Publicada",
     "arenas.document.status.restricted": "Restrita",
+    "arenas.participation.aggregate.checked": "Apurado em {instant}",
+    "arenas.participation.aggregate.current": "Posição atual",
+    "arenas.participation.aggregate.heading": "Resultado agregado",
+    "arenas.participation.aggregate.initial": "Posição inicial",
+    "arenas.participation.aggregate.reveal": "Revelar resultado agregado",
+    "arenas.participation.aggregate.suppressed": "A amostra é pequena demais para publicar o resultado.",
+    "arenas.participation.aggregate.total": "Participantes elegíveis: {total}",
+    "arenas.participation.arguments.empty": "Ainda não há argumento publicado nesta relação.",
+    "arenas.participation.arguments.publish_busy": "Publicando…",
+    "arenas.participation.arguments.publish_heading": "Publicar argumento",
+    "arenas.participation.arguments.publish_intro": "Publicar debita INK do seu saldo conforme o tamanho do texto.",
+    "arenas.participation.arguments.publish_submit": "Publicar",
+    "arenas.participation.arguments.replies": "Respostas: {count}",
+    "arenas.participation.attribution.busy": "Registrando…",
+    "arenas.participation.attribution.heading": "O que influenciou sua mudança",
+    "arenas.participation.attribution.intro": "Escolha até {max} argumentos que influenciaram a mudança.",
+    "arenas.participation.attribution.option": "{relation}: {excerpt}",
+    "arenas.participation.attribution.submit": "Registrar influência",
+    "arenas.participation.brand": "Goyim Arena",
+    "arenas.participation.choice.agree": "A favor",
+    "arenas.participation.choice.disagree": "Contra",
+    "arenas.participation.choice.undecided": "Sem posição",
+    "arenas.participation.errors.argument_not_found": "Um dos argumentos escolhidos não está mais disponível.",
+    "arenas.participation.errors.change_not_found": "Esta mudança não está mais disponível para atribuição.",
+    "arenas.participation.errors.csrf_detail": "Recarregue a página e envie o formulário de novo.",
+    "arenas.participation.errors.csrf_title": "Formulário expirado",
+    "arenas.participation.errors.immutable_position": "A posição inicial já foi confirmada com outro valor.",
+    "arenas.participation.errors.insufficient_ink": "Seu saldo de INK não cobre esta publicação.",
+    "arenas.participation.errors.invalid_choice": "Escolha uma das posições listadas.",
+    "arenas.participation.errors.invalid_content": "Escreva um argumento de até {max} grafemas.",
+    "arenas.participation.errors.invalid_relation": "Escolha uma das relações listadas.",
+    "arenas.participation.errors.required": "Informe um valor para este campo.",
+    "arenas.participation.errors.summary_title": "Corrija os campos indicados",
+    "arenas.participation.errors.too_many_attributions": "Escolha no máximo {max} argumentos.",
+    "arenas.participation.errors.version_conflict": "Sua posição mudou em outro lugar. Recarregue a página e envie de novo.",
+    "arenas.participation.field.content_hint": "Até {max} grafemas — o mesmo limite que o servidor aplica.",
+    "arenas.participation.field.content_label": "Argumento",
+    "arenas.participation.field.position_label": "Posição",
+    "arenas.participation.field.relation_label": "Relação com o enunciado",
+    "arenas.participation.local.heading": "Qual seria a sua posição?",
+    "arenas.participation.local.hint": "Sua escolha fica apenas neste navegador: nada é enviado até você entrar e confirmar.",
+    "arenas.participation.meta.category": "Categoria: {category}",
+    "arenas.participation.meta.language": "Idioma do conteúdo: {language}",
+    "arenas.participation.meta.published": "Publicada em {instant}",
+    "arenas.participation.meta.status": "Situação: {status}",
+    "arenas.participation.nav.arena": "Arena",
+    "arenas.participation.nav.document": "Documento público",
+    "arenas.participation.nav.label": "Navegação",
+    "arenas.participation.nav.login": "Entrar",
+    "arenas.participation.nav.register": "Criar conta",
+    "arenas.participation.nav.signout": "Sair",
+    "arenas.participation.notice.argument_published": "Argumento publicado.",
+    "arenas.participation.notice.attribution_recorded": "Influência registrada.",
+    "arenas.participation.notice.position_changed": "Posição alterada.",
+    "arenas.participation.notice.position_confirmed": "Posição inicial confirmada.",
+    "arenas.participation.page_title": "Participar — {subject}",
+    "arenas.participation.position.anonymous": "Para confirmar uma posição você precisa de uma conta.",
+    "arenas.participation.position.change_busy": "Mudando posição…",
+    "arenas.participation.position.change_heading": "Mudar posição",
+    "arenas.participation.position.change_intro": "A mudança entra no histórico e não pode ser desfeita.",
+    "arenas.participation.position.change_submit": "Mudar posição",
+    "arenas.participation.position.confirm_busy": "Confirmando posição…",
+    "arenas.participation.position.confirm_heading": "Confirmar posição inicial",
+    "arenas.participation.position.confirm_intro": "A posição inicial é imutável; as mudanças depois dela ficam registradas no histórico.",
+    "arenas.participation.position.confirm_submit": "Confirmar posição",
+    "arenas.participation.position.current": "Posição atual: {position}",
+    "arenas.participation.position.heading": "Sua posição",
+    "arenas.participation.position.initial": "Posição inicial: {position}",
+    "arenas.participation.refusal_page_title": "Participação — Goyim Arena",
+    "arenas.participation.relation.context": "Contexto",
+    "arenas.participation.relation.oppose": "Contra",
+    "arenas.participation.relation.support": "A favor",
     "auth.brand": "Goyim Arena",
     "auth.errors.csrf_detail": "A proteção do formulário expirou. Recarregue a página e envie novamente.",
     "auth.errors.csrf_title": "A página perdeu a validade",

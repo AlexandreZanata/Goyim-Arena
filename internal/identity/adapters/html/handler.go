@@ -1,30 +1,25 @@
 package html
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"mime"
 	"net/http"
 	"net/url"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/i18n"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/websurface"
 )
 
 const (
@@ -36,10 +31,6 @@ const (
 	// password is refused with this same message.
 	passwordMinLength = 8
 
-	// maxFormBytes bounds the browser form bodies with the same budget the
-	// JSON API uses for its documents (64 KiB).
-	maxFormBytes = 64 << 10
-
 	// sessionDuration is the session cookie max age, mirroring the JSON API
 	// (14 days absolute ceiling per THR-AUTH-01).
 	sessionDuration = 14 * 24 * time.Hour
@@ -47,10 +38,7 @@ const (
 	// csrfFormField is the hidden input the platform CSRF middleware reads
 	// from a form body (security.CSRFTokenManager.Middleware). A browser form
 	// cannot set a header, so the double submit travels in the body.
-	csrfFormField = "csrf_token"
-
-	// problemMediaType is the media type the platform middleware answers with.
-	problemMediaType = "application/problem+json"
+	csrfFormField = websurface.FormField
 
 	// signInHref is the page a signed-out visitor belongs to.
 	signInHref = "/login"
@@ -171,16 +159,7 @@ func NewHandler(config HandlerConfig) (*Handler, error) {
 // unusable reports whether a dependency cannot be called, which covers both the
 // nil interface and the typed nil pointer a composition passes by accident.
 func unusable(dependency any) bool {
-	if dependency == nil {
-		return true
-	}
-	value := reflect.ValueOf(dependency)
-	switch value.Kind() {
-	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
-		return value.IsNil()
-	default:
-		return false
-	}
+	return websurface.Missing(dependency)
 }
 
 // RegisterRoutes wires the journey into the provided ServeMux.
@@ -617,35 +596,28 @@ type problems map[string]string
 // cannot be read is refused with the validation page, which is what the platform
 // would answer for a body it refuses.
 func (h *Handler) form(w http.ResponseWriter, r *http.Request) (url.Values, bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxFormBytes)
-	if err := r.ParseForm(); err != nil {
-		h.refuse(w, r, http.StatusBadRequest, apperr.KindValidation, false)
-		return nil, false
-	}
-	return r.PostForm, true
+	// A body that cannot be read is refused by websurface.Form with a
+	// problem document; the route is always wrapped in htmlRefusals, which
+	// turns that document into the localized page. Writing the page here as
+	// well would write the answer twice.
+	return websurface.Form(w, r)
 }
 
 // requiredErrors translates the empty required fields of one submission, in the
 // order the form declares them.
 func (h *Handler) requiredErrors(r *http.Request, values ...value) (problems, error) {
-	var missing []value
-	for _, submitted := range values {
-		if submitted.content == "" {
-			missing = append(missing, submitted)
-		}
+	submitted := make(map[string]string, len(values))
+	for _, field := range values {
+		submitted[field.name] = field.content
 	}
-	if len(missing) == 0 {
-		return nil, nil
-	}
-	message, err := localized(r, "auth.errors.required", nil)
+	found, err := websurface.RequiredErrors(r, "auth.errors.required", submitted)
 	if err != nil {
 		return nil, err
 	}
-	found := make(problems, len(missing))
-	for _, submitted := range missing {
-		found[submitted.name] = message
+	if len(found) == 0 {
+		return nil, nil
 	}
-	return found, nil
+	return problems(found), nil
 }
 
 // registrationErrors classifies a registration failure: the two failures about
@@ -1031,10 +1003,7 @@ func (h *Handler) document(r *http.Request, titleKey string) (DocumentData, erro
 // would be refused by the middleware on the way back, which looks exactly like a
 // broken page.
 func (h *Handler) csrfToken(w http.ResponseWriter, r *http.Request) (string, error) {
-	if token, err := h.security.Cookies().GetCSRFToken(r); err == nil && h.security.CSRF().VerifyToken(token) {
-		return token, nil
-	}
-	return h.security.IssueCSRFToken(w)
+	return websurface.CSRF(h.security, w, r)
 }
 
 // renderForm writes one form document. Every page of the journey is private and
@@ -1057,15 +1026,12 @@ func (h *Handler) renderNotice(w http.ResponseWriter, r *http.Request, status in
 // template that cannot render must not leave a half-written page: the body is
 // buffered and only the finished document reaches the connection.
 func (h *Handler) render(w http.ResponseWriter, r *http.Request, status int, execute func(io.Writer) error) {
-	var body bytes.Buffer
-	if err := execute(&body); err != nil {
+	body, err := websurface.Document(execute)
+	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
-	httpcache.Private(w)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.WriteHeader(status)
-	_, _ = w.Write(body.Bytes())
+	websurface.WritePrivate(w, status, body)
 }
 
 // fail answers an unexpected failure as a problem document. The refusal
@@ -1125,126 +1091,25 @@ func refusalKeys(kind apperr.Kind, csrf bool) (string, string) {
 // translated: a document this adapter rendered passes through untouched, so the
 // translation can never rewrite a page or a redirect.
 func (h *Handler) htmlRefusals(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		buffered := &bufferedResponse{header: make(http.Header)}
-		next.ServeHTTP(buffered, r)
-
-		if problem, ok := refusalOf(buffered); ok {
-			h.refuse(w, r, buffered.status, kindForStatus(buffered.status), strings.HasPrefix(problem.Code, "csrf_"))
-			return
-		}
-		buffered.flushTo(w)
-	})
+	return websurface.Refusals(h.presentRefusal, next)
 }
 
-// problemDocument is the subset of the RFC 9457 body the translation reads.
-// Nothing else is used: the title and the detail of the wire document are
-// deliberately ignored, because the page is localized from the stable code and
-// kind (I18N_STANDARD §5).
-type problemDocument struct {
-	Code string `json:"code"`
-}
-
-// refusalOf reports whether the buffered response is a problem document the
-// translation must replace.
-func refusalOf(response *bufferedResponse) (problemDocument, bool) {
-	if response.status < http.StatusBadRequest {
-		return problemDocument{}, false
-	}
-	mediaType, _, err := mime.ParseMediaType(response.header.Get("Content-Type"))
-	if err != nil || !strings.EqualFold(mediaType, problemMediaType) {
-		return problemDocument{}, false
-	}
-	var document problemDocument
-	if err := json.Unmarshal(response.body.Bytes(), &document); err != nil {
-		return problemDocument{}, false
-	}
-	return document, true
-}
-
-// kindForStatus maps an answer to the error vocabulary. It mirrors the table the
-// JSON clients use, so a refusal keeps one meaning across the two surfaces.
-func kindForStatus(status int) apperr.Kind {
-	switch status {
-	case http.StatusUnauthorized:
-		return apperr.KindUnauthorized
-	case http.StatusForbidden:
-		return apperr.KindForbidden
-	case http.StatusNotFound:
-		return apperr.KindNotFound
-	case http.StatusConflict:
-		return apperr.KindConflict
-	case http.StatusTooManyRequests:
-		return apperr.KindRateLimited
-	default:
-		if status >= http.StatusInternalServerError {
-			return apperr.KindInternal
-		}
-		return apperr.KindValidation
-	}
-}
-
-// bufferedResponse collects a response so it can be inspected before it is sent.
-type bufferedResponse struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
-	wrote  bool
-}
-
-func (b *bufferedResponse) Header() http.Header { return b.header }
-
-func (b *bufferedResponse) WriteHeader(status int) {
-	if b.wrote {
-		return
-	}
-	b.status = status
-	b.wrote = true
-}
-
-func (b *bufferedResponse) Write(content []byte) (int, error) {
-	if !b.wrote {
-		b.WriteHeader(http.StatusOK)
-	}
-	return b.body.Write(content)
-}
-
-// flushTo replays the buffered response on the real writer.
-func (b *bufferedResponse) flushTo(w http.ResponseWriter) {
-	target := w.Header()
-	for name, values := range b.header {
-		for _, value := range values {
-			target.Add(name, value)
-		}
-	}
-	if !b.wrote {
-		b.status = http.StatusOK
-	}
-	w.WriteHeader(b.status)
-	_, _ = w.Write(b.body.Bytes())
+// presentRefusal renders one platform refusal as a localized page.
+func (h *Handler) presentRefusal(w http.ResponseWriter, r *http.Request, refusal websurface.Refusal) {
+	h.refuse(w, r, refusal.Status, refusal.Kind, refusal.CSRF)
 }
 
 // localized resolves a catalog message in the request locale, falling back to
 // the default locale so a partially translated catalog never renders an empty
-// label (I18N_STANDARD §4).
+// label (I18N_STANDARD §8).
 func localized(r *http.Request, key string, values map[string]string) (string, error) {
-	language := requestLocale(r)
-	message, err := i18n.Format(language, key, values)
-	if err == nil {
-		return message, nil
-	}
-	return i18n.Format(i18n.DefaultLocale, key, values)
+	return websurface.Localized(r, key, values)
 }
 
 // requestLocale is the interface locale of the request, as resolved by the
 // platform locale middleware.
 func requestLocale(r *http.Request) string {
-	if r != nil {
-		if tag := locale.FromContext(r.Context()); string(tag) != "" {
-			return string(tag)
-		}
-	}
-	return i18n.DefaultLocale
+	return websurface.Locale(r)
 }
 
 // passwordValues are the values of every catalog message about the password

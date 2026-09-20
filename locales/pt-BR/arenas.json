@@ -15,6 +15,104 @@
         "title": "Arena removida",
         "detail": "Esta Arena foi removida pela moderação e não está mais disponível."
       }
+    },
+    "participation": {
+      "page_title": "Participar — {subject}",
+      "refusal_page_title": "Participação — Goyim Arena",
+      "brand": "Goyim Arena",
+      "nav": {
+        "label": "Navegação",
+        "arena": "Arena",
+        "document": "Documento público",
+        "login": "Entrar",
+        "register": "Criar conta",
+        "signout": "Sair"
+      },
+      "meta": {
+        "status": "Situação: {status}",
+        "category": "Categoria: {category}",
+        "language": "Idioma do conteúdo: {language}",
+        "published": "Publicada em {instant}"
+      },
+      "choice": {
+        "agree": "A favor",
+        "disagree": "Contra",
+        "undecided": "Sem posição"
+      },
+      "relation": {
+        "support": "A favor",
+        "oppose": "Contra",
+        "context": "Contexto"
+      },
+      "local": {
+        "heading": "Qual seria a sua posição?",
+        "hint": "Sua escolha fica apenas neste navegador: nada é enviado até você entrar e confirmar."
+      },
+      "aggregate": {
+        "heading": "Resultado agregado",
+        "reveal": "Revelar resultado agregado",
+        "total": "Participantes elegíveis: {total}",
+        "current": "Posição atual",
+        "initial": "Posição inicial",
+        "checked": "Apurado em {instant}",
+        "suppressed": "A amostra é pequena demais para publicar o resultado."
+      },
+      "position": {
+        "heading": "Sua posição",
+        "anonymous": "Para confirmar uma posição você precisa de uma conta.",
+        "confirm_heading": "Confirmar posição inicial",
+        "confirm_intro": "A posição inicial é imutável; as mudanças depois dela ficam registradas no histórico.",
+        "confirm_submit": "Confirmar posição",
+        "confirm_busy": "Confirmando posição…",
+        "initial": "Posição inicial: {position}",
+        "current": "Posição atual: {position}",
+        "change_heading": "Mudar posição",
+        "change_intro": "A mudança entra no histórico e não pode ser desfeita.",
+        "change_submit": "Mudar posição",
+        "change_busy": "Mudando posição…"
+      },
+      "arguments": {
+        "empty": "Ainda não há argumento publicado nesta relação.",
+        "replies": "Respostas: {count}",
+        "publish_heading": "Publicar argumento",
+        "publish_intro": "Publicar debita INK do seu saldo conforme o tamanho do texto.",
+        "publish_submit": "Publicar",
+        "publish_busy": "Publicando…"
+      },
+      "field": {
+        "position_label": "Posição",
+        "relation_label": "Relação com o enunciado",
+        "content_label": "Argumento",
+        "content_hint": "Até {max} grafemas — o mesmo limite que o servidor aplica."
+      },
+      "attribution": {
+        "heading": "O que influenciou sua mudança",
+        "intro": "Escolha até {max} argumentos que influenciaram a mudança.",
+        "option": "{relation}: {excerpt}",
+        "submit": "Registrar influência",
+        "busy": "Registrando…"
+      },
+      "notice": {
+        "position_confirmed": "Posição inicial confirmada.",
+        "position_changed": "Posição alterada.",
+        "argument_published": "Argumento publicado.",
+        "attribution_recorded": "Influência registrada."
+      },
+      "errors": {
+        "summary_title": "Corrija os campos indicados",
+        "required": "Informe um valor para este campo.",
+        "invalid_choice": "Escolha uma das posições listadas.",
+        "invalid_relation": "Escolha uma das relações listadas.",
+        "invalid_content": "Escreva um argumento de até {max} grafemas.",
+        "immutable_position": "A posição inicial já foi confirmada com outro valor.",
+        "version_conflict": "Sua posição mudou em outro lugar. Recarregue a página e envie de novo.",
+        "insufficient_ink": "Seu saldo de INK não cobre esta publicação.",
+        "change_not_found": "Esta mudança não está mais disponível para atribuição.",
+        "argument_not_found": "Um dos argumentos escolhidos não está mais disponível.",
+        "too_many_attributions": "Escolha no máximo {max} argumentos.",
+        "csrf_title": "Formulário expirado",
+        "csrf_detail": "Recarregue a página e envie o formulário de novo."
+      }
     }
   }
 }

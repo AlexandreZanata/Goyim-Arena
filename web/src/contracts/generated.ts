@@ -13,6 +13,19 @@ export interface AccountDeletionRequest {
   readonly status: "requested" | "executed" | "canceled";
 }
 
+export interface ArenaArgumentForm {
+  readonly attempt: string;
+  readonly content: string;
+  readonly csrf_token: string;
+  readonly relation: "support" | "oppose" | "context";
+}
+
+export interface ArenaAttributionForm {
+  readonly argument_ids: ReadonlyArray<string>;
+  readonly change_id: string;
+  readonly csrf_token: string;
+}
+
 export interface ArenaDraftRequest {
   readonly category: "technology" | "science" | "philosophy" | "politics" | "economics" | "health" | "culture" | "society";
   readonly context?: string;
@@ -102,6 +115,11 @@ export interface ArenaPassSummary {
   readonly available_total: number;
   readonly checked_at: string;
   readonly lots: ReadonlyArray<ArenaPassLot>;
+}
+
+export interface ArenaPositionForm {
+  readonly csrf_token: string;
+  readonly position: "agree" | "disagree" | "undecided";
 }
 
 export interface Argument {

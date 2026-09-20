@@ -34,6 +34,17 @@ import type { BusyAttributes } from "./submission.js";
 /** Whether a submission of this page is already in flight. */
 let inFlight = false;
 
+/**
+ * Attribute marking a form whose submission is already guarded. Installation is
+ * idempotent per form because two modules of the same page may both ask for it —
+ * the account journey and the Arena participation page share this file — and a
+ * submission must not be guarded twice by accident.
+ */
+const GUARDED_ATTRIBUTE = "data-ga-guarded";
+
+/** Whether the back-forward cache listener of this document is installed. */
+let pageShowInstalled = false;
+
 /** Applies one set of managed attributes to one element, clearing the rest. */
 function applyManaged(
   element: Element,
@@ -73,6 +84,10 @@ function submitterOf(event: Event, form: HTMLFormElement): Element | null {
 
 /** Installs the guard on one form of the journey. */
 function guard(form: HTMLFormElement): void {
+  if (form.hasAttribute(GUARDED_ATTRIBUTE)) {
+    return;
+  }
+  form.setAttribute(GUARDED_ATTRIBUTE, "");
   form.addEventListener("submit", (event: Event): void => {
     const decision = submissionStart(inFlight);
     if (!decision.allow) {
@@ -95,6 +110,10 @@ export function installSubmissionGuard(document: Document = globalThis.document)
   // A page restored from the back-forward cache comes back while its submission
   // is still recorded as in flight: the navigation abandoned it, so the form has
   // to be usable again.
+  if (pageShowInstalled) {
+    return;
+  }
+  pageShowInstalled = true;
   globalThis.addEventListener("pageshow", (event: PageTransitionEvent): void => {
     if (!event.persisted) {
       return;

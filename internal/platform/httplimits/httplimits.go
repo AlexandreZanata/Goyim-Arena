@@ -170,6 +170,10 @@ var rules = []rule{
 	{class: Limits{Class: ClassAuthWrite, BodyBytes: authBodyBytes, JSONDepth: authJSONDepth, Timeout: authTimeout}, methods: methodWrite, prefix: "/logout"},
 	{class: Limits{Class: ClassAuthWrite, BodyBytes: authBodyBytes, JSONDepth: authJSONDepth, Timeout: authTimeout}, methods: methodWrite, prefix: "/verify"},
 	{class: Limits{Class: ClassAuthWrite, BodyBytes: authBodyBytes, JSONDepth: authJSONDepth, Timeout: authTimeout}, methods: methodWrite, prefix: "/reset"},
+	// The browser participation journey of the Arena (P18-T06) submits the
+	// documents of the owner surface — a position, an argument, an attribution
+	// — so it shares the owner_write budget rather than inventing a second one.
+	{class: Limits{Class: ClassOwnerWrite, BodyBytes: ownerBodyBytes, JSONDepth: ownerJSONDepth, Timeout: ownerTimeout}, methods: methodWrite, prefix: "/arenas/"},
 	{class: Limits{Class: ClassAdminWrite, BodyBytes: adminBodyBytes, JSONDepth: adminJSONDepth, Timeout: adminTimeout}, methods: methodWrite, prefix: "/api/v1/admin/"},
 	{class: Limits{Class: ClassModerationWrite, BodyBytes: moderationBodyBytes, JSONDepth: moderationJSONDepth, Timeout: moderationTimeout}, methods: methodWrite, prefix: "/api/v1/moderation/"},
 	{class: Limits{Class: ClassModerationWrite, BodyBytes: moderationBodyBytes, JSONDepth: moderationJSONDepth, Timeout: moderationTimeout}, methods: methodWrite, prefix: "/api/v1/me/moderation/"},
