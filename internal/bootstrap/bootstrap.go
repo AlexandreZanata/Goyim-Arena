@@ -1,0 +1,283 @@
+// Package bootstrap is the composition root of the process: it turns the
+// configuration and the process edges into the instances the server mounts. It
+// owns no business rule and answers no request — docs/ARCHITECTURE.md names
+// this layer and forbids it from carrying rules of its own.
+//
+// Why it exists as a package (P18-T07A): until now `arena server` mounted the
+// health routes and nothing else, so the browser journeys of the account
+// (P18-T05) and of the Arena (P18-T06) were reachable only from the tests of
+// their adapters — every module route existed in the registry and nowhere in
+// the process. Composing them belongs to one place, and the first surface to
+// land here is the account journey.
+//
+// Two rules shape it:
+//
+//   - it fails closed. A surface is mounted whole or not at all: every
+//     dependency is validated before anything is constructed, and the refusal
+//     names each missing piece, so the process never serves a partial
+//     application while looking healthy;
+//   - it composes, it does not decide. Policies, thresholds and messages come
+//     from the packages that own them; nothing here invents a default that
+//     would be invisible to the module that enforces it.
+package bootstrap
+
+import (
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"sort"
+	"strings"
+	"sync"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/argon2id"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/fakeemail"
+	identityhtml "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/html"
+	identitypostgres "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/postgres"
+	identityapp "github.com/AlexandreZanata/Goyim-Arena/internal/identity/application"
+	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clientip"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
+)
+
+// ErrIncompleteComposition marks a refusal to build a surface from a
+// composition that cannot serve it. Callers can test for it instead of
+// matching message text; the message names every missing piece.
+var ErrIncompleteComposition = errors.New("bootstrap: incomplete composition")
+
+// Options are the process edges and the configuration one surface is composed
+// from. Every field is required unless its documentation says otherwise, and a
+// missing one is a refusal, never a silent default.
+type Options struct {
+	// Env selects the environment rules: the development replacements and the
+	// cookie policy.
+	Env config.Env
+	// Logger records what the composition decided (which surface was mounted,
+	// which replacement was installed).
+	Logger *slog.Logger
+	// Pool is the PostgreSQL pool the module repositories run on.
+	Pool *pgxpool.Pool
+	// Clock is the process clock the use cases receive.
+	Clock ports.Clock
+	// Random is the process entropy source the use cases receive.
+	Random ports.Random
+	// Assets is the manifest of the frontend build the pages load. The pages
+	// reference the hashed files through it, so a surface mounted without one
+	// would render links to files that do not exist.
+	Assets assets.Manifest
+}
+
+// AccountSurface is the composed browser journey of the account, ready to be
+// mounted on the platform mux.
+type AccountSurface struct {
+	routes   []httpserver.Route
+	register func(mux *http.ServeMux)
+	sink     *fakeemail.Sender
+
+	mu      sync.Mutex
+	mounted bool
+}
+
+// ComposeAccount builds the account journey of the browser: registration,
+// email confirmation, sign in, sign out and password recovery, over the real
+// PostgreSQL repositories, the real security manager, the real throttle and
+// the real pages.
+//
+// It returns ErrIncompleteComposition — naming what is missing — rather than a
+// surface that would answer some requests and fail others.
+func ComposeAccount(options Options) (*AccountSurface, error) {
+	if err := options.validate(); err != nil {
+		return nil, err
+	}
+
+	emails, sink, err := accountEmails(options)
+	if err != nil {
+		return nil, err
+	}
+
+	repository := identitypostgres.NewRepository(options.Pool)
+
+	hasher, err := argon2id.NewDefault(options.Random)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: account journey: password hasher: %w", err)
+	}
+
+	manager, err := security.New(security.Options{
+		Env:    options.Env,
+		Clock:  options.Clock,
+		Random: options.Random,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: account journey: security manager: %w", err)
+	}
+
+	// The throttle is the only thing bounding credential guessing on this
+	// surface: the browser policy (`script-src 'self'`) refuses the challenge
+	// script of the provider, so no widget is presented here. Trusted proxies
+	// are still unconfigured — the criterion P16-T03 registered — which means
+	// forwarding headers are evidence of nothing and the peer address is what
+	// is counted.
+	resolver := clientip.New(nil)
+	throttle := ratelimit.New(ratelimit.NewLimiter(ratelimit.Options{Now: options.Clock.Now}), resolver)
+
+	// The risk signal observes a run of failed sign-ins, and `NewEnforcer`
+	// answers the surface's Observe port. Its verifier is deliberately nil:
+	// this surface never presents a challenge, and a verifier installed here
+	// would be a dependency nothing can reach.
+	risk := turnstile.NewEnforcer(
+		turnstile.Config{},
+		nil,
+		turnstile.NewFailureTracker(turnstile.FailureTrackerOptions{Now: options.Clock.Now}),
+		resolver,
+	)
+
+	templates, err := identityhtml.NewTemplates(options.Assets)
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: account journey: templates: %w", err)
+	}
+
+	handler, err := identityhtml.NewHandler(identityhtml.HandlerConfig{
+		Register: identityapp.NewRegisterAccountUseCase(
+			repository, repository, hasher, emails, options.Clock, options.Random, identitydomain.DefaultVerificationPolicy(),
+		),
+		Verify: identityapp.NewVerifyEmailUseCase(repository, repository, options.Clock),
+		Login: identityapp.NewLoginUseCase(
+			repository, repository, repository, hasher, options.Clock, options.Random, identitydomain.DefaultSessionPolicy(),
+		),
+		Logout: identityapp.NewLogoutUseCase(repository),
+		RequestPasswordReset: identityapp.NewRequestPasswordResetUseCase(
+			repository, repository, emails, options.Clock, options.Random, identitydomain.DefaultPasswordResetPolicy(),
+		),
+		CompletePasswordReset: identityapp.NewCompletePasswordResetUseCase(
+			repository, repository, repository, repository, repository, hasher, emails, options.Clock,
+		),
+		Security:   manager,
+		RateLimit:  throttle,
+		Templates:  templates,
+		RiskSignal: risk,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bootstrap: account journey: %w", err)
+	}
+
+	options.Logger.Info("account journey: composed",
+		slog.String("env", string(options.Env)),
+		slog.Int("routes", len(identityhtml.Routes())),
+	)
+
+	return &AccountSurface{
+		routes:   identityhtml.Routes(),
+		register: handler.RegisterRoutes,
+		sink:     sink,
+	}, nil
+}
+
+// Routes is the canonical route list of the surface, in the same vocabulary
+// the registry and the contract use.
+func (surface *AccountSurface) Routes() []httpserver.Route {
+	return append([]httpserver.Route(nil), surface.routes...)
+}
+
+// Surface is what the platform router mounts: the routes the journey answers
+// and the registration that installs them.
+func (surface *AccountSurface) Surface() httpserver.Surface {
+	return httpserver.Surface{Routes: surface.Routes(), Register: surface.Mount}
+}
+
+// Mount registers the surface on the mux the platform router is built from, so
+// its routes are served inside the request id, locale and security layers
+// instead of beside them.
+//
+// Mounting one surface twice is refused instead of attempted: net/http panics
+// on a duplicate pattern, and a boot that panics is not a boot that fails
+// closed.
+func (surface *AccountSurface) Mount(mux *http.ServeMux) error {
+	if mux == nil {
+		return fmt.Errorf("%w: account journey: mux is required", ErrIncompleteComposition)
+	}
+
+	surface.mu.Lock()
+	defer surface.mu.Unlock()
+	if surface.mounted {
+		return fmt.Errorf("%w: account journey is already mounted; mounting it again would register duplicate patterns", ErrIncompleteComposition)
+	}
+
+	surface.register(mux)
+	surface.mounted = true
+	return nil
+}
+
+// LocalSink returns the development email sink when the composition installed
+// one, and nil otherwise. It is the only way a development or test process can
+// follow the link that a real provider would deliver, and it exists so the
+// browser journey can be completed without a provider: the tokens live in the
+// messages this sink recorded, in this process, for this environment.
+func (surface *AccountSurface) LocalSink() *fakeemail.Sender {
+	return surface.sink
+}
+
+// validate reports every missing dependency at once, sorted by name, because
+// an operator fixing a boot failure should not discover them one per attempt.
+func (options Options) validate() error {
+	missing := make([]string, 0, 5)
+	if options.Logger == nil {
+		missing = append(missing, "logger")
+	}
+	if options.Clock == nil {
+		missing = append(missing, "clock")
+	}
+	if options.Random == nil {
+		missing = append(missing, "entropy source")
+	}
+	if options.Pool == nil {
+		missing = append(missing, "postgres pool")
+	}
+	if len(options.Assets.Assets) == 0 {
+		missing = append(missing, "asset manifest")
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return fmt.Errorf("%w: account journey: missing %s", ErrIncompleteComposition, strings.Join(missing, ", "))
+	}
+
+	switch options.Env {
+	case config.EnvDevelopment, config.EnvTest, config.EnvProduction:
+		return nil
+	default:
+		return fmt.Errorf("%w: account journey: environment %q is not one of development, test, production", ErrIncompleteComposition, options.Env)
+	}
+}
+
+// accountEmails selects the email sender of the environment.
+//
+// Development and test install the local sink the identity module already
+// documents for non-production environments, and the composition says so out
+// loud: without a provider the message is recorded and never delivered, which
+// is exactly what a person debugging a journey needs to know. Production has
+// no delivery adapter yet (P15 composed the queue and left delivery to the
+// phase that owns the provider), so it refuses to build the journey instead of
+// serving forms whose links go nowhere.
+func accountEmails(options Options) (identityapp.EmailSender, *fakeemail.Sender, error) {
+	switch options.Env {
+	case config.EnvDevelopment, config.EnvTest:
+		sink := fakeemail.NewSender()
+		options.Logger.Warn(
+			"account journey: local email sink installed; verification and recovery messages are recorded in this process and never delivered",
+			slog.String("env", string(options.Env)),
+		)
+		return sink, sink, nil
+	default:
+		return nil, nil, fmt.Errorf(
+			"%w: account journey: environment %s has no email provider adapter composed (P15 delivered the durable queue and its delivery handler is still recorded as JOB_UNKNOWN_TYPE), so a registration could not deliver its confirmation link",
+			ErrIncompleteComposition, options.Env,
+		)
+	}
+}

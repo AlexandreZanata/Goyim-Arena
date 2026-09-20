@@ -29,6 +29,7 @@ type Config struct {
 	env               Env
 	addr              string
 	adminAddr         string
+	assetsDir         string
 	databaseURL       Secret
 	logLevel          LogLevel
 	dbMaxConns        int32
@@ -157,6 +158,7 @@ func Load(environ []string) (Config, error) {
 		"ARENA_ENV":                   true,
 		"ARENA_ADDR":                  true,
 		"ARENA_ADMIN_ADDR":            true,
+		"ARENA_ASSETS_DIR":            true,
 		"ARENA_DATABASE_URL":          true,
 		"ARENA_LOG_LEVEL":             true,
 		"ARENA_DB_MAX_CONNS":          true,
@@ -184,6 +186,7 @@ func Load(environ []string) (Config, error) {
 	config := Config{
 		env:               EnvDevelopment,
 		addr:              "127.0.0.1:8080",
+		assetsDir:         DefaultAssetsDir,
 		logLevel:          LogLevelInfo,
 		dbMaxConns:        10,
 		dbMinConns:        2,
@@ -220,6 +223,17 @@ func Load(environ []string) (Config, error) {
 		config.adminAddr = raw
 		if problem := validateAdminAddr(raw); problem != "" {
 			validationErrors = append(validationErrors, ValidationError{Variable: "ARENA_ADMIN_ADDR", Problem: problem})
+		}
+	}
+
+	if raw, present := values["ARENA_ASSETS_DIR"]; present {
+		if strings.TrimSpace(raw) == "" {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: "ARENA_ASSETS_DIR",
+				Problem:  "must name the directory of an asset build (for example web/dist, produced by 'make build-web')",
+			})
+		} else {
+			config.assetsDir = raw
 		}
 	}
 
@@ -411,6 +425,15 @@ func (config Config) Addr() string { return config.addr }
 // An empty value disables profiling and other administrative endpoints.
 func (config Config) AdminAddr() string { return config.adminAddr }
 
+// DefaultAssetsDir is the directory the frontend asset pipeline writes to
+// (P18-T01). The server reads its manifest back at boot; a deployment that
+// lays the build out elsewhere points ARENA_ASSETS_DIR at it.
+const DefaultAssetsDir = "web/dist"
+
+// AssetsDir returns the directory of the hashed frontend build whose manifest
+// the server resolves through its templates.
+func (config Config) AssetsDir() string { return config.assetsDir }
+
 // DatabaseURL returns the redacted database DSN.
 func (config Config) DatabaseURL() Secret { return config.databaseURL }
 
@@ -436,8 +459,8 @@ func (config Config) DBAcquireTimeout() time.Duration { return config.dbAcquireT
 // Config can be safely logged without leaking any value.
 func (config Config) String() string {
 	return fmt.Sprintf(
-		"config{env:%s addr:%s database_url:%s log_level:%s db_max_conns:%d db_min_conns:%d}",
-		config.env, config.addr, config.databaseURL, config.logLevel, config.dbMaxConns, config.dbMinConns,
+		"config{env:%s addr:%s assets_dir:%s database_url:%s log_level:%s db_max_conns:%d db_min_conns:%d}",
+		config.env, config.addr, config.assetsDir, config.databaseURL, config.logLevel, config.dbMaxConns, config.dbMinConns,
 	)
 }
 

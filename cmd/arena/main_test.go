@@ -400,11 +400,18 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 	address := listener.Addr().String()
 	_ = listener.Close()
 
+	// The account journey is composed from the database and the frontend build
+	// (P18-T07A), so the boot needs both. The manifest is the fixture the
+	// composition tests use, pointed at explicitly: a deployment names its own
+	// directory the same way.
+	assetsDir := filepath.Join(repoRoot, "internal", "bootstrap", "testdata", "assets")
+
 	cmdHealthy := exec.Command(binary, "server")
 	cmdHealthy.Env = []string{
 		"ARENA_ADDR=" + address,
 		"ARENA_ENV=development",
 		"ARENA_DATABASE_URL=" + dsn,
+		"ARENA_ASSETS_DIR=" + assetsDir,
 		"PATH=" + os.Getenv("PATH"),
 	}
 	if err := cmdHealthy.Start(); err != nil {
@@ -448,6 +455,27 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 		t.Fatalf("unexpected payload: %s", body)
 	}
 
+	// The pages of the account journey are served by the composed binary, not
+	// only by the adapter in its own test: this is the claim P18-T07A exists to
+	// make, checked against the process an operator runs.
+	for _, page := range []string{"/register", "/verify", "/login", "/logout", "/reset", "/reset/confirm"} {
+		pageResponse, err := client.Get(baseURL + page)
+		if err != nil {
+			t.Fatalf("GET %s: %v", page, err)
+		}
+		body, err := io.ReadAll(pageResponse.Body)
+		_ = pageResponse.Body.Close()
+		if err != nil {
+			t.Fatalf("read GET %s body: %v", page, err)
+		}
+		if pageResponse.StatusCode != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200 (body: %.200s)", page, pageResponse.StatusCode, body)
+		}
+		if contentType := pageResponse.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+			t.Errorf("GET %s Content-Type = %q, want text/html", page, contentType)
+		}
+	}
+
 	// Terminate healthy server
 	_ = cmdHealthy.Process.Signal(syscall.SIGTERM)
 	_ = cmdHealthy.Wait()
@@ -466,6 +494,7 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 		"ARENA_ADDR=" + downAddress,
 		"ARENA_ENV=development",
 		"ARENA_DATABASE_URL=" + unreachableDSN,
+		"ARENA_ASSETS_DIR=" + assetsDir,
 		"PATH=" + os.Getenv("PATH"),
 	}
 	if err := cmdDown.Start(); err != nil {

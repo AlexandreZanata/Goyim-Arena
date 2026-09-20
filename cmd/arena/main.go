@@ -17,7 +17,9 @@ import (
 	// ship no system tzdata.
 	_ "time/tzdata"
 
+	"github.com/AlexandreZanata/Goyim-Arena/internal/bootstrap"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/buildinfo"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbpool"
@@ -80,11 +82,19 @@ func run(args []string, stdout *os.File) error {
 	return nil
 }
 
-// runServer boots the hardened HTTP server (P02-T05): typed configuration
-// from the environment, the structured JSON logger, request ID correlation
-// with the health routes, and a graceful shutdown on SIGTERM/SIGINT. It is
-// the process edge — the only place allowed to own signals and the real
+// runServer boots the hardened HTTP server (P02-T05) and composes the module
+// surfaces it serves (P18-T07A): typed configuration from the environment, the
+// structured JSON logger, request ID correlation, the account browser journey
+// mounted on the platform mux, and a graceful shutdown on SIGTERM/SIGINT. It
+// is the process edge — the only place allowed to own signals and the real
 // clock/randomness sources.
+//
+// With ARENA_DATABASE_URL set, the account journey is composed and served; the
+// frontend build named by ARENA_ASSETS_DIR is required for it, because a page
+// mounted without its manifest would render links to files that do not exist.
+// Without the DSN the process serves the health routes only and says so in the
+// log: an application that answers 404 on every page while reporting itself
+// ready is worse than a probe that declares what it is.
 func runServer(args []string, stdout *os.File) error {
 	if len(args) > 0 {
 		return fmt.Errorf("server takes no arguments\n\nUsage: arena server")
@@ -96,20 +106,50 @@ func runServer(args []string, stdout *os.File) error {
 	ids := clockseed.NewIDGenerator("req", clockseed.NewRandom(), clockseed.NewClock())
 	locResolver := locale.NewResolver()
 
+	// One clock and one entropy source for the whole process: a request
+	// observed by two layers must carry the same instant, and a token minted by
+	// a use case must come from the same source the composition was validated
+	// against.
+	clock := clockseed.NewClock()
+	random := clockseed.NewRandom()
+
 	var readyCheckers []httpserver.ReadyChecker
+	var surfaces []httpserver.Surface
 	if cfg.DatabaseURL().IsSet() {
 		dsn := string(cfg.DatabaseURL().Unredacted())
 		poolCfg := dbpool.FromConfig(cfg)
-		dbClock := clockseed.NewClock()
-		pool, err := dbpool.New(context.Background(), dsn, poolCfg, logger, dbClock)
+		pool, err := dbpool.New(context.Background(), dsn, poolCfg, logger, clock)
 		if err != nil {
 			return fmt.Errorf("initialize database pool: %w", err)
 		}
 		defer pool.Close()
 		readyCheckers = append(readyCheckers, pool)
+
+		// The account journey is composed whole or not at all: the database
+		// and the frontend build are both required, and the boot is the only
+		// place where noticing a missing one is cheap.
+		manifest, err := assets.LoadFile(cfg.AssetsDir())
+		if err != nil {
+			return fmt.Errorf("compose the account journey: %w (run 'make build-web' or point ARENA_ASSETS_DIR at an existing build)", err)
+		}
+		account, err := bootstrap.ComposeAccount(bootstrap.Options{
+			Env:    cfg.Env(),
+			Logger: logger,
+			Pool:   pool.Pool(),
+			Clock:  clock,
+			Random: random,
+			Assets: manifest,
+		})
+		if err != nil {
+			return err
+		}
+		surfaces = append(surfaces, account.Surface())
+		logger.Info("http server: account journey mounted", slog.Int("routes", len(account.Routes())))
+	} else {
+		logger.Warn("http server: account journey not mounted (ARENA_DATABASE_URL is not set); only the health routes are served")
 	}
 
-	handler, err := httpserver.NewMux(ids, locResolver, securityheaders.Config{Production: cfg.IsProduction()}, readyCheckers...)
+	handler, err := httpserver.NewMuxWith(ids, locResolver, securityheaders.Config{Production: cfg.IsProduction()}, surfaces, readyCheckers...)
 	if err != nil {
 		return err
 	}

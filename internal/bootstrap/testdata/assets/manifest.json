@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "assets": {
+    "pages/auth.js": {
+      "path": "/assets/pages-auth.js",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "styles/reset.css": {
+      "path": "/assets/styles-reset.css",
+      "sha256": "2c26b46b68ffc68ff99b453c1d30413413422d706483bfa0f98a5e886266e7ae"
+    },
+    "styles/tokens.css": {
+      "path": "/assets/styles-tokens.css",
+      "sha256": "fcde2b2edba56bf408601fb721fe9b5c338d10ee429ea04fae5511b68fbf8fb9"
+    },
+    "styles/base.css": {
+      "path": "/assets/styles-base.css",
+      "sha256": "a1c1d4c0f9e5da9e19d8f0ac0b5b53a2a8f0f2e6b2b2d1a0c6e5e4d3c2b1a09f"
+    },
+    "styles/primitives.css": {
+      "path": "/assets/styles-primitives.css",
+      "sha256": "b2d2e5d1a0f6eb0f2a0e9b1d1c6c64b3b9a1a3f7c3c3e2b1d7f6f5e4d3c2b1a0"
+    },
+    "styles/auth.css": {
+      "path": "/assets/styles-auth.css",
+      "sha256": "c3e3f6e2b1a7fc1a3b1f0c2e2d7d75c4c0b2b4a8d4d4f3c2e8a7a6f5e4d3c2b1"
+    }
+  }
+}

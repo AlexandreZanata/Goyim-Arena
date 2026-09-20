@@ -9,6 +9,9 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 )
 
 type Manifest struct {
@@ -37,6 +40,34 @@ func Load(reader io.Reader) (Manifest, error) {
 		if name == "" || record.Path == "" || record.SHA256 == "" {
 			return Manifest{}, fmt.Errorf("assets: invalid record %q", name)
 		}
+	}
+	return manifest, nil
+}
+
+// ManifestFileName is the file cmd/assetgen writes into its output directory
+// and the composition reads back.
+const ManifestFileName = "manifest.json"
+
+// LoadFile loads the manifest of one build directory. The file is named
+// explicitly in the failure, because "manifest.json not found" is only useful
+// when it also says which build produced it — the composition turns exactly
+// this error into the boot refusal that tells an operator to run the asset
+// build.
+func LoadFile(directory string) (Manifest, error) {
+	if strings.TrimSpace(directory) == "" {
+		return Manifest{}, errors.New("assets: asset directory is required")
+	}
+
+	path := filepath.Join(directory, ManifestFileName)
+	file, err := os.Open(path)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("assets: open %s: %w", path, err)
+	}
+	defer file.Close()
+
+	manifest, err := Load(file)
+	if err != nil {
+		return Manifest{}, fmt.Errorf("%w (file %s)", err, path)
 	}
 	return manifest, nil
 }

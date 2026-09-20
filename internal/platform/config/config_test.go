@@ -7,6 +7,37 @@ import (
 	"testing"
 )
 
+// TestLoadReadsTheAssetDirectory covers P18-T07A: where the frontend build of
+// the server lives is configuration, because the process that serves the pages
+// is not the process that builds them.
+func TestLoadReadsTheAssetDirectory(t *testing.T) {
+	t.Parallel()
+
+	defaulted, err := Load(environ())
+	if err != nil {
+		t.Fatalf("load with no ARENA_* variables: %v", err)
+	}
+	if defaulted.AssetsDir() != DefaultAssetsDir {
+		t.Errorf("assets dir = %q, want the build directory default %q", defaulted.AssetsDir(), DefaultAssetsDir)
+	}
+
+	configured, err := Load(environ("ARENA_ASSETS_DIR=/srv/arena/assets"))
+	if err != nil {
+		t.Fatalf("load with ARENA_ASSETS_DIR: %v", err)
+	}
+	if configured.AssetsDir() != "/srv/arena/assets" {
+		t.Errorf("assets dir = %q, want the configured directory", configured.AssetsDir())
+	}
+
+	_, err = Load(environ("ARENA_ASSETS_DIR=   "))
+	if err == nil {
+		t.Fatal("a blank ARENA_ASSETS_DIR was accepted; the process would read no manifest and never say why")
+	}
+	if !strings.Contains(err.Error(), "ARENA_ASSETS_DIR") {
+		t.Errorf("error should name ARENA_ASSETS_DIR: %v", err)
+	}
+}
+
 func environ(entries ...string) []string {
 	return append([]string{
 		"HOME=/home/operator",
