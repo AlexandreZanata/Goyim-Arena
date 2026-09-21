@@ -126,6 +126,14 @@ func normalizeOrigin(origin string) string {
 
 // validateOriginOrReferer verifies that the request origin or referer matches
 // configured allowed origins or the request's own Host header.
+//
+// An origin that is present and carries no host — "null", the value the HTML
+// standard produces for a form submission under a referrer policy of
+// "no-referrer" — is refused here like any other mismatch. That is deliberate
+// and it is why the product's referrer policy has to be one that keeps the
+// origin (P18-T07D): tolerating "null" would leave the double submit as the
+// only browser protection and contradict the strict-origin control declared
+// in docs/THREAT_MODEL.md (THR-AUTH-03).
 func (m *CSRFTokenManager) validateOriginOrReferer(r *http.Request) error {
 	originHeader := r.Header.Get("Origin")
 	if originHeader != "" {

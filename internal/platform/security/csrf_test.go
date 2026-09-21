@@ -284,6 +284,67 @@ func TestCSRFMiddleware_CrossOriginValidation(t *testing.T) {
 	}
 }
 
+// TestCSRFMiddleware_SameOriginSubmissionCarriesItsOrigin is the pair the
+// browser policy rests on (P18-T07D): a submission from the host that served
+// the page is accepted because it carries that host as its origin, and a
+// submission whose origin was nullified — which is what a referrer policy of
+// "no-referrer" produces for every form of the product — is refused. The
+// second half is the reason the referrer policy has to keep the origin; the
+// first is what makes the journey possible at all.
+func TestCSRFMiddleware_SameOriginSubmissionCarriesItsOrigin(t *testing.T) {
+	mgr := newTestCSRFManager(t, nil, false)
+	token, err := mgr.GenerateToken()
+	if err != nil {
+		t.Fatalf("generate token: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		origin      string
+		expected    int
+		expectedErr string
+	}{
+		{
+			name:     "the origin of the host that serves the page",
+			origin:   "https://arena.example",
+			expected: http.StatusNoContent,
+		},
+		{
+			name:        "an origin nullified by the referrer policy",
+			origin:      "null",
+			expected:    http.StatusForbidden,
+			expectedErr: "csrf_origin_mismatch",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			target := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusNoContent)
+			})
+			handler := mgr.Middleware()(target)
+
+			req := httptest.NewRequest(http.MethodPost, "https://arena.example/arenas/tema", nil)
+			req.Header.Set("Origin", tc.origin)
+			req.Header.Set(security.DefaultCSRFHeaderName, token)
+			req.AddCookie(&http.Cookie{
+				Name:  security.DefaultCSRFCookieName,
+				Value: token,
+			})
+
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			if w.Code != tc.expected {
+				t.Fatalf("POST with Origin %q: status = %d, want %d (body: %s)", tc.origin, w.Code, tc.expected, w.Body.String())
+			}
+			if tc.expectedErr != "" {
+				assertProblemCode(t, w, tc.expectedErr)
+			}
+		})
+	}
+}
+
 func assertProblemCode(t *testing.T, w *httptest.ResponseRecorder, expectedCode string) {
 	t.Helper()
 	var problem struct {

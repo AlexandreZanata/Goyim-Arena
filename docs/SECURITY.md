@@ -60,9 +60,9 @@ Limites conhecidos, que precisam de decisão antes do beta:
 - HTML inicial usa `html/template` com escaping padrão; HTML arbitrário de usuário é proibido.
 - Componentes TypeScript usam DOM seguro e `textContent`; `innerHTML` é proibido para dados dinâmicos.
 - Conteúdo do MVP é plaintext. Markdown, se introduzido, exige parser com allowlist e sanitização.
-- CSRF token em toda mutação baseada em cookie, além de validação de origem quando aplicável.
+- CSRF token em toda mutação baseada em cookie, além de validação de origem quando aplicável: `Origin`/`Referer` precisam casar com a allowlist ou com o `Host` que atende a página, e uma origem presente sem host (`null`) é recusada como qualquer divergência.
 - CSP restritiva; módulos e estilos próprios, sem `unsafe-inline` ou `unsafe-eval` por padrão.
-- Headers: HSTS, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy` e proteção de framing.
+- Headers: HSTS, `X-Content-Type-Options`, `Permissions-Policy` e proteção de framing. `Referrer-Policy` é `same-origin`: nada sai para outra origem e a submissão na mesma origem continua carregando a origem real, que é o que a validação de `Origin` do CSRF lê. `no-referrer` está proibido aqui porque anula essa origem — sob essa política o padrão HTML serializa o `Origin` de um envio de formulário como `null` e **todo** envio de browser era recusado (P18-T07D).
 - Uploads não entram no MVP. Quando entrarem, usar object storage, tipo detectado, limites e domínio de entrega separado quando necessário.
 - Redirecionamentos e URLs externas passam por validação.
 
