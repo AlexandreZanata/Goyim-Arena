@@ -127,8 +127,14 @@ func renderTS(bundle *Bundle) ([]byte, error) {
 	}
 	body.WriteString(";\n\n")
 
-	body.WriteString("/** Named placeholders per message key. */\n")
-	body.WriteString("export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = Object.freeze({\n")
+	// The placeholder map is emitted with literal types (P18-T09) on purpose: the
+	// frontend translator derives, per key, which named values a message accepts,
+	// so `translate("auth.errors.weak_password", { min: 8 })` compiles and the
+	// same call without `min` does not. The `satisfies` clause keeps that
+	// precision without giving up the invariant that every entry is a list of
+	// names.
+	body.WriteString("/** Named placeholders per message key: the exact values one translation accepts. */\n")
+	body.WriteString("export const messagePlaceholders = Object.freeze({\n")
 	for _, namespace := range bundle.Namespaces {
 		for _, key := range bundle.keysOf(namespace) {
 			quoted := make([]string, 0, len(bundle.Placeholders[namespace][key]))
@@ -138,7 +144,7 @@ func renderTS(bundle *Bundle) ([]byte, error) {
 			body.WriteString(fmt.Sprintf("  %q: [%s],\n", key, strings.Join(quoted, ", ")))
 		}
 	}
-	body.WriteString("});\n\n")
+	body.WriteString("} as const satisfies Readonly<Record<string, readonly string[]>>);\n\n")
 
 	body.WriteString("/** Localized messages per locale per key. */\n")
 	body.WriteString("export const messages: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({\n")

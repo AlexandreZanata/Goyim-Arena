@@ -22,7 +22,11 @@ declare module "node:assert/strict" {
     deepEqual(actual: unknown, expected: unknown, message?: string): void;
     match(value: string, pattern: RegExp, message?: string): void;
     doesNotMatch(value: string, pattern: RegExp, message?: string): void;
-    throws(fn: () => unknown, error?: RegExp | string, message?: string): void;
+    // The third shape is the constructor of the error the call must throw. The
+    // i18n runtime refuses with typed errors (`MissingMessageError`,
+    // `MissingPlaceholderError`, `TypeError`, `RangeError`), and asserting the
+    // class is both stronger and less brittle than matching a message string.
+    throws(fn: () => unknown, error?: RegExp | string | (new (...args: never[]) => object), message?: string): void;
     rejects(action: Promise<unknown> | (() => Promise<unknown>), message?: string): Promise<void>;
   }
   const assert: Assert;
@@ -39,6 +43,7 @@ declare module "node:fs" {
 
 declare module "node:path" {
   export function join(...parts: string[]): string;
+  export function dirname(path: string): string;
 }
 
 /** Node exposes its own module directory on `import.meta`. */

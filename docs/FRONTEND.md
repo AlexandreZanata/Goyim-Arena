@@ -110,7 +110,28 @@ CSS deve funcionar em forced colors, zoom de 200%, reduced motion e navegação 
 
 ## 10. i18n
 
-Textos não ficam espalhados em componentes. Catálogos tipados por locale vivem em módulo próprio. Arena mantém idioma independente do locale da interface. Formatação usa `Intl` nativo.
+Textos não ficam espalhados em componentes. Catálogos tipados por locale vivem em módulo próprio gerado (`web/src/i18n/generated.ts`, produzido por `cmd/i18ngen` a partir de `locales/`). Arena mantém idioma independente do locale da interface. Formatação usa `Intl` nativo.
+
+### 10.1 O runtime do frontend
+
+O browser consome os catálogos por um runtime próprio, sem dependência de terceiros, em quatro módulos:
+
+- `web/src/i18n/locale.ts` — identidade do locale: allowlist (`pt-BR`, `en-US`), canonicalização por `Intl.getCanonicalLocales` e resolução que devolve **apenas** um locale que o produto publica. Um valor próximo (`pt-PT`), malformado (`pt_BR`, uma tag com markup) ou de outro tipo nunca é refletido; sem candidato válido, cai no default do produto. É a contraparte no browser da precedência do servidor: o documento já chega renderizado no locale resolvido.
+- `web/src/i18n/formats.ts` — helpers sobre `Intl`: `formatNumber`, `formatCurrencyMinor`, `formatInstant`, `formatRelativeTime`, `formatList` e `pluralCategory`. O locale é sempre explícito. Dinheiro usa minor units inteiros + currency ISO e é montado por aritmética inteira, sem passar por ponto flutuante, com a escala lida do próprio `Intl` (2 para BRL e USD, 0 para JPY, 3 para BHD) e o restante da formatação (símbolo, posição, separadores, sinal) tomado da renderização do ICU; um valor fracionário ou fora do intervalo seguro é recusado, não arredondado.
+- `web/src/i18n/translator.ts` — `createTranslator(locale, { catalog?, namespaces?, fallbackLocale? })`: carrega o catálogo do locale restrito aos namespaces pedidos, interpola placeholders nomeados (valor numérico é formatado para o locale da página) e recusa o que não consegue renderizar. A substituição é uma passada única, então um valor que contenha `{outro}` permanece chaves literais e nunca é reexpandido; o catálogo é injetável, que é como os testes provam o mecanismo de plural e como o pseudo-locale da T10 lê um catálogo derivado.
+- `web/src/i18n/localization.ts` — `createLocalization(locale)`: o controller **de uma página**. Trocar de idioma troca o translator e notifica quem assinou, sem recarregar o documento. A instância é criada pela página, nunca um singleton de módulo, então duas páginas do mesmo processo jamais herdam o idioma uma da outra.
+
+Contrato e chave ausente:
+
+- páginas e componentes recebem o texto pelo próprio contrato (propriedade ou atributo, como as primitives já fazem); só o runtime lê o catálogo gerado, e `web/tests/architecture.test.ts` reprova qualquer outro módulo que o importe — resolvendo o specifier contra o arquivo, para que `./generated.js` e `../i18n/generated.js` sejam a mesma acusação;
+- chave ausente é erro (`MissingMessageError`), nunca a chave crua na tela; `fallbackLocale` (default `pt-BR`) é o caminho de resiliência de produção de `I18N_STANDARD.md` §8;
+- placeholder declarado sem valor também é erro (`MissingPlaceholderError`), e a passada de substituição é a rede de segurança para um catálogo cujo texto discorde da própria declaração.
+
+Plural usa variantes estruturadas por categoria CLDR (`chave.one`, `chave.other`), selecionadas por `Intl.PluralRules`: o zero é `one` em `pt-BR` e `other` em `en-US`, e comparar o número com um daria a resposta errada. Nenhuma mensagem do catálogo usa variantes hoje; o que existe é o mecanismo, provado com catálogo injetado.
+
+Formatação implícita (`toLocaleString()` e companhia, sem argumentos) é proibida por gate: ela usaria o locale do navegador de quem lê em vez do locale em que a página foi renderizada.
+
+Testes: `web/tests/i18n` (os dois locales, plural zero/one/other, BRL/USD/JPY/BHD, instante e fuso com transição de DST, lista, relative time, chave ausente, placeholder malicioso, troca de locale sem reload, separação entre páginas) e `web/tests/i18n/types.test.ts`, que usa `@ts-expect-error` para provar que as declarações geradas continuam literais — se uma delas deixar de ser erro, o `tsc` reprova a expectativa não usada.
 
 ## 11. Orçamentos iniciais
 

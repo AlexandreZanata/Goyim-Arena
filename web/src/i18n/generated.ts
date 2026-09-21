@@ -369,8 +369,8 @@ export type MessageKey =
   | "transparency.document.value"
 ;
 
-/** Named placeholders per message key. */
-export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = Object.freeze({
+/** Named placeholders per message key: the exact values one translation accepts. */
+export const messagePlaceholders = Object.freeze({
   "arenas.document.gone.detail": [],
   "arenas.document.gone.title": [],
   "arenas.document.not_found.detail": [],
@@ -546,7 +546,7 @@ export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = 
   "transparency.document.period": ["end", "start", "timezone"],
   "transparency.document.updated": ["at", "version"],
   "transparency.document.value": [],
-});
+} as const satisfies Readonly<Record<string, readonly string[]>>);
 
 /** Localized messages per locale per key. */
 export const messages: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
