@@ -20,7 +20,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -141,6 +141,21 @@ caddy-verify:
 	tools/caddyaudit/verify.sh
 	@echo "caddy-verify: ok"
 
+# backup-verify é o gate do backup e do PITR (P19-T04): julga o compose
+# commitado, sobe um PostgreSQL descartável com os argumentos que o próprio
+# arquivo declara, mede a arquivamento contínuo pelo pg_stat_archiver, criptografa
+# e envia um base backup para um armazenamento compatível com S3, destrói o
+# primário e restaura num cluster vazio até um instante escolhido — afirmando o
+# que voltou, o que não voltou, as migrations, o checksum das linhas e o que a
+# retenção remove. Exige daemon Docker, como image-verify.
+#
+# ARENA_IMAGE alimenta o passo de migrations e ARENA_BACKUP_S3_IMAGE troca o
+# armazenamento; sem elas, o gate usa a imagem local e o digest do MinIO que o
+# repositório verificou.
+backup-verify:
+	ARENA_IMAGE=$(IMAGE) deploy/backup/verify.sh
+	@echo "backup-verify: ok"
+
 # image-scan procura vulnerabilidades conhecidas na imagem construída. Ele exige
 # um scanner instalado fora do repositório (o padrão é trivy), exatamente como
 # test-load-smoke exige k6; sem ele o alvo falha explicitamente e nunca retorna
@@ -227,7 +242,7 @@ verify: fmt-check generate-check test-unit test-integration test-contract test-s
 		echo "  - $$gate"; \
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
-	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify; do \
+	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify backup-verify; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."

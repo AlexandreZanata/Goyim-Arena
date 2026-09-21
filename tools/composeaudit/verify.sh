@@ -101,6 +101,17 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 \
 	-subj "/CN=${SITE}" -addext "subjectAltName=DNS:${SITE}" >/dev/null 2>&1 ||
 	fail "openssl could not generate the throwaway origin certificate"
 
+# The database's backup mounts are the operator's files (P19-T04): the tool the
+# scripts call and the sealing key. The gate stands in for both, because a bind
+# mount whose host path does not exist is a *directory* Docker creates — which
+# would both litter the checkout and hand the archive a path that is not the
+# tool. The tool here is a placeholder: this gate is about the topology, and the
+# pipeline that uses it is proved by `make backup-verify`.
+printf '#!/bin/sh\nexit 0\n' >"$WORK_DIR/backupctl"
+chmod 0755 "$WORK_DIR/backupctl"
+printf 'not a key, and nothing in this gate opens it\n' >"$WORK_DIR/backup.key"
+chmod 0600 "$WORK_DIR/backup.key"
+
 cat >"$WORK_DIR/.env.production" <<EOF
 COMPOSE_ARENA_IMAGE=${APPLICATION_IMAGE}
 COMPOSE_ENV_FILE=${WORK_DIR}/.env.production
@@ -113,6 +124,8 @@ COMPOSE_HTTPS_PORT=0
 COMPOSE_SITE_ADDRESS=${SITE}
 COMPOSE_TLS_CERT_FILE=${WORK_DIR}/origin.crt
 COMPOSE_TLS_KEY_FILE=${WORK_DIR}/origin.key
+COMPOSE_BACKUP_TOOL=${WORK_DIR}/backupctl
+COMPOSE_BACKUP_KEY_FILE=${WORK_DIR}/backup.key
 ARENA_ENV=production
 ARENA_DATABASE_URL=postgres://arena:${DB_PASSWORD}@db:5432/arena?sslmode=disable
 ARENA_CURSOR_SECRET=compose-verify-cursor-secret-32-bytes

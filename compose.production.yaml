@@ -36,6 +36,14 @@
 #             measurements, and a limit copied from another machine is a guess
 #             wearing a number.
 #
+# The database archives its WAL (P19-T04): `archive_mode`, `archive_command` and
+# the mounts it needs are declared in its own block, the script it calls is
+# `deploy/backup/`, and the settings that script reads (`BACKUP_S3_*`,
+# `BACKUP_BIN`) come from the database's own environment file — they belong to
+# the process that ships the segments, not to the processes that serve requests.
+# `tools/backupctl check-compose` refuses this file when the archive is
+# incomplete, and `make backup-verify` proves the pipeline against a real server.
+#
 # Deliberately absent: migrations. A release applies them as its own step with
 # this same image (docs/DEPLOYMENT.md §5.5, P19-T07), because a container that
 # migrates while its neighbours serve is a schema change racing a request.
@@ -71,10 +79,57 @@ services:
       # test databases use: an index built under a different collation is not
       # the index the queries were written against.
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      # The standard libpq variable the backup scripts inside this container use
+      # to reach the local server (they run as root, and `root` is not a role).
+      # It is the same role POSTGRES_USER creates, named once.
+      PGUSER: arena
+    # Continuous WAL archiving (P19-T04). Every segment this server completes is
+    # shipped, sealed, to the object store, and that archive is what turns a
+    # daily base backup into a point-in-time restore.
+    #
+    # The flags are here rather than in a mounted postgresql.conf because this
+    # file is the deployment: `tools/backupctl check-compose` refuses a db
+    # service without them, `make verify` runs that refusal, and the behaviour
+    # gate (deploy/backup/verify.sh) starts its server with this same command,
+    # read from this same file. A setting that lived in a second place would be
+    # a setting that drifts from the one the gate exercises.
+    #
+    #   archive_mode=on        without it the server recycles WAL unwritten and
+    #                          the store goes quiet without anything failing;
+    #   archive_timeout=300    the bound on lost history: a segment is archived
+    #                          when it fills *or* after five minutes, and the
+    #                          published RPO of §7 is fifteen minutes;
+    #   wal_level=replica      the floor for an archive a restore can replay;
+    #   max_wal_senders        room for pg_basebackup to stream while the
+    #                          application keeps writing;
+    #   wal_keep_size=512MB    what the server refuses to recycle while the
+    #                          archive is failing, so a stall is a stall and not
+    #                          a permanent gap in the history.
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=/opt/backup/archive-wal.sh %p %f
+      - -c
+      - archive_timeout=300
+      - -c
+      - max_wal_senders=3
+      - -c
+      - wal_keep_size=512MB
     volumes:
       # postgres:18+ layout: one mount at /var/lib/postgresql, with the cluster
       # in a subdirectory so pg_upgrade --link stays usable.
       - db-data:/var/lib/postgresql
+      # The backup scripts, the tool they call and the sealing key. The first
+      # two are read-only copies of committed files; the key is a file the
+      # operator owns and is never an environment variable, because a key in the
+      # environment is a key in `docker inspect`.
+      - "${COMPOSE_BACKUP_SCRIPTS_DIR:-./deploy/backup}:/opt/backup:ro"
+      - "${COMPOSE_BACKUP_TOOL:-./bin/backupctl}:/opt/backup-tool/backupctl:ro"
+      - "${COMPOSE_BACKUP_KEY_FILE:-./secrets/backup.key}:/run/secrets/backup_key:ro"
     networks:
       - internal
     healthcheck:

@@ -170,15 +170,23 @@ Migrations destrutivas exigem backup, estimativa de lock, janela e ADR quando ma
 
 ## 7. Backup
 
-Antes do primeiro usuário pagante:
+WAL contínuo e base backup para storage externo compatível com S3 (P19-T04). O exercício `deploy/backup/verify.sh` — `ARENA_IMAGE=<tag> make backup-verify`, exige daemon Docker — é o gate: julga o `compose.production.yaml` commitado, sobe o servidor com os argumentos que o próprio arquivo declara, mede o arquivamento pelo `pg_stat_archiver`, envia um base backup selado, **destrói o primário**, restaura num cluster vazio até um instante escolhido e compara o que voltou com o que existia.
 
-- WAL contínuo para storage externo compatível com S3;
-- base backup diário;
-- criptografia em trânsito e repouso;
-- credencial de backup com privilégio mínimo;
-- retenção documentada;
-- teste mensal automatizado de restauração em ambiente isolado;
-- alerta para atraso ou falha.
+- **Arquivamento.** O comando do serviço `db` carrega `archive_mode=on`, `wal_level=replica`, `archive_command=/opt/backup/archive-wal.sh %p %f`, `archive_timeout=300` e `wal_keep_size=512MB`. `tools/backupctl check-compose` reprova o arquivo quando qualquer um deles se perde, porque um servidor sem arquivamento recicla WAL não escrito e um armazenamento que para de receber segmentos se parece exatamente com um banco quieto.
+- **Objetos selados.** `base-backup.sh` roda `pg_basebackup -Ft -z -X none` e sobe dois objetos: o `.tar.gz.enc` e, por último, o manifesto que o completa (com o checksum do selado e o LSN inicial). O WAL vem do arquivo, não do tarball — `-X none` de propósito, para que uma lacuna no arquivamento seja visível no exercício e não escondida dentro do backup. A ordem das subidas faz de uma execução interrompida um objeto que nenhuma restauração seleciona.
+- **Criptografia.** Cada objeto é selado com a chave montada em `/run/secrets/backup_key`, sempre arquivo e nunca variável de ambiente (chave em ambiente é chave em `docker inspect`). A ferramenta recusa chave legível além do dono e o exercício mede o resultado: baixa o objeto como o armazenamento o guarda e prova que a linha marcada do exercício não está naqueles bytes, enquanto está no primário.
+- **Restauração e retenção.** `restore.sh` recupera até `recovery_target_time`, espera a promoção (`pg_is_in_recovery()` respondido pelo servidor, não inferido do log) e devolve o tempo gasto. `retention.sh` aplica janela e piso; `prune` só apaga com `--apply`, nunca remove o primeiro segmento de que o backup mantido mais antigo precisa e nunca toca num nome que não seja segmento de WAL.
+
+O operador fornece três coisas que não entram no Git: `secrets/backup.key` (0600, ignorado pelo Git), o binário `backupctl` montado em `/opt/backup-tool/backupctl` (caminho em `BACKUP_BIN`; não fica sob `/opt/backup` porque um bind mount aninhado dentro de um bind mount somente leitura não sobe) e o endpoint, bucket e credencial do armazenamento (`BACKUP_S3_*`). Como `archive_command` roda como o usuário `postgres` dentro do contêiner, a chave **dele** é um arquivo próprio, dono `postgres`, modo 0600 — alargar o modo do arquivo do operador para o servidor ler seria entregar a chave a todo processo do host.
+
+Medido no exercício: **RTO de 2 s** (perda do primário até um servidor aceitando escrita no alvo) e RPO limitado por `archive_timeout=300`. A meta de 15 minutos continua meta: a verificação em ambiente isolado é manual (`make backup-verify`) e um alerta de atraso ou falha do arquivamento é a P19-T06.
+
+Antes do primeiro usuário pagante, continuam pendentes:
+
+- exercício de restauração em agenda (hoje ele roda sob demanda);
+- alerta para atraso ou falha do arquivamento;
+- armazenamento durável fora da VPS;
+- retenção publicada como política, com o expurgo em agenda.
 
 Meta inicial: RPO de até 15 minutos e RTO de até 4 horas. A meta só pode ser publicada como garantia depois de exercícios reais. Backup na mesma VPS não conta como backup.
 
