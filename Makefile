@@ -20,7 +20,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke image-build image-verify image-scan compose-verify generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -128,6 +128,19 @@ compose-verify: image-build
 	ARENA_IMAGE=$(IMAGE) tools/composeaudit/verify.sh
 	@echo "compose-verify: ok"
 
+# caddy-verify é o gate da origem Caddy (P19-T03): valida o Caddyfile com a
+# imagem que o próprio compose fixa, exige que o arquivo seja o que `caddy fmt`
+# escreveria, e roda um Caddy de verdade atrás de um upstream stub para afirmar
+# os cabeçalhos que passam, a compressão, quem é acreditado sobre o endereço do
+# visitante, o que sai quando a aplicação não responde e o que uma sonda de
+# admin alcança. Exige daemon Docker, como image-verify.
+#
+# ARENA_CADDY_IMAGE sobrescreve a imagem; sem ela, o gate lê o digest fixado em
+# compose.production.yaml, que é o que o deploy roda.
+caddy-verify:
+	tools/caddyaudit/verify.sh
+	@echo "caddy-verify: ok"
+
 # image-scan procura vulnerabilidades conhecidas na imagem construída. Ele exige
 # um scanner instalado fora do repositório (o padrão é trivy), exatamente como
 # test-load-smoke exige k6; sem ele o alvo falha explicitamente e nunca retorna
@@ -214,7 +227,7 @@ verify: fmt-check generate-check test-unit test-integration test-contract test-s
 		echo "  - $$gate"; \
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
-	@for gate in test-e2e test-load-smoke image-verify image-scan compose-verify; do \
+	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."

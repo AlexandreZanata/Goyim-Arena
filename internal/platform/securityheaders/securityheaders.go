@@ -49,6 +49,38 @@ const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 
 // served with the wrong type into script execution.
 const contentTypeOptions = "nosniff"
 
+// Header is one field of the policy, named and valued exactly as the
+// middleware writes it.
+type Header struct {
+	Name  string
+	Value string
+}
+
+// Policy returns the policy of one environment as the fields the middleware
+// delivers, in the order it delivers them.
+//
+// It exists so that a component which carries the same policy can be compared
+// against this one instead of keeping a second copy of the answer. The edge
+// does exactly that: its own error responses — the ones this process emits when
+// the application never answered — carry the policy too, and the gate that
+// refuses a drifted copy (`tools/caddyaudit`, P19-T03) asks this function what
+// the policy is. A gate holding its own copy would measure the copy.
+//
+// The set is returned rather than written into a writer because a caller that
+// is handed a writer is a caller that can write something else.
+func Policy(production bool) []Header {
+	policy := []Header{
+		{headerContentSecurityPolicy, contentSecurityPolicy},
+		{headerContentTypeOptions, contentTypeOptions},
+		{headerReferrerPolicy, referrerPolicy},
+		{headerPermissionsPolicy, permissionsPolicy},
+	}
+	if production {
+		policy = append(policy, Header{headerStrictTransportSec, strictTransportSecurity})
+	}
+	return policy
+}
+
 // ContentSecurityPolicy returns the exact policy the middleware delivers.
 //
 // It exists for the frontend gate of P18-T08 (`tools/webaudit`): the delivered
@@ -117,15 +149,17 @@ type Config struct {
 // every registered route and every class of response, so weakening it is a
 // visible edit rather than a silent one.
 func Middleware(config Config) func(http.Handler) http.Handler {
+	// The policy of this environment is computed once, when the middleware is
+	// built, and not per request: it is a constant decision, and rebuilding it
+	// inside the handler would put an allocation on the path of every response
+	// to say the same thing.
+	policy := Policy(config.Production)
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			header := writer.Header()
-			header.Set(headerContentSecurityPolicy, contentSecurityPolicy)
-			header.Set(headerContentTypeOptions, contentTypeOptions)
-			header.Set(headerReferrerPolicy, referrerPolicy)
-			header.Set(headerPermissionsPolicy, permissionsPolicy)
-			if config.Production {
-				header.Set(headerStrictTransportSec, strictTransportSecurity)
+			for _, field := range policy {
+				header.Set(field.Name, field.Value)
 			}
 
 			next.ServeHTTP(writer, request)

@@ -29,12 +29,35 @@ Parâmetros como `shared_buffers`, `work_mem`, conexões e pool serão definidos
 
 - PostgreSQL escuta apenas na rede privada do Compose.
 - Caddy é o único container com portas públicas.
-- Origem aceita tráfego web somente do Cloudflare quando a operação estiver estabilizada.
 - Cloudflare usa modo TLS `Full (strict)` até a origem; `Flexible` é proibido.
-- O certificado da origem será Cloudflare Origin CA ou ACME por DNS-01. A escolha operacional final deve evitar reabrir a origem apenas para renovação.
-- Headers de proxy são confiados apenas a CIDRs configurados.
+- A origem recusa o tráfego que não vem do Cloudflare **no firewall**, não no servidor web (§3.1).
+- Headers de proxy são confiados apenas aos CIDRs do Cloudflare, declarados em `deploy/caddy/Caddyfile` (§3.1).
+- O certificado da origem vem de arquivo *secret*: Cloudflare Origin CA no que o repositório commita, ou uma build com ACME por DNS-01 (§3.2).
 - IPv4 e IPv6 seguem a mesma política; não deixar origem exposta por uma família esquecida.
 - Egress é permitido apenas conforme necessidade e monitorado para jobs sensíveis.
+
+### 3.1 Quem é acreditado, e o que recusa o resto (P19-T03)
+
+O `deploy/caddy/Caddyfile` declara `trusted_proxies static` com a lista publicada pelo Cloudflare — 15 faixas IPv4 e 7 IPv6, de https://www.cloudflare.com/ips-v4 e https://www.cloudflare.com/ips-v6, lidas em 2026-09-21 — e `client_ip_headers CF-Connecting-IP`. A consequência exata: `CF-Connecting-IP` só é evidência quando o peer está dentro daquelas faixas; para qualquer outro peer, o endereço do visitante **é** o endereço do peer e o header é ignorado. `X-Forwarded-For` não é consultado nem quando o peer é confiável: a lista foi estreitada a um header de valor único, e um header de cadeia é exatamente o que um cliente pode preencher.
+
+O que o Caddyfile **não** faz é decidir quem pode conectar. A recusa do tráfego que não vem do Cloudflare pertence ao firewall em frente ao container (security group, `nftables`, o balanceador): ali a recusa não custa handshake TLS, nem requisição HTTP, nem linha de log — e uma allowlist declarada no servidor web recusaria também os gates deste repositório, que sobem a stack de verdade a partir do host. As faixas em que a regra deve ser escrita são as mesmas da lista acima, e a fonte é a mesma.
+
+Nota de encaminhamento, registrada e não escondida: a aplicação ainda conta por endereço de peer (`clientip.New(nil)`; o critério está registrado desde a P16-T03), então atrás do Caddy todos os visitantes compartilham uma chave de rate limit. O Caddy passa o endereço que determinou em `X-Forwarded-For` e remove `CF-Connecting-IP` e `X-Real-IP` vindos do cliente, de modo que a informação está do lado certo da fronteira; fiar a aplicação para confiar no peer imediato é o critério registrado que falta.
+
+Gate: `make caddy-verify` valida o arquivo com a **imagem que o próprio compose fixa**, exige que ele seja o que `caddy fmt` escreveria e roda um Caddy real atrás de um upstream stub para afirmar o que passa, o que sai e o que acontece quando a aplicação não responde.
+
+O nome do software não sai do edge, e isso vale para os dois caminhos de resposta. Na rota proxiada um `header -Server` remove o valor; no bloco `handle_errors`, que escreve as respostas que a aplicação nunca produziu, um segundo `-Server` faz o mesmo — e o segundo existe porque o primeiro **não alcança** aquele caminho: medido na 2.10.0 fixada, sem a linha do bloco de erro a resposta de indisponibilidade sai com `Server: Caddy`. O gate afirma as duas coisas — o documento servido e a resposta de erro —, e o upstream stub do gate **declara um nome próprio** (`Server: stub/1.0`) porque, com um upstream silencioso, a asserção sobre vazamento de nome mediria nada: o Caddy encaminha o `Server` do upstream, e o `header -Server` da rota é exatamente o que o remove.
+
+Limite medido, registrado e não escondido: `strict_sni_host on` é afirmado pelo audit sobre o arquivo (regra `sni_strict`, com mutação própria que reprova), mas a sonda de fio **não distingue** `on` de `insecure_off` nesta topologia — com um único certificado vindo de arquivo, um handshake para outro nome termina sem certificado nas duas configurações (curl 35). A asserção de fio continua sendo sobre o que se observa (um handshake para outro nome termina sem um), e a diretiva é responsabilidade do audit.
+
+### 3.2 O certificado da origem
+
+- **Cloudflare Origin CA** — o que o repositório commita: um certificado de longa duração emitido pelo Cloudflare para a origem, entregue como dois arquivos montados em `/run/secrets/origin_certificate` e `/run/secrets/origin_key`. Nenhum desafio precisa ser alcançável da internet e nenhuma renovação de 90 dias pode falhar em silêncio, que é o motivo da escolha: `Full (strict)` valida o certificado da origem, e uma renovação que falha é uma janela de indisponibilidade.
+- **ACME por DNS-01** — renovação automática sem expor a origem, ao custo de uma build do Caddy com o plugin do provedor de DNS e de um token do provedor no ambiente do container: uma credencial de DNS dentro do processo que responde à internet. Vale quando o certificado precisa vir de uma CA pública.
+
+O par de arquivos é a fonte, declarada como `tls <cert> <key>`; o Caddy responde só pelo nome do site (`strict_sni_host on`), com piso de TLS 1.2/1.3.
+
+O Caddy roda como root dentro do container, e isso é uma decisão registrada, não um descuido: a chave é 0600 do usuário que faz o deploy, e lê-la como um root que largou capacidades exigiria devolver `CAP_DAC_READ_SEARCH` — "ler qualquer arquivo do sistema" — por um arquivo só. A alternativa correta (rodar o Caddy com o uid dono do par e `sysctls: net.ipv4.ip_unprivileged_port_start=0` para ainda poder abrir 80/443) depende de como a operação provisiona o par — dono, modo, grupo — e é uma decisão de deploy ainda não tomada.
 
 ## 4. Ambientes
 

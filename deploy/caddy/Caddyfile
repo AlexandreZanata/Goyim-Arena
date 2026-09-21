@@ -1,28 +1,194 @@
-# Caddy ingress — topology level (P19-T02).
+# Caddy origin for Goyim Arena (P19-T03).
 #
-# This configuration is deliberately thin, and the thinness is the design: it
-# answers the question "does the stack have a complete path from the internet
-# to the application", which is what the Compose task is responsible for.
+# Cloudflare terminates the visitor's TLS and connects to this process, so this
+# file answers one question: what may the process that speaks to the internet
+# on the arena's behalf do? It is the hardened version of the topology-level
+# configuration P19-T02 committed — that one proved a complete path existed;
+# this one decides what that path is allowed to accept, forward and emit.
 #
-# P19-T03 owns the hardening that belongs to the ingress itself: TLS Full
-# (strict) against the Cloudflare origin, explicit trusted proxies, security
-# headers, compression, route and cache behaviour, and upstream health checks.
-# P19-T05/T06 own the access logs and the alerting on them. None of that is
-# declared here, so that the file this task commits is only the part this task
-# can validate.
+# Four decisions are worth stating, because each of them is a decision and not
+# a default:
 #
-# Two properties are worth stating because they are decisions, not defaults:
+#   1. The certificate is a file secret, never an ACME issuance. The origin
+#      accepts traffic only from Cloudflare's ranges, so an HTTP-01 challenge
+#      would have to be reachable from the internet — which it is not — and a
+#      renewal that fails is an outage. Cloudflare Origin CA issues a
+#      long-lived certificate for exactly this case; DNS-01 is the alternative
+#      when the origin certificate is not an option. Both are documented in
+#      docs/DEPLOYMENT.md section 3.
 #
-#   - the certificate is a *file secret* mounted by Compose, not an ACME
-#     issuance: the origin accepts traffic only from Cloudflare, so a challenge
-#     that needs to be reachable from the internet would turn every renewal into
-#     an outage window (docs/DEPLOYMENT.md §3);
-#   - the upstream is named by service name on the edge network, and the
-#     application is the only other member of that network, so the name resolves
-#     to one address and a typo cannot silently proxy to something else.
+#   2. A request is believed about its own address only when the peer is
+#      Cloudflare. The peer address is a fact the kernel saw; `CF-Connecting-IP`
+#      is a claim, and Cloudflare's ranges are the only peers whose claim this
+#      process treats as evidence. That is what `trusted_proxies` and
+#      `client_ip_headers` below say. The ranges appear literally rather than
+#      through a variable because Caddy has no substitution inside an argument
+#      list, and a variable that silently expanded to nothing would turn this
+#      rule into a rule that trusts everybody.
+#
+#   3. This process does not decide *whether* someone may connect. An origin
+#      whose address is known can be reached directly, and a direct connection
+#      bypasses the CDN's WAF, its rate limiting and its TLS policy — but the
+#      layer that refuses it is the firewall in front of the container, not the
+#      web server, because a refusal there costs no TLS handshake, no HTTP
+#      request and no log line. An allowlist stated here would also refuse every
+#      client that is not Cloudflare, including the gates of this repository,
+#      which drive the real stack from the host. `docs/DEPLOYMENT.md` section 3
+#      carries the ranges and the two URLs they come from, and the deployment
+#      task (P19-T07) is where that firewall rule belongs.
+#
+#   4. The browser security policy is the application's, not this process's.
+#      Every response the arena binary emits already carries it
+#      (internal/platform/securityheaders, P16-T01) and this file deliberately
+#      does not repeat it: a second copy of a policy is a copy that drifts. The
+#      one thing the application cannot cover is what this process emits when
+#      the application never answered — its own error responses — and those are
+#      covered by `handle_errors` below, whose values `tools/caddyaudit`
+#      compares against the policy the application delivers.
+#
+# Cloudflare's published ranges, the two lists below, are from
+# https://www.cloudflare.com/ips-v4 and https://www.cloudflare.com/ips-v6, read
+# on 2026-09-21. Cloudflare adds ranges from time to time; a deployment that
+# stops serving traffic after such a change is a deployment whose list is stale,
+# and re-reading those two URLs is the whole of the fix.
+{
+	# The admin API is the process's own control plane and the health probe's
+	# endpoint. It stays on the loopback address of the container's network
+	# namespace, which is unreachable from outside that namespace, and it is
+	# never published by the topology (compose.production.yaml).
+	#
+	# `admin off` was considered and rejected: it also removes the config
+	# reload path, turning a configuration change into a restart of the
+	# ingress. A wildcard address, by contrast, would be the accident this
+	# whole file exists to prevent — and `tools/caddyaudit` refuses one.
+	admin localhost:2019
 
-{$COMPOSE_SITE_ADDRESS} {
-	tls /run/secrets/origin_certificate /run/secrets/origin_key
+	servers {
+		# Only a peer inside Cloudflare's published ranges may speak for a
+		# visitor. `client_ip_headers` narrows the claim to one header, so a
+		# forged `X-Forwarded-For` is not consulted here even from a trusted
+		# peer.
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP
 
-	reverse_proxy app:8080
+		# The origin answers for one name. A handshake whose SNI does not
+		# match a served certificate is refused instead of being handed the
+		# first certificate in the cache, which is what makes the certificate
+		# binding a fact rather than a convention.
+		strict_sni_host on
+
+		# HTTP/3 is a visitor-facing protocol — Cloudflare speaks it to the
+		# browser and TCP to the origin — so the origin does not listen on UDP
+		# at all. One protocol family fewer is one surface fewer, and nothing
+		# is lost on the path that actually exists.
+		protocols h1 h2
+
+		# The edge's slow-client budget, in front of the application's own
+		# (internal/platform/httplimits): a header that never finishes arriving
+		# is refused here, and a connection that goes idle is not held forever.
+		# `write` and `read_body` are deliberately left unset — both would cut
+		# off legitimately slow visitors, and the application already bounds
+		# what it accepts.
+		timeouts {
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
+{$COMPOSE_SITE_ADDRESS:arena.invalid} {
+	# Cloudflare's own certificate for this name, mounted as a file secret
+	# (compose.production.yaml). 1.2 is the floor Cloudflare's Full (strict)
+	# mode requires of an origin; 1.3 is preferred when the edge speaks it.
+	tls /run/secrets/origin_certificate /run/secrets/origin_key {
+		protocols tls1.2 tls1.3
+		curves x25519 secp256r1
+	}
+
+	# One explicit route, so the order below is the order that runs rather
+	# than the order Caddy's directive table happens to assign.
+	route {
+		# No version disclosure: the response leaves without naming what
+		# answered it. This is not a strip of the edge's own name alone: a
+		# real upstream names itself, and that value would otherwise be
+		# forwarded to Cloudflare and on to the visitor — the version being
+		# the thing an attacker would rather not have to guess. The responses
+		# this file's `handle_errors` writes never pass through here, and
+		# carry a strip of their own.
+		header -Server
+
+		# Compression at the edge, where the connection to Cloudflare is the
+		# one that benefits. Only the two algorithms worth the CPU are
+		# declared; the directive adds `Vary: Accept-Encoding` on its own.
+		encode zstd gzip
+
+		reverse_proxy {$COMPOSE_APP_UPSTREAM:app:8080} {
+			# The visitor's address as this process determined it, and never
+			# the value the visitor sent: `header_up` replaces the header
+			# rather than appending to it, so a chain the client padded
+			# cannot survive the hop. The two scheme/host headers are set from
+			# what was actually observed for the same reason.
+			header_up X-Forwarded-For {client_ip}
+
+			# `X-Forwarded-Proto` and `X-Forwarded-Host` are deliberately not
+			# declared: the reverse proxy already sets both from what it
+			# observed, and a line that restates a default is a line that looks
+			# like enforcement without being any. The live gate asserts the
+			# values that reach the upstream instead.
+
+			# The application does not consult these two by design
+			# (internal/platform/clientip documents why: neither carries a
+			# chain, so nothing in them can be checked). They are removed so
+			# that a client cannot hand the application a header it is
+			# documented to ignore, and so that a future reader cannot mistake
+			# one of them for a trusted signal.
+			header_up -CF-Connecting-IP
+			header_up -X-Real-IP
+
+			# Bounded in both directions: a hung upstream must fail a request
+			# rather than hold a connection, and an idle upstream connection
+			# is reused instead of re-dialed for every request.
+			transport http {
+				dial_timeout 5s
+				response_header_timeout 15s
+				keepalive 30s
+				keepalive_idle_conns 4
+			}
+
+			# Active health, so a process that is running but not ready stops
+			# receiving traffic instead of answering 503 to visitors. The
+			# endpoint is the application's own readiness probe, which is the
+			# only question whose answer means "send it here".
+			health_uri /health/ready
+			health_interval 10s
+			health_timeout 3s
+			health_status 200
+			fail_duration 15s
+			max_fails 2
+		}
+	}
+
+	# What this process emits when the application never answered. Without
+	# this block a 502 from the origin would be a bare status line: no policy,
+	# no nosniff, and — worse for a reverse proxy — a response an intermediary
+	# is free to cache, which turns a momentary outage into a served one. The
+	# policy values are the application's own (internal/platform/securityheaders)
+	# and `tools/caddyaudit` fails the build if they stop matching.
+	handle_errors {
+		header {
+			# The strip on the proxied path belongs to that path: a response
+			# this block writes never reaches it. Measured on the pinned
+			# 2.10.0, an outage answers with `Server: Caddy` without this line,
+			# so the one response class the application cannot cover would be
+			# the one that names what answered.
+			-Server
+			Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'"
+			X-Content-Type-Options "nosniff"
+			Referrer-Policy "same-origin"
+			Permissions-Policy "accelerometer=(), camera=(), display-capture=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), screen-wake-lock=(), usb=(), xr-spatial-tracking=()"
+			Strict-Transport-Security "max-age=31536000; includeSubDomains"
+			Cache-Control "no-store"
+		}
+		respond "{http.error.status_code} {http.error.status_text}" {http.error.status_code}
+	}
 }
