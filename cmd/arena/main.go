@@ -170,6 +170,11 @@ func runServer(args []string, stdout *os.File) error {
 			Random:   random,
 			Assets:   manifest,
 			Security: manager,
+			// Development and test may name a directory for the local email
+			// sink, so a journey driven by another process reads the same
+			// delivery the person would (P18-T07). Production refuses the
+			// variable before the boot reaches here.
+			SinkDir: cfg.EmailSinkDir(),
 		})
 		if err != nil {
 			return err

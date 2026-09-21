@@ -33,6 +33,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/argon2id"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/emailsink"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/fakeemail"
 	identityhtml "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/html"
 	identitypostgres "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/postgres"
@@ -77,6 +78,12 @@ type Options struct {
 	// participation journey renders. It is required by the journeys that
 	// paginate and ignored by the ones that do not.
 	CursorSecret []byte
+	// SinkDir is the directory the local email sink writes to. When it is
+	// set, development and test deliver the identity messages there instead
+	// of keeping them in memory, so a journey driven by another process can
+	// read the code the message carries (P18-T07). It is refused in
+	// production, where no account code may be written to disk.
+	SinkDir string
 	// Security is the security boundary shared by every surface of the process
 	// (cookies, CSRF, identity in the request context). When nil, a surface
 	// composes its own: correct for a process that serves one journey, and the
@@ -90,6 +97,7 @@ type AccountSurface struct {
 	routes   []httpserver.Route
 	register func(mux *http.ServeMux)
 	sink     *fakeemail.Sender
+	sinkDir  string
 
 	mu      sync.Mutex
 	mounted bool
@@ -111,7 +119,6 @@ func ComposeAccount(options Options) (*AccountSurface, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	repository := identitypostgres.NewRepository(options.Pool)
 
 	hasher, err := argon2id.NewDefault(options.Random)
@@ -182,6 +189,7 @@ func ComposeAccount(options Options) (*AccountSurface, error) {
 		routes:   identityhtml.Routes(),
 		register: handler.RegisterRoutes,
 		sink:     sink,
+		sinkDir:  options.SinkDir,
 	}, nil
 }
 
@@ -221,13 +229,23 @@ func (surface *AccountSurface) Mount(mux *http.ServeMux) error {
 }
 
 // LocalSink returns the development email sink when the composition installed
-// one, and nil otherwise. It is the only way a development or test process can
-// follow the link that a real provider would deliver, and it exists so the
-// browser journey can be completed without a provider: the tokens live in the
-// messages this sink recorded, in this process, for this environment.
+// the in-memory one, and nil otherwise. It is the only way a development or
+// test process can follow the link that a real provider would deliver, and it
+// exists so the browser journey can be completed without a provider: the
+// tokens live in the messages this sink recorded, in this process, for this
+// environment.
+//
+// When the composition installed the directory sink instead, this returns nil
+// and SinkDirectory names where the messages are: a process that reads the
+// tokens from outside does not need an in-process handle, and handing out a
+// half-configured one would hide the difference.
 func (surface *AccountSurface) LocalSink() *fakeemail.Sender {
 	return surface.sink
 }
+
+// SinkDirectory returns the directory the local email sink writes to, and the
+// empty string when the composition installed the in-memory sink.
+func (surface *AccountSurface) SinkDirectory() string { return surface.sinkDir }
 
 // validate reports every missing dependency at once, sorted by name, because
 // an operator fixing a boot failure should not discover them one per attempt.
@@ -258,6 +276,12 @@ func (options Options) validate(journey string) error {
 
 	switch options.Env {
 	case config.EnvDevelopment, config.EnvTest, config.EnvProduction:
+		// The sink directory is a development replacement, not a deployment
+		// option: it is refused here as well as at the configuration edge, so
+		// no caller of this composition can install it in production.
+		if options.Env == config.EnvProduction && options.SinkDir != "" {
+			return fmt.Errorf("%w: %s: the local email sink is refused in production", ErrIncompleteComposition, journey)
+		}
 		return nil
 	default:
 		return fmt.Errorf("%w: %s: environment %q is not one of development, test, production", ErrIncompleteComposition, journey, options.Env)
@@ -269,13 +293,33 @@ func (options Options) validate(journey string) error {
 // Development and test install the local sink the identity module already
 // documents for non-production environments, and the composition says so out
 // loud: without a provider the message is recorded and never delivered, which
-// is exactly what a person debugging a journey needs to know. Production has
-// no delivery adapter yet (P15 composed the queue and left delivery to the
-// phase that owns the provider), so it refuses to build the journey instead of
-// serving forms whose links go nowhere.
+// is exactly what a person debugging a journey needs to know. Two flavours
+// exist because two kinds of reader exist (P18-T07): the in-memory sink is
+// enough for a test that owns the process, and the directory sink is how a
+// reader in another process — the browser harness — sees the same delivery.
+// Production has no delivery adapter yet (P15 composed the queue and left
+// delivery to the phase that owns the provider), so it refuses to build the
+// journey instead of serving forms whose links go nowhere.
 func accountEmails(options Options) (identityapp.EmailSender, *fakeemail.Sender, error) {
 	switch options.Env {
 	case config.EnvDevelopment, config.EnvTest:
+		if options.SinkDir != "" {
+			sink, err := emailsink.NewSender(emailsink.Options{
+				Directory: options.SinkDir,
+				Clock:     options.Clock,
+				Logger:    options.Logger,
+			})
+			if err != nil {
+				return nil, nil, fmt.Errorf("%w: account journey: local email sink: %w", ErrIncompleteComposition, err)
+			}
+			options.Logger.Warn(
+				"account journey: local email sink writes to a directory; verification and recovery messages are recorded there and never delivered",
+				slog.String("env", string(options.Env)),
+				slog.String("directory", sink.Directory()),
+			)
+			return sink, nil, nil
+		}
+
 		sink := fakeemail.NewSender()
 		options.Logger.Warn(
 			"account journey: local email sink installed; verification and recovery messages are recorded in this process and never delivered",

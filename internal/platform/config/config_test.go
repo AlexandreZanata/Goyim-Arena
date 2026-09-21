@@ -74,6 +74,51 @@ func TestLoadReadsTheCursorSecret(t *testing.T) {
 	}
 }
 
+// TestLoadHandlesTheEmailSinkDirectory covers "default seguro" and "negativo":
+// the sink is off unless configured, a blank value is refused instead of
+// silently disabling it, and production — which serves real accounts — refuses
+// the variable however the rest of the environment is configured (P18-T07).
+func TestLoadHandlesTheEmailSinkDirectory(t *testing.T) {
+	t.Parallel()
+
+	unset, err := Load(environ())
+	if err != nil {
+		t.Fatalf("load with no ARENA_* variables: %v", err)
+	}
+	if unset.EmailSinkDir() != "" {
+		t.Errorf("the sink directory should be empty without configuration, got %q", unset.EmailSinkDir())
+	}
+
+	configured, err := Load(environ(EmailSinkDirVariable + "=/tmp/arena-email-sink"))
+	if err != nil {
+		t.Fatalf("load with %s: %v", EmailSinkDirVariable, err)
+	}
+	if configured.EmailSinkDir() != "/tmp/arena-email-sink" {
+		t.Errorf("the sink directory was not read from the environment: %q", configured.EmailSinkDir())
+	}
+
+	_, err = Load(environ(EmailSinkDirVariable + "=   "))
+	if err == nil {
+		t.Fatal("a blank sink directory was accepted")
+	}
+	if !strings.Contains(err.Error(), EmailSinkDirVariable) {
+		t.Errorf("the refusal must name the variable: %v", err)
+	}
+
+	_, err = Load(environ(
+		"ARENA_ENV=production",
+		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
+		"ARENA_STRIPE_SECRET_KEY=sk_live_production",
+		EmailSinkDirVariable+"=/tmp/arena-email-sink",
+	))
+	if err == nil {
+		t.Fatal("production accepted the local email sink")
+	}
+	if !strings.Contains(err.Error(), EmailSinkDirVariable) || !strings.Contains(err.Error(), "production") {
+		t.Errorf("the refusal must name the variable and the environment: %v", err)
+	}
+}
+
 func environ(entries ...string) []string {
 	return append([]string{
 		"HOME=/home/operator",

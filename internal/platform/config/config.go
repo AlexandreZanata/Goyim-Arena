@@ -30,6 +30,7 @@ type Config struct {
 	addr              string
 	adminAddr         string
 	assetsDir         string
+	emailSinkDir      string
 	cursorSecret      Secret
 	databaseURL       Secret
 	logLevel          LogLevel
@@ -160,6 +161,7 @@ func Load(environ []string) (Config, error) {
 		"ARENA_ADDR":                  true,
 		"ARENA_ADMIN_ADDR":            true,
 		"ARENA_ASSETS_DIR":            true,
+		EmailSinkDirVariable:          true,
 		"ARENA_CURSOR_SECRET":         true,
 		"ARENA_DATABASE_URL":          true,
 		"ARENA_LOG_LEVEL":             true,
@@ -236,6 +238,17 @@ func Load(environ []string) (Config, error) {
 			})
 		} else {
 			config.assetsDir = raw
+		}
+	}
+
+	if raw, present := values[EmailSinkDirVariable]; present {
+		if strings.TrimSpace(raw) == "" {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: EmailSinkDirVariable,
+				Problem:  "must name the directory the local email sink writes to (for example .tmp/email-sink)",
+			})
+		} else {
+			config.emailSinkDir = raw
 		}
 	}
 
@@ -399,6 +412,18 @@ func Load(environ []string) (Config, error) {
 		})
 	}
 
+	// The local email sink is a development convenience: it writes the codes
+	// of verification and recovery messages to disk so a journey can be
+	// completed without a provider. No environment that serves real accounts
+	// may install it, whichever layer asks, so the variable is refused here
+	// instead of being ignored (P18-T07).
+	if config.env == EnvProduction && config.emailSinkDir != "" {
+		validationErrors = append(validationErrors, ValidationError{
+			Variable: EmailSinkDirVariable,
+			Problem:  "is refused when ARENA_ENV=production: it would put the codes of real accounts on disk",
+		})
+	}
+
 	// Selling is impossible without the payment provider credential, and the
 	// versioned catalog already refuses to build in production without an
 	// enabled commercial region, so production always sells: the credential is
@@ -447,6 +472,18 @@ const DefaultAssetsDir = "web/dist"
 // AssetsDir returns the directory of the hashed frontend build whose manifest
 // the server resolves through its templates.
 func (config Config) AssetsDir() string { return config.assetsDir }
+
+// EmailSinkDirVariable names the directory the local email sink writes to
+// (P18-T07). It exists so a journey driven by another process — the browser
+// harness — can read the code a message carries, and it is meaningful only in
+// development and test: production refuses the variable, because a directory
+// of account codes is not a delivery mechanism.
+const EmailSinkDirVariable = "ARENA_EMAIL_SINK_DIR"
+
+// EmailSinkDir returns the directory the local email sink writes to, and the
+// empty string when nothing configures the sink. Development and test install
+// it; production refuses the variable above.
+func (config Config) EmailSinkDir() string { return config.emailSinkDir }
 
 // CursorSecretVariable signs the pagination cursors of the public lists
 // (P18-T07B). It enters configuration together with the composition that

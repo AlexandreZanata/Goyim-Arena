@@ -15,7 +15,7 @@ ASSETGEN := $(GO) run ./cmd/assetgen
 # OpenAPI e emite web/src/contracts/generated.ts (nunca editado à mão).
 CONTRACTGEN := $(GO) run ./tools/contractgen
 
-.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web test-contract test-load-smoke generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web test-contract test-e2e test-load-smoke generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -102,6 +102,27 @@ test-security:
 	$(GO) test -count=1 ./internal/security/... ./internal/platform/security/... ./internal/arguments/adapters/http/... ./internal/arguments/adapters/postgres/... ./internal/billing/adapters/stripe/... ./internal/billing/application/... ./internal/moderation/adapters/http/... ./internal/moderation/application/... ./internal/positions/adapters/http/... ./internal/transparency/adapters/http/... ./internal/wallet/adapters/http/... ./internal/wallet/adapters/postgres/...
 	@echo "test-security: ok"
 
+# test-e2e roda as jornadas críticas em navegador real (P18-T07). O harness
+# descartável de tools/e2e provisiona um PostgreSQL próprio, um sink de email em
+# diretório, o binário `arena server` e o runner pinado — tudo fora do pacote
+# entregue. Antes das jornadas, o gate de isolamento prova que nada do runner
+# está em web/, no build que as páginas referenciam ou no binário entregue.
+#
+# O alvo depende de build-web porque são as páginas reais, servindo o build
+# real, que as jornadas dirigem.
+#
+# Ele não está em `verify` porque exige um navegador instalado na máquina
+# (o harness garante o build do Chromium que o runner fixa, mas não instala
+# dependências de sistema). Ausente do alvo, nunca ausente de gate.
+#
+# Exige ARENA_DATABASE_URL (o workflow `verify` já a define em todo o job). O
+# banco nomeado por ela é apenas a porta: o harness cria um banco descartável
+# ao lado dele, migra, semeia e **remove** — o banco apontado nunca é tocado.
+test-e2e: build-web
+	@tools/e2e/isolation-check.sh
+	tools/e2e/harness.sh
+	@echo "test-e2e: ok"
+
 # test-load-smoke executa os cenários k6 versionados contra uma instância
 # local preparada exclusivamente com dados sintéticos. O gate falha se k6 não
 # estiver instalado ou se o workload não atingir os thresholds declarados.
@@ -119,9 +140,12 @@ test-load-smoke:
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
 verify: fmt-check generate-check test-unit test-integration test-contract test-security test-web typecheck build-web
-	@echo "verify: gates presentes, porém não implementados (falham explicitamente ao serem invocados):"
-	@echo "verify: gates ainda não criados:"
-	@for gate in lint test-e2e test-race test-load-smoke vuln; do \
+	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
+	@for gate in lint test-race vuln; do \
+		echo "  - $$gate"; \
+	done
+	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
+	@for gate in test-e2e test-load-smoke; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."

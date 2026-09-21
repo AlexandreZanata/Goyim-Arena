@@ -67,7 +67,11 @@ O processo compõe as jornadas que serve a partir da configuração, e recusa o 
 
 - o build referenciado pelas páginas é servido pelo **mesmo processo**, a partir do manifest que ele já lê: a superfície publica exatamente os endereços que o build declarou e nada mais. É conteúdo, não operação: ela não entra no registro de rotas nem no contrato OpenAPI (um CSS não é um endpoint), e a política de cache é a da seção 9 — nome com hash `immutable` por um ano, caminho estável do grafo ESM com revalidação. Um endereço que o manifest não publicou responde 404, não há listagem de diretório e um caminho que tente sair do diretório do build não é filtrado, é irrepresentável: a lista de endereços é montada na composição a partir do manifest, e um manifest que descreva algo fora do build recusa o boot.
 
+- em desenvolvimento e teste, `ARENA_EMAIL_SINK_DIR` faz o sink local de email escrever cada mensagem de identidade em um documento JSON no diretório nomeado, em vez de apenas registrar na memória: é assim que uma jornada dirigida **por outro processo** — o harness de browser de `tools/e2e`, ou uma pessoa completando um cadastro à mão — lê o código de confirmação. A variável é recusada em produção, no `Load` e na composição, porque um diretório de códigos de contas reais não é um mecanismo de entrega;
+
 As rotas que o registro declara e nenhuma superfície monta continuam respondendo como placeholder: o processo declara o contrato inteiro e serve o que foi composto.
+
+O gate de browser (`make test-e2e`, P18-T07) dirige esse mesmo processo: `tools/e2e/harness.sh` provisiona um PostgreSQL descartável (removido em qualquer caminho de saída), um diretório de sink próprio, semeia duas contas confirmadas com INK e uma Arena publicada, sobe o binário e roda as jornadas com o Playwright pinado. `tools/e2e/isolation-check.sh` roda antes e recusa o gate se o runner aparecer no pacote do frontend, no build servido ou no binário. Ele não está em `make verify` porque exige um navegador instalado na máquina.
 
 Deploy automático em produção só será ativado depois que rollback e restauração tiverem sido testados.
 

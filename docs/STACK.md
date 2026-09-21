@@ -51,7 +51,7 @@ Goyim Arena será uma aplicação API-first com backend Go e frontend baseado so
 - **Deploy:** Docker Compose em Debian estável ou Ubuntu LTS.
 - **CI/CD:** GitHub Actions.
 - **Carga:** k6.
-- **E2E:** Playwright fora do bundle do frontend.
+- **E2E:** Playwright fora do bundle do frontend, em `tools/e2e` (P18-T07).
 
 ## 2. O significado de “sem dependências externas”
 
@@ -141,7 +141,7 @@ Um gerador interno em Go poderá ler o subconjunto versionado do contrato OpenAP
 ## 6. Ferramentas de desenvolvimento
 
 - `tsc --noEmit` para tipos e `tsc` para emissão ESM.
-- APIs nativas de teste para unidades puras; Playwright para comportamento real do browser.
+- APIs nativas de teste para unidades puras; Playwright para comportamento real do browser, no pacote isolado `tools/e2e` (`make test-e2e`), cujas jornadas dirigem o binário real contra um PostgreSQL descartável — nada do runner está em `web/`, no build referenciado pelas páginas ou no binário entregue.
 - `go test`, race detector, fuzzing dirigido e benchmarks.
 - `golangci-lint` e `govulncheck`.
 - `sqlc vet` e migrations em banco descartável.
