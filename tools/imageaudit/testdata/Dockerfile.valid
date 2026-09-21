@@ -1,0 +1,23 @@
+# Fixture: the shape the audit approves (P19-T01). Bases pinned by digest,
+# explicit copies, a runtime stage that names a non-root user.
+FROM node:24-bookworm-slim@sha256:0e0ff40c39bc087845bfb27465a0df4ea419520094bc35842ff83dd8cbe6f9b6 AS web
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY web/src ./src
+RUN npm run build
+
+FROM golang:1.27.1-bookworm@sha256:69a7b9788769bec032d238959b61854e9ae87f57be9029ec04e9885fabf99195 AS build
+ARG VERSION=dev
+COPY --from=web /src/web/generated ./web/generated
+COPY cmd ./cmd
+RUN CGO_ENABLED=0 go build -trimpath -o /out/arena ./cmd/arena
+
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab AS runtime
+COPY --from=build /out/arena /arena
+COPY --from=build /src/web/dist /web/dist
+ENV ARENA_ADDR=0.0.0.0:8080 ARENA_ASSETS_DIR=/web/dist
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/arena"]
+CMD ["server"]

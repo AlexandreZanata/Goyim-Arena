@@ -1,0 +1,4 @@
+# Fixture: a base identified by a tag. The tag can be repointed under a review,
+# which is exactly what pinning exists to prevent.
+FROM node:24-bookworm-slim AS web
+RUN npm ci --ignore-scripts

@@ -6,7 +6,7 @@
 
 - Debian estável ou Ubuntu LTS com atualizações de segurança.
 - Docker Engine e Compose plugin.
-- Containers iniciais: `caddy`, `app`, `worker` e `postgres`.
+- Containers iniciais: `caddy`, `app`, `worker` e `postgres` (app e worker usam a mesma imagem, com comandos diferentes; P19-T01).
 - Mesmo artefato imutável para app e worker, com comandos diferentes.
 - Volumes persistentes apenas para PostgreSQL, Caddy e dados operacionais necessários.
 - Upload público nunca fica no filesystem local da VPS.
@@ -55,6 +55,37 @@ Nunca copiar banco de produção integral para desenvolvimento. Fixtures e dados
 6. Containers são atualizados e health checks confirmados.
 7. Smoke tests exercitam leitura, autenticação e dependências críticas.
 8. Falha faz rollback da aplicação; migration destrutiva nunca depende de `down` automático.
+
+### A imagem da aplicação (P19-T01)
+
+O `Dockerfile` na raiz compõe a imagem em três estágios, e cada um existe por um motivo que a sua ausência quebraria:
+
+- **web** — compila TypeScript 7 em ESM nativo com o `tsc` oficial (`npm ci --ignore-scripts` sobre o lockfile e nada além: sem bundler, por política). Node vive aqui e não sai deste estágio;
+- **build** — compila o binário Go e roda `assetgen`, que transforma o grafo emitido mais `web/src` nos endereços com hash e no manifest que o servidor relê no boot. Os dois sistemas de build se encontram uma única vez, em `web/generated`, que nenhum dos dois possui;
+- **runtime** — o binário, o build de assets e a base. Nada de gerenciador de pacotes, compilador, shell ou Node.
+
+As bases são **fixadas por digest do manifest list**, nunca por tag flutuante, com a tag mantida ao lado do digest (`node:24-bookworm-slim@sha256:...`, `golang:1.27.1-bookworm@sha256:...`, `gcr.io/distroless/static-debian12:nonroot@sha256:...`): a tag diz o que a imagem é, o digest decide qual imagem é. Atualizar uma base é um commit revisável, não um efeito colateral de um `docker build` de amanhã.
+
+O container resultante tem propriedades que o smoke mede, não que a receita promete:
+
+- **não é root** — `USER 65532:65532`, declarado na receita e conferido no `Config` da imagem construída;
+- **filesystem somente leitura** — `docker run --read-only` funciona porque o processo não escreve disco nenhum: o sink de email é recusado em produção, as migrations vivem dentro do binário e os logs saem em stdout. Um deploy que precise de rascunho monta um `tmpfs`, e isso é decisão do Compose, não da imagem;
+- **sem árvore de fontes** — a imagem carrega o binário e `web/dist`, e o gate reprova qualquer arquivo de fonte (`*.ts`, `*.go`, `web/src/`), cache (`node_modules`, `GOPATH`, cache de apt) ou shell/compilador que apareça no runtime;
+- **migrations dentro do binário** — `arena migrate up` roda a partir da própria imagem, contra um banco vazio, sem nada montado de fora; é o que o smoke executa antes de subir o servidor;
+- **`ARENA_ADDR=0.0.0.0:8080` e `ARENA_ASSETS_DIR=/web/dist`** vêm definidos na imagem: o default `127.0.0.1` deixaria o processo inalcançável dentro do próprio namespace de rede, e só o Caddy publica porta. Nenhuma dessas duas é segredo — a configuração continua recusando variável `ARENA_*` desconhecida, e um `ARG`/`ENV` com nome de credencial reprova o gate, porque o que entra num build fica gravado numa camada;
+- **metadata por build arg** — `VERSION`, `COMMIT` e `BUILD_DATE` chegam por `-ldflags` ao `buildinfo`; nenhum deles é credencial.
+
+O contexto de build é reduzido pelo `.dockerignore`, que exclui `.git`, `.local`, `.env`/`.env.*`, `node_modules`, `web/dist`, `web/generated` e o tooling local — e a receita copia caminhos explícitos, nunca `COPY . .`. O gate exige as duas coisas: uma varredura que encontre o contexto inteiro oferecido ao build é uma varredura que vai encontrar um segredo.
+
+O que verifica isso:
+
+- `make image-build` constrói a imagem (tag em `IMAGE`, padrão `goyim-arena:local`);
+- `make image-verify` é o gate: constrói, sobe um PostgreSQL descartável, aplica as migrations **de dentro da imagem**, sobe o container com filesystem somente leitura, prova `/health/live` 200, uma página (`/login` em `text/html`), um endereço com hash lido do manifest **de dentro da imagem** e um 404 para endereço que o manifest nunca declarou, e então entrega receita, contexto, `Config` e filesystem exportado a `tools/imageaudit`;
+- `make image-scan` procura vulnerabilidades conhecidas na imagem construída, com `--severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`;
+
+Nenhum dos três entra em `make verify`, pelo mesmo motivo de `test-e2e`: exigem um daemon Docker (e o scan exige um scanner instalado fora do repositório, como `test-load-smoke` exige k6). Ausente do alvo, nunca ausente de gate: sem o scanner o alvo falha explicitamente e nunca retorna sucesso falso.
+
+Limites registrados: a imagem é construída para a arquitetura do host (uma matriz multi-arquitetura é trabalho de deploy, não desta tarefa); `tools/imageaudit` varre o conteúdo em busca das formas conhecidas de credencial (DSN de desenvolvimento, chaves de provedor, chaves privadas) e **não pode** provar a ausência de um segredo desconhecido — é por isso que o `.dockerignore` e a cópia explícita continuam sendo a defesa principal; e o scan depende de um banco de vulnerabilidades atualizado no momento da execução.
 
 ### Requisitos de boot do `arena server` (P18-T07A, P18-T07B, P18-T07C)
 
