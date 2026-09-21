@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/AlexandreZanata/Goyim-Arena/internal/bootstrap"
 	identityjobs "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/jobs"
 	identityrepo "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/postgres"
 	identityapp "github.com/AlexandreZanata/Goyim-Arena/internal/identity/application"
@@ -90,11 +91,37 @@ func runWorker(args []string, stdout *os.File) error {
 	// scheduled session cleanup is the first one to land here (P16-T06): its
 	// cadence has been queued by the scheduler since P15-T05, and a queued
 	// workload with no handler is not idle, it is a dead job per period. The
-	// remaining workloads (email delivery, retention and the rest of the
-	// scheduled maintenance) are still recorded as JOB_UNKNOWN_TYPE rather
-	// than guessed at, and the started record below counts what is wired.
+	// remaining workloads (retention and the rest of the scheduled
+	// maintenance) are still recorded as JOB_UNKNOWN_TYPE rather than guessed
+	// at, and the started record below counts what is wired.
 	registry := jobsapp.NewHandlerMap()
 	_ = enqueue // Enqueue is composed for producers wired in later phases.
+
+	// Transactional email (P19-T02A): production queues every identity message
+	// as an `email_delivery` job — the composition of the account journey hands
+	// the message to the outbox instead of recording it — and this is the
+	// process that delivers it. Development and test deliver through the local
+	// sink, so nothing is queued there and the composition returns no handler:
+	// a handler installed anyway would consume work no flow produced.
+	delivery, err := bootstrap.ComposeEmailDelivery(bootstrap.Options{
+		Env:         cfg.Env(),
+		Logger:      logger,
+		Pool:        pool.Pool(),
+		Clock:       clock,
+		EmailFrom:   cfg.EmailFrom(),
+		EmailAPIKey: cfg.ResendAPIKey(),
+	})
+	if err != nil {
+		return err
+	}
+	if delivery.Handler != nil {
+		if err := delivery.Handler.Register(registry); err != nil {
+			return err
+		}
+		logger.Info("job worker: transactional email handler registered")
+	} else {
+		logger.Info("job worker: transactional email is delivered by the local sink; no email handler to register")
+	}
 
 	sessionCleanup, err := identityjobs.NewCleanupHandler(
 		identityapp.NewCleanupSessionsUseCase(

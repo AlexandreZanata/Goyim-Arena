@@ -117,10 +117,9 @@ func TestStripeConfigurationRefusesUnusableValues(t *testing.T) {
 func TestProductionRequiresTheProviderCredential(t *testing.T) {
 	t.Parallel()
 
-	_, err := Load(environ(
-		"ARENA_ENV=production",
-		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
-	))
+	// Everything else in production is satisfied; the credential is the single
+	// blank, so the only refusal left to report is the one under test.
+	_, err := Load(productionEnv("ARENA_STRIPE_SECRET_KEY="))
 	if err == nil {
 		t.Fatal("production without a provider credential must fail")
 	}
@@ -154,11 +153,7 @@ func TestStripeCredentialNeverPrints(t *testing.T) {
 	t.Parallel()
 
 	const credential = "sk_live_never_print_me"
-	config, err := Load(environ(
-		"ARENA_ENV=production",
-		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
-		"ARENA_STRIPE_SECRET_KEY="+credential,
-	))
+	config, err := Load(productionEnv("ARENA_STRIPE_SECRET_KEY=" + credential))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -184,5 +179,7 @@ func renderedConfig(config Config) string {
 		config.DatabaseURL().String(),
 		config.StripeSecretKey().String(),
 		config.StripeTimeout().String(),
+		config.ResendAPIKey().String(),
+		config.EmailFrom(),
 	}, " ")
 }

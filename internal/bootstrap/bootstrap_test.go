@@ -156,9 +156,12 @@ func TestComposeAccountRefusesAnUnknownEnvironment(t *testing.T) {
 }
 
 // TestComposeAccountRefusesProductionWithoutAnEmailProvider is the fail-closed
-// half of the local sink: a registration whose confirmation link has no
-// delivery path is not served at all, instead of being served and silently
-// dropping the message.
+// half of the transactional email decision: production serves registrations,
+// and a registration is a link that has to arrive, so an environment that
+// cannot deliver refuses to build the journey instead of serving forms whose
+// links go nowhere. The refusal names the two variables the operator has to
+// set: "no email provider" without a variable name is a puzzle, not an error
+// message.
 func TestComposeAccountRefusesProductionWithoutAnEmailProvider(t *testing.T) {
 	t.Parallel()
 
@@ -172,7 +175,41 @@ func TestComposeAccountRefusesProductionWithoutAnEmailProvider(t *testing.T) {
 	if !errors.Is(err, bootstrap.ErrIncompleteComposition) {
 		t.Errorf("ComposeAccount() error = %v, want it to wrap ErrIncompleteComposition", err)
 	}
-	if !strings.Contains(err.Error(), "email provider") {
-		t.Errorf("ComposeAccount() error = %q, want it to name the missing provider", err)
+	for _, variable := range []string{config.ResendAPIKeyVariable, config.EmailFromVariable} {
+		if !strings.Contains(err.Error(), variable) {
+			t.Errorf("ComposeAccount() error = %q, want it to name %s", err, variable)
+		}
+	}
+}
+
+// TestComposeAccountServesProductionWithAnEmailProvider is the other half, and
+// the reason P19-T02A exists: with the credential and the sender address
+// configured, production composes — the durable queue behind the flow and the
+// delivery handler in front of it — instead of refusing the boot.
+//
+// Nothing here reaches PostgreSQL. The refusals are decided before anything is
+// constructed, and building handles is not querying: the pool in these options
+// points at an unreachable address, so a composition that dialed would fail
+// loudly rather than pass quietly.
+func TestComposeAccountServesProductionWithAnEmailProvider(t *testing.T) {
+	t.Parallel()
+
+	options := completeOptions(t)
+	options.Env = config.EnvProduction
+	options.EmailFrom = "Arena <no-reply@arena.invalid>"
+	options.EmailAPIKey = config.NewSecret("re_live_provider_key")
+
+	surface, err := bootstrap.ComposeAccount(options)
+	if err != nil {
+		t.Fatalf("ComposeAccount() refused a complete production composition: %v", err)
+	}
+	if len(surface.Routes()) == 0 {
+		t.Fatal("production composed a surface without routes")
+	}
+	if surface.LocalSink() != nil {
+		t.Error("production installed the in-process email sink")
+	}
+	if surface.SinkDirectory() != "" {
+		t.Error("production installed a directory of account codes")
 	}
 }

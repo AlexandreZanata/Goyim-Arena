@@ -175,6 +175,12 @@ func runServer(args []string, stdout *os.File) error {
 			// delivery the person would (P18-T07). Production refuses the
 			// variable before the boot reaches here.
 			SinkDir: cfg.EmailSinkDir(),
+			// Production delivers through the provider: the flows queue the
+			// message as durable work and the worker runs the handler
+			// (P19-T02A). A missing credential is a refusal at boot, never a
+			// registration whose link goes nowhere.
+			EmailFrom:   cfg.EmailFrom(),
+			EmailAPIKey: cfg.ResendAPIKey(),
 		})
 		if err != nil {
 			return err

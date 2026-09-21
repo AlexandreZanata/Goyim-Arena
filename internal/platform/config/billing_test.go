@@ -21,11 +21,7 @@ func TestLoadWithoutBillingConfigurationSellsNothing(t *testing.T) {
 			config.BillingMarkets(), config.BillingPrices())
 	}
 
-	production, err := Load(environ(
-		"ARENA_ENV=production",
-		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
-		"ARENA_STRIPE_SECRET_KEY=sk_live_production",
-	))
+	production, err := Load(productionEnv())
 	if err != nil {
 		t.Fatalf("production without billing variables must load: %v", err)
 	}
@@ -199,10 +195,7 @@ func TestBillingReturnURLsAreAllowlisted(t *testing.T) {
 				"ARENA_BILLING_CANCEL_URL="+testCase.cancel,
 			)
 			if testCase.envValue == "production" {
-				environment = environ(
-					"ARENA_ENV=production",
-					"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
-					"ARENA_STRIPE_SECRET_KEY=sk_live_urls",
+				environment = productionEnv(
 					"ARENA_BILLING_SUCCESS_URL="+testCase.success,
 					"ARENA_BILLING_CANCEL_URL="+testCase.cancel,
 				)
@@ -250,10 +243,7 @@ func TestBillingReturnURLsAreAllowlisted(t *testing.T) {
 
 	t.Run("plain HTTP is refused in production", func(t *testing.T) {
 		t.Parallel()
-		_, err := Load(environ(
-			"ARENA_ENV=production",
-			"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
-			"ARENA_STRIPE_SECRET_KEY=sk_live_urls",
+		_, err := Load(productionEnv(
 			"ARENA_BILLING_SUCCESS_URL=http://arena.example/ok",
 			"ARENA_BILLING_CANCEL_URL=http://arena.example/no",
 		))
