@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
 )
 
 func runForTest(t *testing.T, args ...string) (string, string, error) {
@@ -400,11 +402,21 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 	address := listener.Addr().String()
 	_ = listener.Close()
 
+	// The account journey is composed from the database and the frontend build
+	// (P18-T07A), so the boot needs both. The manifest is the fixture the
+	// composition tests use, pointed at explicitly: a deployment names its own
+	// directory the same way.
+	assetsDir := filepath.Join(repoRoot, "internal", "bootstrap", "testdata", "assets")
+
 	cmdHealthy := exec.Command(binary, "server")
 	cmdHealthy.Env = []string{
 		"ARENA_ADDR=" + address,
 		"ARENA_ENV=development",
 		"ARENA_DATABASE_URL=" + dsn,
+		"ARENA_ASSETS_DIR=" + assetsDir,
+		// The participation journey (P18-T07B) signs its pagination
+		// cursors; without this key it is deliberately not mounted.
+		"ARENA_CURSOR_SECRET=arena-boot-test-cursor-secret-32b",
 		"PATH=" + os.Getenv("PATH"),
 	}
 	if err := cmdHealthy.Start(); err != nil {
@@ -448,6 +460,122 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 		t.Fatalf("unexpected payload: %s", body)
 	}
 
+	// The pages of the account journey are served by the composed binary, not
+	// only by the adapter in its own test: this is the claim P18-T07A exists to
+	// make, checked against the process an operator runs.
+	for _, page := range []string{"/register", "/verify", "/login", "/logout", "/reset", "/reset/confirm"} {
+		pageResponse, err := client.Get(baseURL + page)
+		if err != nil {
+			t.Fatalf("GET %s: %v", page, err)
+		}
+		body, err := io.ReadAll(pageResponse.Body)
+		_ = pageResponse.Body.Close()
+		if err != nil {
+			t.Fatalf("read GET %s body: %v", page, err)
+		}
+		if pageResponse.StatusCode != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200 (body: %.200s)", page, pageResponse.StatusCode, body)
+		}
+		if contentType := pageResponse.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+			t.Errorf("GET %s Content-Type = %q, want text/html", page, contentType)
+		}
+	}
+
+	// The transitions of the Arena participation journey are mounted by the
+	// composed binary too (P18-T07B). They are asked without a session, so the
+	// answer is a refusal — what matters is that it is not the 404 of a route
+	// nobody mounted: a declared route whose module is not composed answers
+	// exactly that, and it is indistinguishable from a working journey until
+	// someone tries to use it.
+	for _, transition := range []string{"position", "position/change", "arguments", "attributions"} {
+		path := "/arenas/qualquer-arena/" + transition
+		request, err := http.NewRequest(http.MethodPost, baseURL+path, strings.NewReader(""))
+		if err != nil {
+			t.Fatalf("build POST %s: %v", path, err)
+		}
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatalf("POST %s: %v", path, err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode == http.StatusNotFound {
+			t.Errorf("POST %s status = 404: the participation transition is not mounted (body: %.200s)", path, body)
+		}
+	}
+	// The page is the same claim for the read: it is answered by the composed
+	// surface instead of by the placeholder of an uncomposed module. What the
+	// surface answers depends on the database this process was pointed at — the
+	// refusal page when the schema is there, an RFC 9457 problem document when
+	// it is not — and both are documents of the journey, while the placeholder
+	// answers net/http's plain-text 404. The rendered page over a migrated
+	// database is asserted where it can be set up: internal/bootstrap composes
+	// the journey against a disposable one.
+	pageResponse, err := client.Get(baseURL + "/arenas/qualquer-arena")
+	if err != nil {
+		t.Fatalf("GET /arenas/qualquer-arena: %v", err)
+	}
+	body, _ = io.ReadAll(pageResponse.Body)
+	_ = pageResponse.Body.Close()
+	if contentType := pageResponse.Header.Get("Content-Type"); strings.HasPrefix(contentType, "text/plain") {
+		t.Errorf("GET /arenas/qualquer-arena answered the placeholder of an uncomposed route (Content-Type %q, body %.200s)", contentType, body)
+	}
+
+	// The build the pages reference is served by the same process (P18-T07C):
+	// the published address of the manifest is immutable for a year, the stable
+	// address of the module graph is revalidated every time, and an address the
+	// manifest never published is not reachable — which is what keeps a broken
+	// stylesheet from being a page that loads nothing.
+	frontend, err := assets.LoadFile(assetsDir)
+	if err != nil {
+		t.Fatalf("read the build manifest: %v", err)
+	}
+	publishedStylesheet, err := frontend.URL("styles/reset.css")
+	if err != nil {
+		t.Fatalf("resolve the published stylesheet: %v", err)
+	}
+	publishedModule, err := frontend.URL("pages/auth.js")
+	if err != nil {
+		t.Fatalf("resolve the published module: %v", err)
+	}
+
+	for _, want := range []struct {
+		target      string
+		contentType string
+		cache       string
+	}{
+		{target: publishedStylesheet, contentType: "text/css; charset=utf-8", cache: assets.CacheHashed},
+		{target: "/assets/styles/reset.css", contentType: "text/css; charset=utf-8", cache: assets.CacheStable},
+		{target: publishedModule, contentType: "text/javascript; charset=utf-8", cache: assets.CacheHashed},
+	} {
+		response, err := client.Get(baseURL + want.target)
+		if err != nil {
+			t.Fatalf("GET %s: %v", want.target, err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusOK {
+			t.Errorf("GET %s status = %d, want 200 (body: %.200s)", want.target, response.StatusCode, body)
+			continue
+		}
+		if contentType := response.Header.Get("Content-Type"); contentType != want.contentType {
+			t.Errorf("GET %s Content-Type = %q, want %q", want.target, contentType, want.contentType)
+		}
+		if cache := response.Header.Get("Cache-Control"); cache != want.cache {
+			t.Errorf("GET %s Cache-Control = %q, want %q", want.target, cache, want.cache)
+		}
+	}
+
+	undeclared, err := client.Get(baseURL + "/assets/styles/private.css")
+	if err != nil {
+		t.Fatalf("GET an undeclared asset: %v", err)
+	}
+	_ = undeclared.Body.Close()
+	if undeclared.StatusCode != http.StatusNotFound {
+		t.Errorf("GET an address the manifest does not declare = %d, want 404", undeclared.StatusCode)
+	}
+
 	// Terminate healthy server
 	_ = cmdHealthy.Process.Signal(syscall.SIGTERM)
 	_ = cmdHealthy.Wait()
@@ -466,6 +594,7 @@ func TestServerReadinessWithDatabaseURL(t *testing.T) {
 		"ARENA_ADDR=" + downAddress,
 		"ARENA_ENV=development",
 		"ARENA_DATABASE_URL=" + unreachableDSN,
+		"ARENA_ASSETS_DIR=" + assetsDir,
 		"PATH=" + os.Getenv("PATH"),
 	}
 	if err := cmdDown.Start(); err != nil {

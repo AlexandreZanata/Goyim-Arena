@@ -29,7 +29,7 @@ Dependências de terceiros não são conveniências para evitar código simples;
 ### 2.2 Dependências de build do frontend
 - A única dependência autorizada para o frontend é o compilador oficial `typescript`, fixado e executado exclusivamente durante o processo de build para emissão de JavaScript ESM nativo.
 - Proibido o uso de bundlers complexos (Vite, Webpack, Rollup, Babel). A compilação é realizada diretamente pelo `tsc`.
-- Ferramentas de teste E2E (como Playwright) são confinadas ao pipeline de testes e nunca incluídas no pacote de produção.
+- Ferramentas de teste E2E (como Playwright) são confinadas ao pipeline de testes e nunca incluídas no pacote de produção. O pacote isolado é `tools/e2e` (P18-T07): ele depende de `web/`, nunca o contrário, e `tools/e2e/isolation-check.sh` recusa o build se o runner aparecer no pacote do frontend, no build referenciado pelas páginas ou no binário.
 
 ---
 
@@ -66,7 +66,7 @@ Cada dependência admitida no projeto possui uma classe clara, um owner respons�
 | `govulncheck` | Dev / Security Tooling | Pipeline de CI e `Makefile` | Verificação oficial de vulnerabilidades conhecidas em Go | BSD-3-Clause |
 | `testcontainers-go` | Test Tooling | `tests/integration` | Subida de contêineres efêmeros de PostgreSQL para testes | MIT |
 | `k6` | Test Tooling | `tests/load` | Testes de carga, estresse e validação de SLO de performance | AGPL-3.0 (CLI externa) |
-| `playwright` | Test Tooling | `tests/e2e` | Testes end-to-end em navegadores reais (isolado da web) | Apache-2.0 |
+| `playwright` | Test Tooling | `tools/e2e` | Testes end-to-end em navegadores reais (isolado da web; `make test-e2e` prova por gate que nada do runner é entregue) | Apache-2.0 |
 | `gitleaks` | Dev / Security Tooling | Pipeline de CI e pre-commit | Varredura de credenciais e segredos no histórico Git | MIT |
 | `dependabot` | Dev / Security Tooling | Repositório / GitHub | Monitoramento automatizado de novas versões e CVEs | Serviço GitHub |
 | `PostgreSQL 18.x` | Infraestrutura / Dados | `infra/postgres` | Sistema relacional primário de registro e persistência ACID | PostgreSQL License |

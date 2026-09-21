@@ -51,7 +51,7 @@ Goyim Arena será uma aplicação API-first com backend Go e frontend baseado so
 - **Deploy:** Docker Compose em Debian estável ou Ubuntu LTS.
 - **CI/CD:** GitHub Actions.
 - **Carga:** k6.
-- **E2E:** Playwright fora do bundle do frontend.
+- **E2E:** Playwright fora do bundle do frontend, em `tools/e2e` (P18-T07).
 
 ## 2. O significado de “sem dependências externas”
 
@@ -141,7 +141,9 @@ Um gerador interno em Go poderá ler o subconjunto versionado do contrato OpenAP
 ## 6. Ferramentas de desenvolvimento
 
 - `tsc --noEmit` para tipos e `tsc` para emissão ESM.
-- APIs nativas de teste para unidades puras; Playwright para comportamento real do browser.
+- `tools/webaudit` (`make audit-web`, dentro de `make verify`) mede o build entregue contra os orçamentos de [FRONTEND.md](FRONTEND.md) §11 e as regras de dependência: JS comprimido por página pública, CSS inicial, imports externos, bare specifiers, imports não publicados, construtos que a CSP servida recusa e primitivas de rede fora de `web/src/core`.
+- APIs nativas de teste para unidades puras; Playwright para comportamento real do browser, no pacote isolado `tools/e2e` (`make test-e2e`), cujas jornadas dirigem o binário real contra um PostgreSQL descartável — nada do runner está em `web/`, no build referenciado pelas páginas ou no binário entregue. O harness acrescenta a tag de build `pseudolocale` ao servidor das jornadas, que é o único jeito de servir o pseudo-locale de layout; o binário entregue não é compilado com ela (provado por `go test ./internal/i18n/...`), e a execução falha de imediato se o servidor das jornadas não servir o locale.
+- `tools/i18naudit` (`make audit-i18n`, dentro de `make verify`) lê a árvore entregue em busca de documento que escreve a própria linguagem (ou nenhuma), prosa fora do catálogo e propriedade física de direção em folha de estilo. Só biblioteca padrão, nada é reescrito e nada é entregue ao usuário.
 - `go test`, race detector, fuzzing dirigido e benchmarks.
 - `golangci-lint` e `govulncheck`.
 - `sqlc vet` e migrations em banco descartável.

@@ -1,0 +1,10 @@
+/* Fixture of the direction rule: the same declarations, written logically, so
+   one sheet serves both writing directions. */
+.card {
+  margin-inline-start: 1rem;
+  padding-inline-end: 2rem;
+  border-inline-start: 1px solid var(--ga-border);
+  text-align: start;
+  inset-inline-start: 0;
+  float: inline-start;
+}

@@ -22,6 +22,7 @@ import (
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/i18n"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/domain"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/websurface"
 )
 
 // Catalog keys, one block per message type, shared by the plain-text and
@@ -46,7 +47,7 @@ const (
 // requires an explicit entry per template, so a template that needs different
 // markup is a visible addition rather than a silent reuse.
 const htmlDocument = `<!doctype html>
-<html lang="{{.Language}}">
+<html lang="{{.Language}}" dir="{{dir .Language}}">
 <head>
 <meta charset="utf-8">
 <title>{{.Subject}}</title>
@@ -178,7 +179,7 @@ func NewRenderer(options ...Option) (*Renderer, error) {
 		if !ok {
 			return nil, fmt.Errorf("renderer: no html source for template %q", id)
 		}
-		parsed, err := template.New(id.String()).Parse(source)
+		parsed, err := template.New(id.String()).Funcs(websurface.Funcs()).Parse(source)
 		if err != nil {
 			return nil, fmt.Errorf("renderer: parse template %q: %w", id, err)
 		}

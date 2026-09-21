@@ -238,6 +238,185 @@ func TestNewMuxRoutesAndCorrelates(t *testing.T) {
 	}
 }
 
+// TestNewMuxWithServesASurfaceInsideTheStack covers P18-T07A: a route the
+// registry declares is served by the surface that claims it, inside the
+// platform middleware (the request id header is what proves the position), and
+// not by the placeholder a module that is not composed leaves behind.
+// surfacePath is the route the composition tests mount. The registry is a
+// process-wide list, so the provider is installed once for the whole test
+// binary: a provider registered per test would declare the route twice, which
+// the registry itself refuses.
+const surfacePath = "/composed-surface"
+
+func init() {
+	httpserver.RegisterRouteProvider(func() []httpserver.Route {
+		return []httpserver.Route{{Method: http.MethodGet, Path: surfacePath}}
+	})
+}
+
+func TestNewMuxWithServesASurfaceInsideTheStack(t *testing.T) {
+	t.Parallel()
+
+	path := surfacePath
+
+	served := 0
+	handler, err := httpserver.NewMuxWith(
+		stubIDs{value: "composed-id"}, nil, securityheaders.Config{},
+		[]httpserver.Surface{{
+			Routes: []httpserver.Route{{Method: http.MethodGet, Path: path}},
+			Register: func(mux *http.ServeMux) error {
+				mux.HandleFunc("GET "+path, func(writer http.ResponseWriter, request *http.Request) {
+					served++
+					writer.WriteHeader(http.StatusOK)
+				})
+				return nil
+			},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewMuxWith() error = %v", err)
+	}
+
+	recorder := do(t, handler, path)
+	if recorder.Code != http.StatusOK || served != 1 {
+		t.Errorf("GET %s status = %d (handler calls = %d), want the mounted surface to answer", path, recorder.Code, served)
+	}
+	if got := recorder.Header().Get("X-Request-Id"); got != "composed-id" {
+		t.Errorf("X-Request-Id = %q, want the platform middleware to cover the mounted route", got)
+	}
+
+	// Without the surface the same declared route is a placeholder: that is the
+	// difference between a route the process declares and one it serves.
+	placeholder, err := httpserver.NewMuxWith(stubIDs{value: "composed-id"}, nil, securityheaders.Config{}, nil)
+	if err != nil {
+		t.Fatalf("NewMuxWith() without surfaces error = %v", err)
+	}
+	if recorder := do(t, placeholder, path); recorder.Code != http.StatusNotFound {
+		t.Errorf("GET %s without a surface = %d, want the placeholder 404", path, recorder.Code)
+	}
+}
+
+// TestNewMuxWithRefusesSurfacesItCannotServe is the fail-closed half: a surface
+// that is incomplete, undeclared, duplicated or in conflict with a platform
+// route fails the composition instead of booting a mux that answers wrongly.
+func TestNewMuxWithRefusesSurfacesItCannotServe(t *testing.T) {
+	t.Parallel()
+
+	undeclared := []httpserver.Route{{Method: http.MethodGet, Path: "/never-declared"}}
+	health := []httpserver.Route{{Method: http.MethodGet, Path: "/health/live"}}
+	surface := []httpserver.Route{{Method: http.MethodGet, Path: surfacePath}}
+	ok := func(mux *http.ServeMux) error { return nil }
+
+	cases := []struct {
+		name     string
+		surfaces []httpserver.Surface
+		want     string
+	}{
+		{
+			name:     "a surface that registers nothing",
+			surfaces: []httpserver.Surface{{Routes: health}},
+			want:     "registers nothing",
+		},
+		{
+			name:     "a surface that declares no routes",
+			surfaces: []httpserver.Surface{{Register: ok}},
+			want:     "declares no routes",
+		},
+		{
+			name:     "a static surface that claims a route of the registry",
+			surfaces: []httpserver.Surface{{Routes: surface, Register: ok, Static: true}},
+			want:     "is static and declares",
+		},
+		{
+			name:     "a route the registry does not declare",
+			surfaces: []httpserver.Surface{{Routes: undeclared, Register: ok}},
+			want:     "does not declare",
+		},
+		{
+			name: "two surfaces claiming one route",
+			surfaces: []httpserver.Surface{
+				{Routes: surface, Register: ok},
+				{Routes: surface, Register: ok},
+			},
+			want: "claimed by two surfaces",
+		},
+		{
+			name:     "a surface claiming a platform route",
+			surfaces: []httpserver.Surface{{Routes: health, Register: ok}},
+			want:     "which is a platform route",
+		},
+		{
+			name: "a surface that panics while registering",
+			surfaces: []httpserver.Surface{{
+				Routes:   surface,
+				Register: func(*http.ServeMux) error { panic("duplicate pattern") },
+			}},
+			want: "route registration panicked",
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler, err := httpserver.NewMuxWith(stubIDs{value: "id"}, nil, securityheaders.Config{}, testCase.surfaces)
+			if err == nil {
+				t.Fatalf("NewMuxWith() accepted the composition and returned %T", handler)
+			}
+			if !strings.Contains(err.Error(), testCase.want) {
+				t.Errorf("NewMuxWith() error = %q, want it to report %q", err, testCase.want)
+			}
+		})
+	}
+}
+
+// TestNewMuxWithServesAStaticSurface covers P18-T07C: the frontend build is
+// content, not an operation, so it is mounted inside the platform stack without
+// entering the registry the contract is compared with — the router knows the
+// address space because the surface registers it, not because a route declares
+// it.
+func TestNewMuxWithServesAStaticSurface(t *testing.T) {
+	t.Parallel()
+
+	const prefix = "/assets"
+	handler, err := httpserver.NewMuxWith(
+		stubIDs{value: "static-id"}, nil, securityheaders.Config{},
+		[]httpserver.Surface{{
+			Static: true,
+			Register: func(mux *http.ServeMux) error {
+				mux.HandleFunc("GET "+prefix+"/", func(writer http.ResponseWriter, request *http.Request) {
+					writer.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+					_, _ = writer.Write([]byte("/* build */"))
+				})
+				return nil
+			},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewMuxWith() error = %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, prefix+"/styles/arena-abc123.css", nil))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("GET an address of the static surface = %d, want 200", recorder.Code)
+	}
+	if recorder.Header().Get("X-Request-Id") == "" {
+		t.Error("the static surface answered outside the platform middleware: no request id")
+	}
+	if got := recorder.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+		t.Errorf("Cache-Control = %q, want the policy the surface set", got)
+	}
+
+	// A route the registry declares is still answered by the placeholder when
+	// no module surface claims it: the static surface declares nothing.
+	placeholder := httptest.NewRecorder()
+	handler.ServeHTTP(placeholder, httptest.NewRequest(http.MethodGet, surfacePath, nil))
+	if placeholder.Code != http.StatusNotFound {
+		t.Errorf("GET %s = %d, want the placeholder of an uncomposed route", surfacePath, placeholder.Code)
+	}
+}
+
 func TestListenFailsFastOnBusyPort(t *testing.T) {
 	t.Parallel()
 

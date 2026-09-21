@@ -18,6 +18,7 @@ import (
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/arguments/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/http"
+	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/html"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/adapters/http"
 	_ "github.com/AlexandreZanata/Goyim-Arena/internal/moderation/adapters/http"

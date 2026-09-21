@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "assets": {
+    "pages/auth.js": {
+      "path": "/assets/pages/auth-9bde709de9d0.js",
+      "sha256": "9bde709de9d0956301e6f61dc0cc0172e65bdad702115db0d8c052586196d7c0"
+    },
+    "pages/arena.js": {
+      "path": "/assets/pages/arena-f363fbe72792.js",
+      "sha256": "f363fbe727927de7e330a49b039f8bacbd0420906b8448441e6ad3c11d17fe0f"
+    },
+    "styles/reset.css": {
+      "path": "/assets/styles/reset-9ce670ee3f4c.css",
+      "sha256": "9ce670ee3f4c0864f4769cd2d39044e95b448daf0112295fb810201c00113600"
+    },
+    "styles/tokens.css": {
+      "path": "/assets/styles/tokens-38e920b12e7e.css",
+      "sha256": "38e920b12e7e1ee67b259ed81abf53dbf995ade7d77df433b314cc2371396b8a"
+    },
+    "styles/base.css": {
+      "path": "/assets/styles/base-3173c8db69b3.css",
+      "sha256": "3173c8db69b3c372342c61384f8cda625b354482a5221b2a8b3015de1f211cf4"
+    },
+    "styles/primitives.css": {
+      "path": "/assets/styles/primitives-d73c96be7ed6.css",
+      "sha256": "d73c96be7ed6a59d24b4318e2a0e0011fa5771db2724d6147d77e7a6c0ce9e08"
+    },
+    "styles/auth.css": {
+      "path": "/assets/styles/auth-53f96aba637c.css",
+      "sha256": "53f96aba637c4ad7ce628a0fd585d0626e9aefd9eb143d7d321598025d9d2d3c"
+    },
+    "styles/arena.css": {
+      "path": "/assets/styles/arena-6d32a4710371.css",
+      "sha256": "6d32a471037189318ee1a93162ff2921bb4e57bb2b403055c2040390931141c9"
+    }
+  }
+}

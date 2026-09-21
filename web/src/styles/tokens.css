@@ -1,84 +1,93 @@
 /* Goyim Arena — design tokens. Native CSS custom properties only. */
 
-:root {
-  color-scheme: light dark;
-
-  /* Color: primitive palette */
-  --ga-color-neutral-0: #ffffff;
-  --ga-color-neutral-50: #f5f6f7;
-  --ga-color-neutral-100: #e6e8ea;
-  --ga-color-neutral-300: #b9bec4;
-  --ga-color-neutral-600: #5c636a;
-  --ga-color-neutral-900: #16181a;
-  --ga-color-accent-500: #7c3aed;
-  --ga-color-accent-600: #6d28d9;
-  --ga-color-accent-contrast: #ffffff;
-  --ga-color-danger-500: #dc2626;
-  --ga-color-success-500: #16a34a;
-
-  /* Color: semantic aliases */
-  --ga-color-surface: var(--ga-color-neutral-0);
-  --ga-color-surface-muted: var(--ga-color-neutral-50);
-  --ga-color-text: var(--ga-color-neutral-900);
-  --ga-color-text-muted: var(--ga-color-neutral-600);
-  --ga-color-border: var(--ga-color-neutral-100);
-  --ga-color-action: var(--ga-color-accent-500);
-  --ga-color-action-hover: var(--ga-color-accent-600);
-  --ga-color-action-contrast: var(--ga-color-accent-contrast);
-  --ga-color-critical: var(--ga-color-danger-500);
-  --ga-color-positive: var(--ga-color-success-500);
-
-  /* Typography */
-  --ga-font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --ga-font-size-xs: 0.75rem;
-  --ga-font-size-sm: 0.875rem;
-  --ga-font-size-md: 1rem;
-  --ga-font-size-lg: 1.25rem;
-  --ga-font-size-xl: 1.5rem;
-  --ga-font-weight-regular: 400;
-  --ga-font-weight-medium: 500;
-  --ga-font-weight-semibold: 600;
-  --ga-line-height-tight: 1.25;
-  --ga-line-height-normal: 1.5;
-
-  /* Spacing scale */
-  --ga-space-1: 0.25rem;
-  --ga-space-2: 0.5rem;
-  --ga-space-3: 0.75rem;
-  --ga-space-4: 1rem;
-  --ga-space-6: 1.5rem;
-  --ga-space-8: 2rem;
-
-  /* Radius */
-  --ga-radius-sm: 0.25rem;
-  --ga-radius-md: 0.5rem;
-  --ga-radius-lg: 1rem;
-
-  /* Shadow */
-  --ga-shadow-1: 0 1px 2px rgb(22 18 26 / 0.08);
-  --ga-shadow-2: 0 4px 12px rgb(22 18 26 / 0.12);
-
-  /* Motion */
-  --ga-duration-fast: 120ms;
-  --ga-duration-normal: 200ms;
-  --ga-ease-standard: cubic-bezier(0.2, 0, 0, 1);
-
-  /* Z-index */
-  --ga-z-base: 0;
-  --ga-z-sticky: 100;
-  --ga-z-dialog: 1000;
-  --ga-z-toast: 1100;
-}
-
-@media (prefers-reduced-motion: reduce) {
+@layer tokens {
   :root {
-    --ga-duration-fast: 0ms;
-    --ga-duration-normal: 0ms;
+    color-scheme: light dark;
+
+    /* Color: primitive palette */
+    --ga-color-neutral-0: #ffffff;
+    --ga-color-neutral-50: #f5f6f7;
+    --ga-color-neutral-100: #e6e8ea;
+    --ga-color-neutral-300: #b9bec4;
+    --ga-color-neutral-600: #5c636a;
+    --ga-color-neutral-900: #16181a;
+    --ga-color-accent-500: #7c3aed;
+    --ga-color-accent-600: #6d28d9;
+    --ga-color-accent-contrast: #ffffff;
+    --ga-color-danger-500: #dc2626;
+    --ga-color-success-500: #16a34a;
+
+    /* Color: semantic aliases */
+    --ga-color-surface: var(--ga-color-neutral-0);
+    --ga-color-surface-muted: var(--ga-color-neutral-50);
+    --ga-color-text: var(--ga-color-neutral-900);
+    --ga-color-text-muted: var(--ga-color-neutral-600);
+    --ga-color-border: var(--ga-color-neutral-100);
+    --ga-color-action: var(--ga-color-accent-500);
+    --ga-color-action-hover: var(--ga-color-accent-600);
+    --ga-color-action-contrast: var(--ga-color-accent-contrast);
+    --ga-color-critical: var(--ga-color-danger-500);
+    --ga-color-positive: var(--ga-color-success-500);
+
+    /* Typography */
+    --ga-font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --ga-font-size-xs: 0.75rem;
+    --ga-font-size-sm: 0.875rem;
+    --ga-font-size-md: 1rem;
+    --ga-font-size-lg: 1.25rem;
+    --ga-font-size-xl: 1.5rem;
+    --ga-font-weight-regular: 400;
+    --ga-font-weight-medium: 500;
+    --ga-font-weight-semibold: 600;
+    --ga-line-height-tight: 1.25;
+    --ga-line-height-normal: 1.5;
+
+    /* Spacing scale */
+    --ga-space-1: 0.25rem;
+    --ga-space-2: 0.5rem;
+    --ga-space-3: 0.75rem;
+    --ga-space-4: 1rem;
+    --ga-space-6: 1.5rem;
+    --ga-space-8: 2rem;
+
+    /* Radius */
+    --ga-radius-sm: 0.25rem;
+    --ga-radius-md: 0.5rem;
+    --ga-radius-lg: 1rem;
+
+    /* Shadow */
+    --ga-shadow-1: 0 1px 2px rgb(22 18 26 / 0.08);
+    --ga-shadow-2: 0 4px 12px rgb(22 18 26 / 0.12);
+
+    /* Motion */
+    --ga-duration-fast: 120ms;
+    --ga-duration-normal: 200ms;
+    --ga-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+    /* Z-index */
+    --ga-z-base: 0;
+    --ga-z-sticky: 100;
+    --ga-z-dialog: 1000;
+    --ga-z-toast: 1100;
+
+    /* Component sizing */
+    --ga-control-max-inline-size: 28rem;
+
+    /* Reading measure: the widest a column of prose and a form may grow before
+     * the line length stops being readable (P18-T05, the account journey). */
+    --ga-measure-max-inline-size: 34rem;
   }
-}
 
-@media (prefers-contrast: more) {
-  :root {
-    --ga-color-text-muted: var(--ga-color-neutral-900);
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --ga-duration-fast: 0ms;
+      --ga-duration-normal: 0ms;
+    }
+  }
+
+  @media (prefers-contrast: more) {
+    :root {
+      --ga-color-text-muted: var(--ga-color-neutral-900);
+    }
   }
 }

@@ -9,6 +9,8 @@ package html
 import (
 	"html/template"
 	"io"
+
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/websurface"
 )
 
 // documentTemplateSrc renders the public Arena document. Void elements are
@@ -17,7 +19,7 @@ import (
 // payload arrives as template.JS produced by encoding/json, never as raw
 // user content.
 const documentTemplateSrc = `<!DOCTYPE html>
-<html lang="{{.Lang}}">
+<html lang="{{.Lang}}" dir="{{dir .Lang}}">
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -45,7 +47,7 @@ const documentTemplateSrc = `<!DOCTYPE html>
 // errorTemplateSrc renders the not-found and gone documents. Error pages
 // never echo the requested slug and are never cacheable.
 const errorTemplateSrc = `<!DOCTYPE html>
-<html lang="{{.Lang}}">
+<html lang="{{.Lang}}" dir="{{dir .Lang}}">
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -103,8 +105,8 @@ type Templates struct {
 // NewTemplates parses and compiles the arena documents.
 func NewTemplates() *Templates {
 	return &Templates{
-		document: template.Must(template.New("arenaDocument").Parse(documentTemplateSrc)),
-		errorDoc: template.Must(template.New("arenaError").Parse(errorTemplateSrc)),
+		document: template.Must(template.New("arenaDocument").Funcs(websurface.Funcs()).Parse(documentTemplateSrc)),
+		errorDoc: template.Must(template.New("arenaError").Funcs(websurface.Funcs()).Parse(errorTemplateSrc)),
 	}
 }
 

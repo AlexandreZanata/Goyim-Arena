@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "assets": {
+    "core/http.js": {
+      "path": "/assets/core/http-633062d98609.js",
+      "sha256": "633062d98609dfa151169498741ab066005a0a63fa689eb5c67a8a49b48aec2c"
+    },
+    "pages/arena.js": {
+      "path": "/assets/pages/arena-e1c6bbe3ea65.js",
+      "sha256": "e1c6bbe3ea65b7d8bfa5279b96abb36c15211897d5444d0256d22a9dfc4b38c5"
+    },
+    "styles/base.css": {
+      "path": "/assets/styles/base-2e832af93541.css",
+      "sha256": "2e832af935419c5141f3cdbe282af566e8bb516a2b0f1b77fb5945c0ab118018"
+    }
+  }
+}

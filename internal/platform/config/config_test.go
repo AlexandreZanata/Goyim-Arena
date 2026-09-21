@@ -7,6 +7,118 @@ import (
 	"testing"
 )
 
+// TestLoadReadsTheAssetDirectory covers P18-T07A: where the frontend build of
+// the server lives is configuration, because the process that serves the pages
+// is not the process that builds them.
+func TestLoadReadsTheAssetDirectory(t *testing.T) {
+	t.Parallel()
+
+	defaulted, err := Load(environ())
+	if err != nil {
+		t.Fatalf("load with no ARENA_* variables: %v", err)
+	}
+	if defaulted.AssetsDir() != DefaultAssetsDir {
+		t.Errorf("assets dir = %q, want the build directory default %q", defaulted.AssetsDir(), DefaultAssetsDir)
+	}
+
+	configured, err := Load(environ("ARENA_ASSETS_DIR=/srv/arena/assets"))
+	if err != nil {
+		t.Fatalf("load with ARENA_ASSETS_DIR: %v", err)
+	}
+	if configured.AssetsDir() != "/srv/arena/assets" {
+		t.Errorf("assets dir = %q, want the configured directory", configured.AssetsDir())
+	}
+
+	_, err = Load(environ("ARENA_ASSETS_DIR=   "))
+	if err == nil {
+		t.Fatal("a blank ARENA_ASSETS_DIR was accepted; the process would read no manifest and never say why")
+	}
+	if !strings.Contains(err.Error(), "ARENA_ASSETS_DIR") {
+		t.Errorf("error should name ARENA_ASSETS_DIR: %v", err)
+	}
+}
+
+// TestLoadReadsTheCursorSecret covers P18-T07B: the key that signs the
+// pagination cursors of the public lists is configuration, it is never
+// printed, and a key too short to be a key is refused at boot instead of
+// failing inside a use case constructor.
+func TestLoadReadsTheCursorSecret(t *testing.T) {
+	t.Parallel()
+
+	unset, err := Load(environ())
+	if err != nil {
+		t.Fatalf("load with no ARENA_* variables: %v", err)
+	}
+	if unset.CursorSecret().IsSet() {
+		t.Error("the cursor secret should be unset without configuration")
+	}
+
+	secret := strings.Repeat("k", 32)
+	configured, err := Load(environ("ARENA_CURSOR_SECRET=" + secret))
+	if err != nil {
+		t.Fatalf("load with ARENA_CURSOR_SECRET: %v", err)
+	}
+	if !configured.CursorSecret().IsSet() {
+		t.Error("the cursor secret was not read from the environment")
+	}
+	if rendered := fmt.Sprintf("%v %#v", configured.CursorSecret(), configured); strings.Contains(rendered, secret) {
+		t.Fatalf("the configured secret leaked into a printable rendering: %s", rendered)
+	}
+
+	_, err = Load(environ("ARENA_CURSOR_SECRET=" + strings.Repeat("k", minCursorSecretLength-1)))
+	if err == nil {
+		t.Fatal("a cursor secret below the minimum key size was accepted")
+	}
+	if !strings.Contains(err.Error(), "ARENA_CURSOR_SECRET") || !strings.Contains(err.Error(), "at least") {
+		t.Errorf("the refusal must name the variable and the key size: %v", err)
+	}
+}
+
+// TestLoadHandlesTheEmailSinkDirectory covers "default seguro" and "negativo":
+// the sink is off unless configured, a blank value is refused instead of
+// silently disabling it, and production — which serves real accounts — refuses
+// the variable however the rest of the environment is configured (P18-T07).
+func TestLoadHandlesTheEmailSinkDirectory(t *testing.T) {
+	t.Parallel()
+
+	unset, err := Load(environ())
+	if err != nil {
+		t.Fatalf("load with no ARENA_* variables: %v", err)
+	}
+	if unset.EmailSinkDir() != "" {
+		t.Errorf("the sink directory should be empty without configuration, got %q", unset.EmailSinkDir())
+	}
+
+	configured, err := Load(environ(EmailSinkDirVariable + "=/tmp/arena-email-sink"))
+	if err != nil {
+		t.Fatalf("load with %s: %v", EmailSinkDirVariable, err)
+	}
+	if configured.EmailSinkDir() != "/tmp/arena-email-sink" {
+		t.Errorf("the sink directory was not read from the environment: %q", configured.EmailSinkDir())
+	}
+
+	_, err = Load(environ(EmailSinkDirVariable + "=   "))
+	if err == nil {
+		t.Fatal("a blank sink directory was accepted")
+	}
+	if !strings.Contains(err.Error(), EmailSinkDirVariable) {
+		t.Errorf("the refusal must name the variable: %v", err)
+	}
+
+	_, err = Load(environ(
+		"ARENA_ENV=production",
+		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
+		"ARENA_STRIPE_SECRET_KEY=sk_live_production",
+		EmailSinkDirVariable+"=/tmp/arena-email-sink",
+	))
+	if err == nil {
+		t.Fatal("production accepted the local email sink")
+	}
+	if !strings.Contains(err.Error(), EmailSinkDirVariable) || !strings.Contains(err.Error(), "production") {
+		t.Errorf("the refusal must name the variable and the environment: %v", err)
+	}
+}
+
 func environ(entries ...string) []string {
 	return append([]string{
 		"HOME=/home/operator",

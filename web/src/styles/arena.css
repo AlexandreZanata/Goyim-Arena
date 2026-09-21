@@ -1,0 +1,69 @@
+/* Layout of the Arena participation page (P18-T06).
+ *
+ * The page is a server-rendered document: this sheet only places what the
+ * templates already produce, using the tokens of tokens.css and logical
+ * properties so the layout follows the writing direction and survives a 200%
+ * zoom. Everything the primitives own (fields, summaries, the busy state, the
+ * toasts) stays in primitives.css; nothing here reaches into their internals. */
+@layer layout {
+  .ga-arena {
+    max-inline-size: var(--ga-measure-max-inline-size);
+    margin-inline: auto;
+    padding-inline: var(--ga-space-4);
+    padding-block: var(--ga-space-6);
+    color: var(--ga-color-text);
+  }
+
+  .ga-arena__header {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ga-space-4);
+    align-items: baseline;
+    justify-content: space-between;
+    max-inline-size: var(--ga-measure-max-inline-size);
+    margin-inline: auto;
+    padding-inline: var(--ga-space-4);
+    padding-block: var(--ga-space-4);
+  }
+
+  .ga-arena__brand {
+    font-weight: 700;
+    text-decoration: none;
+    color: var(--ga-color-text);
+  }
+
+  .ga-arena__nav ul {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ga-space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .ga-arena__section {
+    margin-block-start: var(--ga-space-8);
+    padding-block-start: var(--ga-space-4);
+    border-block-start: 1px solid var(--ga-color-border);
+  }
+
+  .ga-arena__choices,
+  .ga-arena__choice {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--ga-space-2);
+    align-items: center;
+  }
+
+  .ga-arena__choice {
+    margin-block-start: var(--ga-space-2);
+  }
+
+  .ga-arena__arguments {
+    display: grid;
+    gap: var(--ga-space-4);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+}

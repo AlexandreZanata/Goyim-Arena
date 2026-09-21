@@ -49,11 +49,34 @@ const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 
 // served with the wrong type into script execution.
 const contentTypeOptions = "nosniff"
 
-// referrerPolicy sends no Referer at all. Arena addresses carry the user's
-// own published slug in the path, and nothing in the product needs to tell a
-// third-party site which documents a visitor came from; same-origin
-// navigation does not need it either, because the product has no analytics.
-const referrerPolicy = "no-referrer"
+// ContentSecurityPolicy returns the exact policy the middleware delivers.
+//
+// It exists for the frontend gate of P18-T08 (`tools/webaudit`): the delivered
+// code has to be compatible with the policy of the binary that serves it, and a
+// gate cannot ask that question by keeping a second copy of the answer. The
+// value is the constant itself, not a parameter: a caller that could change it
+// would be changing the policy of every response, which is a reviewed edit to
+// this file and to docs/SECURITY.md section 4, never a local convenience.
+func ContentSecurityPolicy() string { return contentSecurityPolicy }
+
+// referrerPolicy keeps the referrer inside the origin: a request to another
+// origin carries none. Arena addresses carry the user's own published slug in
+// the path, and nothing in the product needs to tell a third-party site which
+// documents a visitor came from, so nothing leaves. Inside the origin the
+// product has no analytics either, and a same-origin referrer costs nothing.
+//
+// It is deliberately not "no-referrer" (P18-T07D). That policy does more than
+// withhold the Referer: the HTML standard also serialises the **Origin** of a
+// form submission as "null" under it, and the double submit of the security
+// boundary refuses a request whose Origin is present and has no host. With
+// "no-referrer" no browser could submit any form of the product —
+// registration, sign-in, confirmation, position, publication, attribution —
+// while the strict-origin control declared in docs/THREAT_MODEL.md
+// (THR-AUTH-03) looked alive, because the Go tests never send an Origin. The
+// two halves of this choice are asserted: this package checks the exact value
+// delivered, and the middleware's own tests check that a nullified origin is
+// still refused while the origin of the serving host is accepted.
+const referrerPolicy = "same-origin"
 
 // permissionsPolicy disables the capabilities the product does not use, one
 // entry per capability so the set is auditable against the features the MVP

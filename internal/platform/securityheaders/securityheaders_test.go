@@ -47,8 +47,13 @@ func assertPolicy(t *testing.T, where string, header http.Header, production boo
 	if got := header.Get(contentTypeOptionsHeader); got != "nosniff" {
 		t.Errorf("%s: X-Content-Type-Options = %q, want nosniff", where, got)
 	}
-	if got := header.Get(referrerPolicyHeader); got != "no-referrer" {
-		t.Errorf("%s: Referrer-Policy = %q, want no-referrer", where, got)
+	// The exact value is load-bearing (P18-T07D): "no-referrer" also
+	// serialises the Origin of a form submission as "null", which the CSRF
+	// boundary refuses, so no browser could submit a form. "same-origin"
+	// keeps the privacy decision — nothing is sent to another origin — and
+	// leaves the origin of a same-origin submission readable.
+	if got := header.Get(referrerPolicyHeader); got != "same-origin" {
+		t.Errorf("%s: Referrer-Policy = %q, want same-origin", where, got)
 	}
 	if got := header.Get(permissionsPolicyHeader); got == "" {
 		t.Errorf("%s: Permissions-Policy is empty", where)

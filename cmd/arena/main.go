@@ -17,7 +17,9 @@ import (
 	// ship no system tzdata.
 	_ "time/tzdata"
 
+	"github.com/AlexandreZanata/Goyim-Arena/internal/bootstrap"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/buildinfo"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbpool"
@@ -25,6 +27,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/profiling"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/securityheaders"
 )
 
@@ -80,11 +83,23 @@ func run(args []string, stdout *os.File) error {
 	return nil
 }
 
-// runServer boots the hardened HTTP server (P02-T05): typed configuration
-// from the environment, the structured JSON logger, request ID correlation
-// with the health routes, and a graceful shutdown on SIGTERM/SIGINT. It is
+// runServer boots the hardened HTTP server (P02-T05) and composes the surfaces
+// it serves (P18-T07A, P18-T07B, P18-T07C): typed configuration from the
+// environment, the structured JSON logger, request ID correlation, the account
+// and participation browser journeys, the frontend build they reference, all
+// mounted on the platform mux, and a graceful shutdown on SIGTERM/SIGINT. It is
 // the process edge — the only place allowed to own signals and the real
 // clock/randomness sources.
+//
+// With ARENA_DATABASE_URL set, the account and participation journeys are
+// composed and served, and so is the frontend build named by ARENA_ASSETS_DIR:
+// the pages reference hashed addresses and the process publishes exactly the
+// ones its manifest declares (P18-T07C). A page mounted without its manifest
+// would render links to files that do not exist, and a build without the
+// process that serves it is a page that loads nothing. Without the DSN the
+// process serves the health routes only and says so in the log: an application
+// that answers 404 on every page while reporting itself ready is worse than a
+// probe that declares what it is.
 func runServer(args []string, stdout *os.File) error {
 	if len(args) > 0 {
 		return fmt.Errorf("server takes no arguments\n\nUsage: arena server")
@@ -96,20 +111,114 @@ func runServer(args []string, stdout *os.File) error {
 	ids := clockseed.NewIDGenerator("req", clockseed.NewRandom(), clockseed.NewClock())
 	locResolver := locale.NewResolver()
 
+	// One clock and one entropy source for the whole process: a request
+	// observed by two layers must carry the same instant, and a token minted by
+	// a use case must come from the same source the composition was validated
+	// against.
+	clock := clockseed.NewClock()
+	random := clockseed.NewRandom()
+
 	var readyCheckers []httpserver.ReadyChecker
+	var surfaces []httpserver.Surface
 	if cfg.DatabaseURL().IsSet() {
 		dsn := string(cfg.DatabaseURL().Unredacted())
 		poolCfg := dbpool.FromConfig(cfg)
-		dbClock := clockseed.NewClock()
-		pool, err := dbpool.New(context.Background(), dsn, poolCfg, logger, dbClock)
+		pool, err := dbpool.New(context.Background(), dsn, poolCfg, logger, clock)
 		if err != nil {
 			return fmt.Errorf("initialize database pool: %w", err)
 		}
 		defer pool.Close()
 		readyCheckers = append(readyCheckers, pool)
+
+		// The account journey is composed whole or not at all: the database
+		// and the frontend build are both required, and the boot is the only
+		// place where noticing a missing one is cheap.
+		manifest, err := assets.LoadFile(cfg.AssetsDir())
+		if err != nil {
+			return fmt.Errorf("compose the account journey: %w (run 'make build-web' or point ARENA_ASSETS_DIR at an existing build)", err)
+		}
+
+		// The build the pages reference is served by this same process, from
+		// the manifest that was just read: a page whose stylesheet and module
+		// answer 404 is a broken page, and no deployment step should have to
+		// guess which addresses the build published (P18-T07C).
+		frontend, err := assets.NewServer(assets.Config{
+			Directory: cfg.AssetsDir(),
+			Manifest:  manifest,
+			Logger:    logger,
+		})
+		if err != nil {
+			return fmt.Errorf("compose the frontend build: %w", err)
+		}
+		surfaces = append(surfaces, httpserver.Surface{Static: true, Register: frontend.Mount})
+		logger.Info("http server: frontend build served", slog.String("prefix", frontend.Prefix()))
+
+		// One security boundary for every surface of the process: the CSRF
+		// cookie belongs to the origin, not to a journey, so a person moving
+		// between the account pages and an Arena page must not be refused by
+		// two managers that cannot verify each other's tokens.
+		manager, err := security.New(security.Options{Env: cfg.Env(), Clock: clock, Random: random})
+		if err != nil {
+			return fmt.Errorf("compose the security boundary: %w", err)
+		}
+
+		account, err := bootstrap.ComposeAccount(bootstrap.Options{
+			Env:      cfg.Env(),
+			Logger:   logger,
+			Pool:     pool.Pool(),
+			Clock:    clock,
+			Random:   random,
+			Assets:   manifest,
+			Security: manager,
+			// Development and test may name a directory for the local email
+			// sink, so a journey driven by another process reads the same
+			// delivery the person would (P18-T07). Production refuses the
+			// variable before the boot reaches here.
+			SinkDir: cfg.EmailSinkDir(),
+		})
+		if err != nil {
+			return err
+		}
+		surfaces = append(surfaces, account.Surface())
+		logger.Info("http server: account journey mounted", slog.Int("routes", len(account.Routes())))
+
+		// The participation journey charges INK, so it is composed where the
+		// wallet is: in the same process, over the same pool. Without the
+		// cursor signing secret it cannot paginate a list honestly, so it is
+		// not mounted — and production, which is expected to serve the Arena,
+		// refuses the boot instead of shipping the gap silently.
+		if cfg.CursorSecret().IsSet() {
+			participation, err := bootstrap.ComposeParticipation(bootstrap.Options{
+				Env:          cfg.Env(),
+				Logger:       logger,
+				Pool:         pool.Pool(),
+				Clock:        clock,
+				Random:       random,
+				Assets:       manifest,
+				CursorSecret: []byte(cfg.CursorSecret().Unredacted()),
+				Security:     manager,
+			})
+			if err != nil {
+				return err
+			}
+			surfaces = append(surfaces, participation.Surface())
+			logger.Info("http server: participation journey mounted", slog.Int("routes", len(participation.Routes())))
+		} else if cfg.IsProduction() {
+			return fmt.Errorf(
+				"compose the participation journey: %s is not set, and without a cursor signing secret the Arena pages cannot paginate their lists",
+				config.CursorSecretVariable,
+			)
+		} else {
+			logger.Warn(
+				"http server: participation journey not mounted (ARENA_CURSOR_SECRET is not set); the account pages and the health routes are served",
+				slog.String("variable", config.CursorSecretVariable),
+			)
+		}
+	} else {
+		logger.Warn("http server: account journey not mounted (ARENA_DATABASE_URL is not set); only the health routes are served")
 	}
 
-	handler, err := httpserver.NewMux(ids, locResolver, securityheaders.Config{Production: cfg.IsProduction()}, readyCheckers...)
+	handler, err := httpserver.NewMuxWith(ids, locResolver, securityheaders.Config{Production: cfg.IsProduction()}, surfaces, readyCheckers...)
 	if err != nil {
 		return err
 	}

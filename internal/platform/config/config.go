@@ -29,6 +29,9 @@ type Config struct {
 	env               Env
 	addr              string
 	adminAddr         string
+	assetsDir         string
+	emailSinkDir      string
+	cursorSecret      Secret
 	databaseURL       Secret
 	logLevel          LogLevel
 	dbMaxConns        int32
@@ -157,6 +160,9 @@ func Load(environ []string) (Config, error) {
 		"ARENA_ENV":                   true,
 		"ARENA_ADDR":                  true,
 		"ARENA_ADMIN_ADDR":            true,
+		"ARENA_ASSETS_DIR":            true,
+		EmailSinkDirVariable:          true,
+		"ARENA_CURSOR_SECRET":         true,
 		"ARENA_DATABASE_URL":          true,
 		"ARENA_LOG_LEVEL":             true,
 		"ARENA_DB_MAX_CONNS":          true,
@@ -184,6 +190,7 @@ func Load(environ []string) (Config, error) {
 	config := Config{
 		env:               EnvDevelopment,
 		addr:              "127.0.0.1:8080",
+		assetsDir:         DefaultAssetsDir,
 		logLevel:          LogLevelInfo,
 		dbMaxConns:        10,
 		dbMinConns:        2,
@@ -220,6 +227,40 @@ func Load(environ []string) (Config, error) {
 		config.adminAddr = raw
 		if problem := validateAdminAddr(raw); problem != "" {
 			validationErrors = append(validationErrors, ValidationError{Variable: "ARENA_ADMIN_ADDR", Problem: problem})
+		}
+	}
+
+	if raw, present := values["ARENA_ASSETS_DIR"]; present {
+		if strings.TrimSpace(raw) == "" {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: "ARENA_ASSETS_DIR",
+				Problem:  "must name the directory of an asset build (for example web/dist, produced by 'make build-web')",
+			})
+		} else {
+			config.assetsDir = raw
+		}
+	}
+
+	if raw, present := values[EmailSinkDirVariable]; present {
+		if strings.TrimSpace(raw) == "" {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: EmailSinkDirVariable,
+				Problem:  "must name the directory the local email sink writes to (for example .tmp/email-sink)",
+			})
+		} else {
+			config.emailSinkDir = raw
+		}
+	}
+
+	if raw, present := values[CursorSecretVariable]; present {
+		problem := validateCursorSecret(raw)
+		if problem == "" {
+			config.cursorSecret = NewSecret(raw)
+		} else {
+			validationErrors = append(validationErrors, ValidationError{
+				Variable: CursorSecretVariable,
+				Problem:  problem,
+			})
 		}
 	}
 
@@ -371,6 +412,18 @@ func Load(environ []string) (Config, error) {
 		})
 	}
 
+	// The local email sink is a development convenience: it writes the codes
+	// of verification and recovery messages to disk so a journey can be
+	// completed without a provider. No environment that serves real accounts
+	// may install it, whichever layer asks, so the variable is refused here
+	// instead of being ignored (P18-T07).
+	if config.env == EnvProduction && config.emailSinkDir != "" {
+		validationErrors = append(validationErrors, ValidationError{
+			Variable: EmailSinkDirVariable,
+			Problem:  "is refused when ARENA_ENV=production: it would put the codes of real accounts on disk",
+		})
+	}
+
 	// Selling is impossible without the payment provider credential, and the
 	// versioned catalog already refuses to build in production without an
 	// enabled commercial region, so production always sells: the credential is
@@ -411,6 +464,52 @@ func (config Config) Addr() string { return config.addr }
 // An empty value disables profiling and other administrative endpoints.
 func (config Config) AdminAddr() string { return config.adminAddr }
 
+// DefaultAssetsDir is the directory the frontend asset pipeline writes to
+// (P18-T01). The server reads its manifest back at boot; a deployment that
+// lays the build out elsewhere points ARENA_ASSETS_DIR at it.
+const DefaultAssetsDir = "web/dist"
+
+// AssetsDir returns the directory of the hashed frontend build whose manifest
+// the server resolves through its templates.
+func (config Config) AssetsDir() string { return config.assetsDir }
+
+// EmailSinkDirVariable names the directory the local email sink writes to
+// (P18-T07). It exists so a journey driven by another process — the browser
+// harness — can read the code a message carries, and it is meaningful only in
+// development and test: production refuses the variable, because a directory
+// of account codes is not a delivery mechanism.
+const EmailSinkDirVariable = "ARENA_EMAIL_SINK_DIR"
+
+// EmailSinkDir returns the directory the local email sink writes to, and the
+// empty string when nothing configures the sink. Development and test install
+// it; production refuses the variable above.
+func (config Config) EmailSinkDir() string { return config.emailSinkDir }
+
+// CursorSecretVariable signs the pagination cursors of the public lists
+// (P18-T07B). It enters configuration together with the composition that
+// consumes it: a cursor signed with an ephemeral key would stop resolving
+// after a restart, which a person experiences as a page that broke rather
+// than as a security property.
+const CursorSecretVariable = "ARENA_CURSOR_SECRET"
+
+// minCursorSecretLength is the key size the cursor codecs of the modules
+// require. It is repeated here so that a short secret is refused at boot, with
+// the variable named, instead of failing later inside a use case constructor.
+const minCursorSecretLength = 32
+
+// validateCursorSecret enforces the key size of the cursor signing secret.
+func validateCursorSecret(raw string) string {
+	if len(raw) < minCursorSecretLength {
+		return fmt.Sprintf("must be at least %d bytes of entropy (got %d)", minCursorSecretLength, len(raw))
+	}
+	return ""
+}
+
+// CursorSecret returns the redacted signing secret of the pagination cursors.
+// It is unset when nothing configures it, and the composition that needs it
+// refuses to build rather than minting one of its own.
+func (config Config) CursorSecret() Secret { return config.cursorSecret }
+
 // DatabaseURL returns the redacted database DSN.
 func (config Config) DatabaseURL() Secret { return config.databaseURL }
 
@@ -432,12 +531,19 @@ func (config Config) DBMaxConnIdleTime() time.Duration { return config.dbMaxConn
 // DBAcquireTimeout returns the timeout for acquiring a connection from the pool.
 func (config Config) DBAcquireTimeout() time.Duration { return config.dbAcquireTimeout }
 
+// GoString implements fmt.GoStringer on the Config itself, because %#v walks
+// the struct fields and would render the secret fields through reflection
+// without consulting their own redacting methods (P18-T07B).
+func (config Config) GoString() string {
+	return config.String()
+}
+
 // String implements fmt.Stringer with a fully redacted representation, so a
 // Config can be safely logged without leaking any value.
 func (config Config) String() string {
 	return fmt.Sprintf(
-		"config{env:%s addr:%s database_url:%s log_level:%s db_max_conns:%d db_min_conns:%d}",
-		config.env, config.addr, config.databaseURL, config.logLevel, config.dbMaxConns, config.dbMinConns,
+		"config{env:%s addr:%s assets_dir:%s database_url:%s log_level:%s db_max_conns:%d db_min_conns:%d}",
+		config.env, config.addr, config.assetsDir, config.databaseURL, config.logLevel, config.dbMaxConns, config.dbMinConns,
 	)
 }
 

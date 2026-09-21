@@ -15,6 +15,104 @@
         "title": "Arena removed",
         "detail": "This Arena was removed by moderation and is no longer available."
       }
+    },
+    "participation": {
+      "page_title": "Take part — {subject}",
+      "refusal_page_title": "Participation — Goyim Arena",
+      "brand": "Goyim Arena",
+      "nav": {
+        "label": "Navigation",
+        "arena": "Arena",
+        "document": "Public document",
+        "login": "Sign in",
+        "register": "Create account",
+        "signout": "Sign out"
+      },
+      "meta": {
+        "status": "Status: {status}",
+        "category": "Category: {category}",
+        "language": "Content language: {language}",
+        "published": "Published on {instant}"
+      },
+      "choice": {
+        "agree": "Agree",
+        "disagree": "Disagree",
+        "undecided": "Undecided"
+      },
+      "relation": {
+        "support": "Support",
+        "oppose": "Oppose",
+        "context": "Context"
+      },
+      "local": {
+        "heading": "Where would you stand?",
+        "hint": "Your choice stays in this browser only: nothing is sent until you sign in and confirm it."
+      },
+      "aggregate": {
+        "heading": "Aggregate result",
+        "reveal": "Reveal aggregate result",
+        "total": "Eligible participants: {total}",
+        "current": "Current position",
+        "initial": "Initial position",
+        "checked": "Derived at {instant}",
+        "suppressed": "The sample is too small to publish the result."
+      },
+      "position": {
+        "heading": "Your position",
+        "anonymous": "Confirming a position requires an account.",
+        "confirm_heading": "Confirm initial position",
+        "confirm_intro": "The initial position is immutable; later changes are recorded in the history.",
+        "confirm_submit": "Confirm position",
+        "confirm_busy": "Confirming position…",
+        "initial": "Initial position: {position}",
+        "current": "Current position: {position}",
+        "change_heading": "Change position",
+        "change_intro": "The change enters the history and cannot be undone.",
+        "change_submit": "Change position",
+        "change_busy": "Changing position…"
+      },
+      "arguments": {
+        "empty": "No argument has been published under this relation yet.",
+        "replies": "Replies: {count}",
+        "publish_heading": "Publish an argument",
+        "publish_intro": "Publishing debits INK from your balance according to the length of the text.",
+        "publish_submit": "Publish",
+        "publish_busy": "Publishing…"
+      },
+      "field": {
+        "position_label": "Position",
+        "relation_label": "Relation to the statement",
+        "content_label": "Argument",
+        "content_hint": "Up to {max} graphemes — the same limit the server enforces."
+      },
+      "attribution": {
+        "heading": "What influenced your change",
+        "intro": "Choose up to {max} arguments that influenced the change.",
+        "option": "{relation}: {excerpt}",
+        "submit": "Record influence",
+        "busy": "Recording…"
+      },
+      "notice": {
+        "position_confirmed": "Initial position confirmed.",
+        "position_changed": "Position changed.",
+        "argument_published": "Argument published.",
+        "attribution_recorded": "Influence recorded."
+      },
+      "errors": {
+        "summary_title": "Fix the highlighted fields",
+        "required": "Provide a value for this field.",
+        "invalid_choice": "Choose one of the listed positions.",
+        "invalid_relation": "Choose one of the listed relations.",
+        "invalid_content": "Write an argument of up to {max} graphemes.",
+        "immutable_position": "The initial position was already confirmed with another value.",
+        "version_conflict": "Your position changed elsewhere. Reload the page and submit again.",
+        "insufficient_ink": "Your INK balance does not cover this publication.",
+        "change_not_found": "This change is no longer available for attribution.",
+        "argument_not_found": "One of the chosen arguments is no longer available.",
+        "too_many_attributions": "Choose at most {max} arguments.",
+        "csrf_title": "Form expired",
+        "csrf_detail": "Reload the page and submit the form again."
+      }
     }
   }
 }

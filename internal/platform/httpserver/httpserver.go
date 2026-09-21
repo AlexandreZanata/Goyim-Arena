@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -188,6 +189,20 @@ func (server *Server) Run(ctx context.Context) error {
 	}
 }
 
+// mountSafely runs one mount, converting the panic net/http raises for a
+// pattern that conflicts with one already registered into an error. The
+// platform routes are registered first, so a surface that claims one of them
+// is refused at composition time — with a message naming the surface — instead
+// of taking the process down with a stack trace at boot.
+func mountSafely(mount func(mux *http.ServeMux) error, mux *http.ServeMux) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("route registration panicked: %v", recovered)
+		}
+	}()
+	return mount(mux)
+}
+
 // statusBody is the single-field JSON document of the health endpoints.
 type statusBody struct {
 	Status string `json:"status"`
@@ -269,9 +284,101 @@ func writeStatus(status string) http.Handler {
 //     the negotiated interface locale;
 //   - the bound sits outside the mux, so a route cannot be served without it.
 func NewMux(ids ports.IDGenerator, locales *locale.Resolver, security securityheaders.Config, readyCheckers ...ReadyChecker) (http.Handler, error) {
+	return NewMuxWith(ids, locales, security, nil, readyCheckers...)
+}
+
+// Surface is one module surface a composition mounts: the routes it answers and
+// the registration that installs them on the mux.
+//
+// The routes are declared here, and not left implicit in the registration,
+// because the platform router has to know them before it builds the mux. The
+// registry (routes.go) knows every route the process *declares*, including the
+// ones whose module is not composed yet; without the declaration, those routes
+// would be registered as placeholders and then collide with the real surface
+// mounting on top of them.
+type Surface struct {
+	// Routes is the surface route list, in the same vocabulary the registry
+	// and the contract use. A static surface declares none: its addresses are
+	// published by the asset manifest, not by the registry.
+	Routes []Route
+	// Register installs the surface on the mux. A registration that fails
+	// aborts the composition.
+	Register func(mux *http.ServeMux) error
+	// Static marks a surface that serves content a build declares — today the
+	// hashed frontend build (P18-T07C) — instead of application endpoints. It
+	// is mounted inside the same middleware stack, but it takes no part in the
+	// registry/contract comparison, because a stylesheet is not an operation of
+	// the API. Declaring a route beside Static is contradictory and refused.
+	Static bool
+}
+
+// NewMuxWith composes the same router as NewMux and additionally mounts the
+// given module surfaces, inside the platform middleware stack (request id,
+// locale and security policy cover them) and in the declared order.
+//
+// The distinction the router makes is between a route that is *declared* and a
+// route that is *served*: a declared route no surface claims keeps the
+// placeholder answer of a module that is not composed yet, and a surface that
+// claims a route the registry does not declare is refused, because the
+// contract would not know the endpoint a person can reach.
+func NewMuxWith(ids ports.IDGenerator, locales *locale.Resolver, security securityheaders.Config, surfaces []Surface, readyCheckers ...ReadyChecker) (http.Handler, error) {
 	mux := http.NewServeMux()
-	if err := RegisterAll(mux, RegisteredRoutes(), readyCheckers...); err != nil {
+
+	declared := make(map[string]bool)
+	for _, route := range RegisteredRoutes() {
+		declared[route.String()] = true
+	}
+
+	// The platform routes are answered by the platform. A module surface that
+	// claimed one of them would not conflict — it would silently replace it,
+	// because the mux is built from whatever is left unclaimed.
+	platform := make(map[string]bool)
+	for _, route := range HealthRoutes() {
+		platform[route.String()] = true
+	}
+
+	claimed := make(map[string]bool)
+	for index, surface := range surfaces {
+		if surface.Register == nil {
+			return nil, fmt.Errorf("httpserver: surface %d registers nothing", index)
+		}
+		if surface.Static {
+			if len(surface.Routes) != 0 {
+				return nil, fmt.Errorf("httpserver: surface %d is static and declares %d routes; static content is published by its build, not by the registry", index, len(surface.Routes))
+			}
+			continue
+		}
+		if len(surface.Routes) == 0 {
+			return nil, fmt.Errorf("httpserver: surface %d declares no routes", index)
+		}
+		for _, route := range surface.Routes {
+			if platform[route.String()] {
+				return nil, fmt.Errorf("httpserver: surface %d claims %s, which is a platform route", index, route.String())
+			}
+			if !declared[route.String()] {
+				return nil, fmt.Errorf("httpserver: surface %d serves %s, which the route registry does not declare", index, route.String())
+			}
+			if claimed[route.String()] {
+				return nil, fmt.Errorf("httpserver: %s is claimed by two surfaces", route.String())
+			}
+			claimed[route.String()] = true
+		}
+	}
+
+	remaining := make([]Route, 0, len(declared))
+	for _, route := range RegisteredRoutes() {
+		if !claimed[route.String()] {
+			remaining = append(remaining, route)
+		}
+	}
+	if err := RegisterAll(mux, remaining, readyCheckers...); err != nil {
 		return nil, err
+	}
+
+	for index, surface := range surfaces {
+		if err := mountSafely(surface.Register, mux); err != nil {
+			return nil, fmt.Errorf("httpserver: surface %d: %w", index, err)
+		}
 	}
 
 	handler := httplimits.Middleware(httplimits.Default, mux)

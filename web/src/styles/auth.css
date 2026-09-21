@@ -1,0 +1,60 @@
+/* Layout of the account journey (P18-T05).
+ *
+ * The pages are server-rendered documents: this sheet only places what the
+ * templates already produce, using the tokens of tokens.css and logical
+ * properties so the layout follows the writing direction and survives a 200%
+ * zoom. Everything the primitives own (fields, summaries, the busy state) stays
+ * in primitives.css; nothing here reaches into their internals. */
+@layer layout {
+	.ga-auth {
+		max-inline-size: var(--ga-measure-max-inline-size);
+		margin-inline: auto;
+		padding-inline: var(--ga-space-4);
+		padding-block: var(--ga-space-6);
+	}
+
+	.ga-auth__header {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--ga-space-4);
+		align-items: baseline;
+		justify-content: space-between;
+		max-inline-size: var(--ga-measure-max-inline-size);
+		margin-inline: auto;
+		padding-inline: var(--ga-space-4);
+		padding-block: var(--ga-space-4);
+	}
+
+	.ga-auth__brand {
+		font-weight: 700;
+		text-decoration: none;
+	}
+
+	.ga-auth__nav {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--ga-space-4);
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.ga-auth__form {
+		display: flex;
+		flex-direction: column;
+		gap: var(--ga-space-4);
+		margin-block-start: var(--ga-space-4);
+	}
+
+	.ga-auth__form > ga-field {
+		display: flex;
+		flex-direction: column;
+		gap: var(--ga-space-1);
+	}
+
+	.ga-auth__form button[type="submit"] {
+		align-self: flex-start;
+		padding-inline: var(--ga-space-4);
+		padding-block: var(--ga-space-2);
+	}
+}

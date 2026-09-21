@@ -1,0 +1,9 @@
+/* Fixture of the direction rule: each declaration below is physical, so it
+   serves one writing direction and breaks the other. */
+.card {
+  margin-left: 1rem;
+  padding-right: 2rem;
+  border-left: 1px solid var(--ga-border);
+  text-align: right;
+  left: 0;
+}

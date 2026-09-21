@@ -3,6 +3,8 @@ package http
 import (
 	"html/template"
 	"io"
+
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/websurface"
 )
 
 // transparencyTemplate renders the public transparency document. Metric
@@ -10,7 +12,7 @@ import (
 // arrives pre-localized through the document fields, so the template
 // itself holds no interface strings.
 const transparencyTemplate = `<!DOCTYPE html>
-<html lang="{{.Lang}}" dir="ltr">
+<html lang="{{.Lang}}" dir="{{dir .Lang}}">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -59,7 +61,7 @@ type Templates struct {
 
 // NewTemplates parses the transparency templates.
 func NewTemplates() (*Templates, error) {
-	document, err := template.New("transparency").Parse(transparencyTemplate)
+	document, err := template.New("transparency").Funcs(websurface.Funcs()).Parse(transparencyTemplate)
 	if err != nil {
 		return nil, err
 	}

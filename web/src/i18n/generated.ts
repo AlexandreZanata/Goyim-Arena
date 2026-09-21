@@ -12,6 +12,169 @@ export const messageKeys = {
     "arenas.document.status.closed",
     "arenas.document.status.published",
     "arenas.document.status.restricted",
+    "arenas.participation.aggregate.checked",
+    "arenas.participation.aggregate.current",
+    "arenas.participation.aggregate.heading",
+    "arenas.participation.aggregate.initial",
+    "arenas.participation.aggregate.reveal",
+    "arenas.participation.aggregate.suppressed",
+    "arenas.participation.aggregate.total",
+    "arenas.participation.arguments.empty",
+    "arenas.participation.arguments.publish_busy",
+    "arenas.participation.arguments.publish_heading",
+    "arenas.participation.arguments.publish_intro",
+    "arenas.participation.arguments.publish_submit",
+    "arenas.participation.arguments.replies",
+    "arenas.participation.attribution.busy",
+    "arenas.participation.attribution.heading",
+    "arenas.participation.attribution.intro",
+    "arenas.participation.attribution.option",
+    "arenas.participation.attribution.submit",
+    "arenas.participation.brand",
+    "arenas.participation.choice.agree",
+    "arenas.participation.choice.disagree",
+    "arenas.participation.choice.undecided",
+    "arenas.participation.errors.argument_not_found",
+    "arenas.participation.errors.change_not_found",
+    "arenas.participation.errors.csrf_detail",
+    "arenas.participation.errors.csrf_title",
+    "arenas.participation.errors.immutable_position",
+    "arenas.participation.errors.insufficient_ink",
+    "arenas.participation.errors.invalid_choice",
+    "arenas.participation.errors.invalid_content",
+    "arenas.participation.errors.invalid_relation",
+    "arenas.participation.errors.required",
+    "arenas.participation.errors.summary_title",
+    "arenas.participation.errors.too_many_attributions",
+    "arenas.participation.errors.version_conflict",
+    "arenas.participation.field.content_hint",
+    "arenas.participation.field.content_label",
+    "arenas.participation.field.position_label",
+    "arenas.participation.field.relation_label",
+    "arenas.participation.local.heading",
+    "arenas.participation.local.hint",
+    "arenas.participation.meta.category",
+    "arenas.participation.meta.language",
+    "arenas.participation.meta.published",
+    "arenas.participation.meta.status",
+    "arenas.participation.nav.arena",
+    "arenas.participation.nav.document",
+    "arenas.participation.nav.label",
+    "arenas.participation.nav.login",
+    "arenas.participation.nav.register",
+    "arenas.participation.nav.signout",
+    "arenas.participation.notice.argument_published",
+    "arenas.participation.notice.attribution_recorded",
+    "arenas.participation.notice.position_changed",
+    "arenas.participation.notice.position_confirmed",
+    "arenas.participation.page_title",
+    "arenas.participation.position.anonymous",
+    "arenas.participation.position.change_busy",
+    "arenas.participation.position.change_heading",
+    "arenas.participation.position.change_intro",
+    "arenas.participation.position.change_submit",
+    "arenas.participation.position.confirm_busy",
+    "arenas.participation.position.confirm_heading",
+    "arenas.participation.position.confirm_intro",
+    "arenas.participation.position.confirm_submit",
+    "arenas.participation.position.current",
+    "arenas.participation.position.heading",
+    "arenas.participation.position.initial",
+    "arenas.participation.refusal_page_title",
+    "arenas.participation.relation.context",
+    "arenas.participation.relation.oppose",
+    "arenas.participation.relation.support",
+  ] as const,
+  auth: [
+    "auth.brand",
+    "auth.errors.csrf_detail",
+    "auth.errors.csrf_title",
+    "auth.errors.invalid_code",
+    "auth.errors.invalid_credentials",
+    "auth.errors.invalid_email",
+    "auth.errors.required",
+    "auth.errors.summary_title",
+    "auth.errors.weak_password",
+    "auth.field.code_hint",
+    "auth.field.code_label",
+    "auth.field.email_hint",
+    "auth.field.email_label",
+    "auth.field.new_password_label",
+    "auth.field.password_hint",
+    "auth.field.password_label",
+    "auth.landing.reset_error.action",
+    "auth.landing.reset_error.detail",
+    "auth.landing.reset_error.heading",
+    "auth.landing.reset_error.note",
+    "auth.landing.reset_error.page_title",
+    "auth.landing.reset_form.detail",
+    "auth.landing.reset_form.field_label",
+    "auth.landing.reset_form.heading",
+    "auth.landing.reset_form.page_title",
+    "auth.landing.reset_form.submit",
+    "auth.landing.reset_success.action",
+    "auth.landing.reset_success.detail",
+    "auth.landing.reset_success.heading",
+    "auth.landing.reset_success.note",
+    "auth.landing.reset_success.page_title",
+    "auth.landing.verify_error.action",
+    "auth.landing.verify_error.detail",
+    "auth.landing.verify_error.heading",
+    "auth.landing.verify_error.note",
+    "auth.landing.verify_error.page_title",
+    "auth.landing.verify_success.action",
+    "auth.landing.verify_success.detail",
+    "auth.landing.verify_success.heading",
+    "auth.landing.verify_success.note",
+    "auth.landing.verify_success.page_title",
+    "auth.login.busy",
+    "auth.login.heading",
+    "auth.login.intro",
+    "auth.login.page_title",
+    "auth.login.reset_action",
+    "auth.login.submit",
+    "auth.logout.busy",
+    "auth.logout.heading",
+    "auth.logout.intro",
+    "auth.logout.page_title",
+    "auth.logout.submit",
+    "auth.nav.label",
+    "auth.nav.login",
+    "auth.nav.register",
+    "auth.nav.reset",
+    "auth.nav.verify",
+    "auth.register.busy",
+    "auth.register.heading",
+    "auth.register.intro",
+    "auth.register.notice_action",
+    "auth.register.notice_detail",
+    "auth.register.notice_heading",
+    "auth.register.page_title",
+    "auth.register.submit",
+    "auth.reset.busy",
+    "auth.reset.confirm_busy",
+    "auth.reset.confirm_heading",
+    "auth.reset.confirm_intro",
+    "auth.reset.confirm_page_title",
+    "auth.reset.confirm_submit",
+    "auth.reset.confirm_success_action",
+    "auth.reset.confirm_success_detail",
+    "auth.reset.confirm_success_heading",
+    "auth.reset.heading",
+    "auth.reset.intro",
+    "auth.reset.notice_action",
+    "auth.reset.notice_detail",
+    "auth.reset.notice_heading",
+    "auth.reset.page_title",
+    "auth.reset.submit",
+    "auth.verify.busy",
+    "auth.verify.heading",
+    "auth.verify.intro",
+    "auth.verify.page_title",
+    "auth.verify.submit",
+    "auth.verify.success_action",
+    "auth.verify.success_detail",
+    "auth.verify.success_heading",
   ] as const,
   email: [
     "email.greeting",
@@ -62,6 +225,167 @@ export type MessageKey =
   | "arenas.document.status.closed"
   | "arenas.document.status.published"
   | "arenas.document.status.restricted"
+  | "arenas.participation.aggregate.checked"
+  | "arenas.participation.aggregate.current"
+  | "arenas.participation.aggregate.heading"
+  | "arenas.participation.aggregate.initial"
+  | "arenas.participation.aggregate.reveal"
+  | "arenas.participation.aggregate.suppressed"
+  | "arenas.participation.aggregate.total"
+  | "arenas.participation.arguments.empty"
+  | "arenas.participation.arguments.publish_busy"
+  | "arenas.participation.arguments.publish_heading"
+  | "arenas.participation.arguments.publish_intro"
+  | "arenas.participation.arguments.publish_submit"
+  | "arenas.participation.arguments.replies"
+  | "arenas.participation.attribution.busy"
+  | "arenas.participation.attribution.heading"
+  | "arenas.participation.attribution.intro"
+  | "arenas.participation.attribution.option"
+  | "arenas.participation.attribution.submit"
+  | "arenas.participation.brand"
+  | "arenas.participation.choice.agree"
+  | "arenas.participation.choice.disagree"
+  | "arenas.participation.choice.undecided"
+  | "arenas.participation.errors.argument_not_found"
+  | "arenas.participation.errors.change_not_found"
+  | "arenas.participation.errors.csrf_detail"
+  | "arenas.participation.errors.csrf_title"
+  | "arenas.participation.errors.immutable_position"
+  | "arenas.participation.errors.insufficient_ink"
+  | "arenas.participation.errors.invalid_choice"
+  | "arenas.participation.errors.invalid_content"
+  | "arenas.participation.errors.invalid_relation"
+  | "arenas.participation.errors.required"
+  | "arenas.participation.errors.summary_title"
+  | "arenas.participation.errors.too_many_attributions"
+  | "arenas.participation.errors.version_conflict"
+  | "arenas.participation.field.content_hint"
+  | "arenas.participation.field.content_label"
+  | "arenas.participation.field.position_label"
+  | "arenas.participation.field.relation_label"
+  | "arenas.participation.local.heading"
+  | "arenas.participation.local.hint"
+  | "arenas.participation.meta.category"
+  | "arenas.participation.meta.language"
+  | "arenas.participation.meta.published"
+  | "arenas.participation.meta.status"
+  | "arenas.participation.nav.arena"
+  | "arenas.participation.nav.document"
+  | "arenas.participation.nav.label"
+  | "arenas.participation.nav.login"
+  | "arenas.participation.nav.register"
+  | "arenas.participation.nav.signout"
+  | "arenas.participation.notice.argument_published"
+  | "arenas.participation.notice.attribution_recorded"
+  | "arenas.participation.notice.position_changed"
+  | "arenas.participation.notice.position_confirmed"
+  | "arenas.participation.page_title"
+  | "arenas.participation.position.anonymous"
+  | "arenas.participation.position.change_busy"
+  | "arenas.participation.position.change_heading"
+  | "arenas.participation.position.change_intro"
+  | "arenas.participation.position.change_submit"
+  | "arenas.participation.position.confirm_busy"
+  | "arenas.participation.position.confirm_heading"
+  | "arenas.participation.position.confirm_intro"
+  | "arenas.participation.position.confirm_submit"
+  | "arenas.participation.position.current"
+  | "arenas.participation.position.heading"
+  | "arenas.participation.position.initial"
+  | "arenas.participation.refusal_page_title"
+  | "arenas.participation.relation.context"
+  | "arenas.participation.relation.oppose"
+  | "arenas.participation.relation.support"
+  | "auth.brand"
+  | "auth.errors.csrf_detail"
+  | "auth.errors.csrf_title"
+  | "auth.errors.invalid_code"
+  | "auth.errors.invalid_credentials"
+  | "auth.errors.invalid_email"
+  | "auth.errors.required"
+  | "auth.errors.summary_title"
+  | "auth.errors.weak_password"
+  | "auth.field.code_hint"
+  | "auth.field.code_label"
+  | "auth.field.email_hint"
+  | "auth.field.email_label"
+  | "auth.field.new_password_label"
+  | "auth.field.password_hint"
+  | "auth.field.password_label"
+  | "auth.landing.reset_error.action"
+  | "auth.landing.reset_error.detail"
+  | "auth.landing.reset_error.heading"
+  | "auth.landing.reset_error.note"
+  | "auth.landing.reset_error.page_title"
+  | "auth.landing.reset_form.detail"
+  | "auth.landing.reset_form.field_label"
+  | "auth.landing.reset_form.heading"
+  | "auth.landing.reset_form.page_title"
+  | "auth.landing.reset_form.submit"
+  | "auth.landing.reset_success.action"
+  | "auth.landing.reset_success.detail"
+  | "auth.landing.reset_success.heading"
+  | "auth.landing.reset_success.note"
+  | "auth.landing.reset_success.page_title"
+  | "auth.landing.verify_error.action"
+  | "auth.landing.verify_error.detail"
+  | "auth.landing.verify_error.heading"
+  | "auth.landing.verify_error.note"
+  | "auth.landing.verify_error.page_title"
+  | "auth.landing.verify_success.action"
+  | "auth.landing.verify_success.detail"
+  | "auth.landing.verify_success.heading"
+  | "auth.landing.verify_success.note"
+  | "auth.landing.verify_success.page_title"
+  | "auth.login.busy"
+  | "auth.login.heading"
+  | "auth.login.intro"
+  | "auth.login.page_title"
+  | "auth.login.reset_action"
+  | "auth.login.submit"
+  | "auth.logout.busy"
+  | "auth.logout.heading"
+  | "auth.logout.intro"
+  | "auth.logout.page_title"
+  | "auth.logout.submit"
+  | "auth.nav.label"
+  | "auth.nav.login"
+  | "auth.nav.register"
+  | "auth.nav.reset"
+  | "auth.nav.verify"
+  | "auth.register.busy"
+  | "auth.register.heading"
+  | "auth.register.intro"
+  | "auth.register.notice_action"
+  | "auth.register.notice_detail"
+  | "auth.register.notice_heading"
+  | "auth.register.page_title"
+  | "auth.register.submit"
+  | "auth.reset.busy"
+  | "auth.reset.confirm_busy"
+  | "auth.reset.confirm_heading"
+  | "auth.reset.confirm_intro"
+  | "auth.reset.confirm_page_title"
+  | "auth.reset.confirm_submit"
+  | "auth.reset.confirm_success_action"
+  | "auth.reset.confirm_success_detail"
+  | "auth.reset.confirm_success_heading"
+  | "auth.reset.heading"
+  | "auth.reset.intro"
+  | "auth.reset.notice_action"
+  | "auth.reset.notice_detail"
+  | "auth.reset.notice_heading"
+  | "auth.reset.page_title"
+  | "auth.reset.submit"
+  | "auth.verify.busy"
+  | "auth.verify.heading"
+  | "auth.verify.intro"
+  | "auth.verify.page_title"
+  | "auth.verify.submit"
+  | "auth.verify.success_action"
+  | "auth.verify.success_detail"
+  | "auth.verify.success_heading"
   | "email.greeting"
   | "email.password_changed.lead"
   | "email.password_changed.subject"
@@ -95,8 +419,8 @@ export type MessageKey =
   | "transparency.document.value"
 ;
 
-/** Named placeholders per message key. */
-export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = Object.freeze({
+/** Named placeholders per message key: the exact values one translation accepts. */
+export const messagePlaceholders = Object.freeze({
   "arenas.document.gone.detail": [],
   "arenas.document.gone.title": [],
   "arenas.document.not_found.detail": [],
@@ -105,6 +429,167 @@ export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = 
   "arenas.document.status.closed": [],
   "arenas.document.status.published": [],
   "arenas.document.status.restricted": [],
+  "arenas.participation.aggregate.checked": ["instant"],
+  "arenas.participation.aggregate.current": [],
+  "arenas.participation.aggregate.heading": [],
+  "arenas.participation.aggregate.initial": [],
+  "arenas.participation.aggregate.reveal": [],
+  "arenas.participation.aggregate.suppressed": [],
+  "arenas.participation.aggregate.total": ["total"],
+  "arenas.participation.arguments.empty": [],
+  "arenas.participation.arguments.publish_busy": [],
+  "arenas.participation.arguments.publish_heading": [],
+  "arenas.participation.arguments.publish_intro": [],
+  "arenas.participation.arguments.publish_submit": [],
+  "arenas.participation.arguments.replies": ["count"],
+  "arenas.participation.attribution.busy": [],
+  "arenas.participation.attribution.heading": [],
+  "arenas.participation.attribution.intro": ["max"],
+  "arenas.participation.attribution.option": ["excerpt", "relation"],
+  "arenas.participation.attribution.submit": [],
+  "arenas.participation.brand": [],
+  "arenas.participation.choice.agree": [],
+  "arenas.participation.choice.disagree": [],
+  "arenas.participation.choice.undecided": [],
+  "arenas.participation.errors.argument_not_found": [],
+  "arenas.participation.errors.change_not_found": [],
+  "arenas.participation.errors.csrf_detail": [],
+  "arenas.participation.errors.csrf_title": [],
+  "arenas.participation.errors.immutable_position": [],
+  "arenas.participation.errors.insufficient_ink": [],
+  "arenas.participation.errors.invalid_choice": [],
+  "arenas.participation.errors.invalid_content": ["max"],
+  "arenas.participation.errors.invalid_relation": [],
+  "arenas.participation.errors.required": [],
+  "arenas.participation.errors.summary_title": [],
+  "arenas.participation.errors.too_many_attributions": ["max"],
+  "arenas.participation.errors.version_conflict": [],
+  "arenas.participation.field.content_hint": ["max"],
+  "arenas.participation.field.content_label": [],
+  "arenas.participation.field.position_label": [],
+  "arenas.participation.field.relation_label": [],
+  "arenas.participation.local.heading": [],
+  "arenas.participation.local.hint": [],
+  "arenas.participation.meta.category": ["category"],
+  "arenas.participation.meta.language": ["language"],
+  "arenas.participation.meta.published": ["instant"],
+  "arenas.participation.meta.status": ["status"],
+  "arenas.participation.nav.arena": [],
+  "arenas.participation.nav.document": [],
+  "arenas.participation.nav.label": [],
+  "arenas.participation.nav.login": [],
+  "arenas.participation.nav.register": [],
+  "arenas.participation.nav.signout": [],
+  "arenas.participation.notice.argument_published": [],
+  "arenas.participation.notice.attribution_recorded": [],
+  "arenas.participation.notice.position_changed": [],
+  "arenas.participation.notice.position_confirmed": [],
+  "arenas.participation.page_title": ["subject"],
+  "arenas.participation.position.anonymous": [],
+  "arenas.participation.position.change_busy": [],
+  "arenas.participation.position.change_heading": [],
+  "arenas.participation.position.change_intro": [],
+  "arenas.participation.position.change_submit": [],
+  "arenas.participation.position.confirm_busy": [],
+  "arenas.participation.position.confirm_heading": [],
+  "arenas.participation.position.confirm_intro": [],
+  "arenas.participation.position.confirm_submit": [],
+  "arenas.participation.position.current": ["position"],
+  "arenas.participation.position.heading": [],
+  "arenas.participation.position.initial": ["position"],
+  "arenas.participation.refusal_page_title": [],
+  "arenas.participation.relation.context": [],
+  "arenas.participation.relation.oppose": [],
+  "arenas.participation.relation.support": [],
+  "auth.brand": [],
+  "auth.errors.csrf_detail": [],
+  "auth.errors.csrf_title": [],
+  "auth.errors.invalid_code": [],
+  "auth.errors.invalid_credentials": [],
+  "auth.errors.invalid_email": [],
+  "auth.errors.required": [],
+  "auth.errors.summary_title": [],
+  "auth.errors.weak_password": ["min"],
+  "auth.field.code_hint": [],
+  "auth.field.code_label": [],
+  "auth.field.email_hint": [],
+  "auth.field.email_label": [],
+  "auth.field.new_password_label": [],
+  "auth.field.password_hint": ["min"],
+  "auth.field.password_label": [],
+  "auth.landing.reset_error.action": [],
+  "auth.landing.reset_error.detail": [],
+  "auth.landing.reset_error.heading": [],
+  "auth.landing.reset_error.note": [],
+  "auth.landing.reset_error.page_title": [],
+  "auth.landing.reset_form.detail": [],
+  "auth.landing.reset_form.field_label": [],
+  "auth.landing.reset_form.heading": [],
+  "auth.landing.reset_form.page_title": [],
+  "auth.landing.reset_form.submit": [],
+  "auth.landing.reset_success.action": [],
+  "auth.landing.reset_success.detail": [],
+  "auth.landing.reset_success.heading": [],
+  "auth.landing.reset_success.note": [],
+  "auth.landing.reset_success.page_title": [],
+  "auth.landing.verify_error.action": [],
+  "auth.landing.verify_error.detail": [],
+  "auth.landing.verify_error.heading": [],
+  "auth.landing.verify_error.note": [],
+  "auth.landing.verify_error.page_title": [],
+  "auth.landing.verify_success.action": [],
+  "auth.landing.verify_success.detail": [],
+  "auth.landing.verify_success.heading": [],
+  "auth.landing.verify_success.note": [],
+  "auth.landing.verify_success.page_title": [],
+  "auth.login.busy": [],
+  "auth.login.heading": [],
+  "auth.login.intro": [],
+  "auth.login.page_title": [],
+  "auth.login.reset_action": [],
+  "auth.login.submit": [],
+  "auth.logout.busy": [],
+  "auth.logout.heading": [],
+  "auth.logout.intro": [],
+  "auth.logout.page_title": [],
+  "auth.logout.submit": [],
+  "auth.nav.label": [],
+  "auth.nav.login": [],
+  "auth.nav.register": [],
+  "auth.nav.reset": [],
+  "auth.nav.verify": [],
+  "auth.register.busy": [],
+  "auth.register.heading": [],
+  "auth.register.intro": [],
+  "auth.register.notice_action": [],
+  "auth.register.notice_detail": [],
+  "auth.register.notice_heading": [],
+  "auth.register.page_title": [],
+  "auth.register.submit": [],
+  "auth.reset.busy": [],
+  "auth.reset.confirm_busy": [],
+  "auth.reset.confirm_heading": [],
+  "auth.reset.confirm_intro": [],
+  "auth.reset.confirm_page_title": [],
+  "auth.reset.confirm_submit": [],
+  "auth.reset.confirm_success_action": [],
+  "auth.reset.confirm_success_detail": [],
+  "auth.reset.confirm_success_heading": [],
+  "auth.reset.heading": [],
+  "auth.reset.intro": [],
+  "auth.reset.notice_action": [],
+  "auth.reset.notice_detail": [],
+  "auth.reset.notice_heading": [],
+  "auth.reset.page_title": [],
+  "auth.reset.submit": [],
+  "auth.verify.busy": [],
+  "auth.verify.heading": [],
+  "auth.verify.intro": [],
+  "auth.verify.page_title": [],
+  "auth.verify.submit": [],
+  "auth.verify.success_action": [],
+  "auth.verify.success_detail": [],
+  "auth.verify.success_heading": [],
   "email.greeting": [],
   "email.password_changed.lead": [],
   "email.password_changed.subject": [],
@@ -136,7 +621,7 @@ export const messagePlaceholders: Readonly<Record<string, readonly string[]>> = 
   "transparency.document.period": ["end", "start", "timezone"],
   "transparency.document.updated": ["at", "version"],
   "transparency.document.value": [],
-});
+} as const satisfies Readonly<Record<string, readonly string[]>>);
 
 /** Localized messages per locale per key. */
 export const messages: Readonly<Record<string, Readonly<Record<string, string>>>> = Object.freeze({
@@ -149,6 +634,167 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "arenas.document.status.closed": "Closed",
     "arenas.document.status.published": "Published",
     "arenas.document.status.restricted": "Restricted",
+    "arenas.participation.aggregate.checked": "Derived at {instant}",
+    "arenas.participation.aggregate.current": "Current position",
+    "arenas.participation.aggregate.heading": "Aggregate result",
+    "arenas.participation.aggregate.initial": "Initial position",
+    "arenas.participation.aggregate.reveal": "Reveal aggregate result",
+    "arenas.participation.aggregate.suppressed": "The sample is too small to publish the result.",
+    "arenas.participation.aggregate.total": "Eligible participants: {total}",
+    "arenas.participation.arguments.empty": "No argument has been published under this relation yet.",
+    "arenas.participation.arguments.publish_busy": "Publishing…",
+    "arenas.participation.arguments.publish_heading": "Publish an argument",
+    "arenas.participation.arguments.publish_intro": "Publishing debits INK from your balance according to the length of the text.",
+    "arenas.participation.arguments.publish_submit": "Publish",
+    "arenas.participation.arguments.replies": "Replies: {count}",
+    "arenas.participation.attribution.busy": "Recording…",
+    "arenas.participation.attribution.heading": "What influenced your change",
+    "arenas.participation.attribution.intro": "Choose up to {max} arguments that influenced the change.",
+    "arenas.participation.attribution.option": "{relation}: {excerpt}",
+    "arenas.participation.attribution.submit": "Record influence",
+    "arenas.participation.brand": "Goyim Arena",
+    "arenas.participation.choice.agree": "Agree",
+    "arenas.participation.choice.disagree": "Disagree",
+    "arenas.participation.choice.undecided": "Undecided",
+    "arenas.participation.errors.argument_not_found": "One of the chosen arguments is no longer available.",
+    "arenas.participation.errors.change_not_found": "This change is no longer available for attribution.",
+    "arenas.participation.errors.csrf_detail": "Reload the page and submit the form again.",
+    "arenas.participation.errors.csrf_title": "Form expired",
+    "arenas.participation.errors.immutable_position": "The initial position was already confirmed with another value.",
+    "arenas.participation.errors.insufficient_ink": "Your INK balance does not cover this publication.",
+    "arenas.participation.errors.invalid_choice": "Choose one of the listed positions.",
+    "arenas.participation.errors.invalid_content": "Write an argument of up to {max} graphemes.",
+    "arenas.participation.errors.invalid_relation": "Choose one of the listed relations.",
+    "arenas.participation.errors.required": "Provide a value for this field.",
+    "arenas.participation.errors.summary_title": "Fix the highlighted fields",
+    "arenas.participation.errors.too_many_attributions": "Choose at most {max} arguments.",
+    "arenas.participation.errors.version_conflict": "Your position changed elsewhere. Reload the page and submit again.",
+    "arenas.participation.field.content_hint": "Up to {max} graphemes — the same limit the server enforces.",
+    "arenas.participation.field.content_label": "Argument",
+    "arenas.participation.field.position_label": "Position",
+    "arenas.participation.field.relation_label": "Relation to the statement",
+    "arenas.participation.local.heading": "Where would you stand?",
+    "arenas.participation.local.hint": "Your choice stays in this browser only: nothing is sent until you sign in and confirm it.",
+    "arenas.participation.meta.category": "Category: {category}",
+    "arenas.participation.meta.language": "Content language: {language}",
+    "arenas.participation.meta.published": "Published on {instant}",
+    "arenas.participation.meta.status": "Status: {status}",
+    "arenas.participation.nav.arena": "Arena",
+    "arenas.participation.nav.document": "Public document",
+    "arenas.participation.nav.label": "Navigation",
+    "arenas.participation.nav.login": "Sign in",
+    "arenas.participation.nav.register": "Create account",
+    "arenas.participation.nav.signout": "Sign out",
+    "arenas.participation.notice.argument_published": "Argument published.",
+    "arenas.participation.notice.attribution_recorded": "Influence recorded.",
+    "arenas.participation.notice.position_changed": "Position changed.",
+    "arenas.participation.notice.position_confirmed": "Initial position confirmed.",
+    "arenas.participation.page_title": "Take part — {subject}",
+    "arenas.participation.position.anonymous": "Confirming a position requires an account.",
+    "arenas.participation.position.change_busy": "Changing position…",
+    "arenas.participation.position.change_heading": "Change position",
+    "arenas.participation.position.change_intro": "The change enters the history and cannot be undone.",
+    "arenas.participation.position.change_submit": "Change position",
+    "arenas.participation.position.confirm_busy": "Confirming position…",
+    "arenas.participation.position.confirm_heading": "Confirm initial position",
+    "arenas.participation.position.confirm_intro": "The initial position is immutable; later changes are recorded in the history.",
+    "arenas.participation.position.confirm_submit": "Confirm position",
+    "arenas.participation.position.current": "Current position: {position}",
+    "arenas.participation.position.heading": "Your position",
+    "arenas.participation.position.initial": "Initial position: {position}",
+    "arenas.participation.refusal_page_title": "Participation — Goyim Arena",
+    "arenas.participation.relation.context": "Context",
+    "arenas.participation.relation.oppose": "Oppose",
+    "arenas.participation.relation.support": "Support",
+    "auth.brand": "Goyim Arena",
+    "auth.errors.csrf_detail": "The form protection expired. Reload the page and submit it again.",
+    "auth.errors.csrf_title": "The page is no longer valid",
+    "auth.errors.invalid_code": "The code is invalid, expired or already used.",
+    "auth.errors.invalid_credentials": "Invalid email or password.",
+    "auth.errors.invalid_email": "Enter a valid email address.",
+    "auth.errors.required": "Fill in this field.",
+    "auth.errors.summary_title": "Fix the fields below",
+    "auth.errors.weak_password": "The password must be at least {min} characters long.",
+    "auth.field.code_hint": "Paste the code we sent by email.",
+    "auth.field.code_label": "Code",
+    "auth.field.email_hint": "We use this address to confirm the account and to tell you when it changes.",
+    "auth.field.email_label": "Email",
+    "auth.field.new_password_label": "New password",
+    "auth.field.password_hint": "At least {min} characters.",
+    "auth.field.password_label": "Password",
+    "auth.landing.reset_error.action": "Back to the start",
+    "auth.landing.reset_error.detail": "The recovery token is invalid, expired or was used before.",
+    "auth.landing.reset_error.heading": "Your password could not be reset",
+    "auth.landing.reset_error.note": "Request a new password recovery to continue.",
+    "auth.landing.reset_error.page_title": "Reset failed — Goyim Arena",
+    "auth.landing.reset_form.detail": "Enter your new password to recover access to your account.",
+    "auth.landing.reset_form.field_label": "New password (at least 8 characters):",
+    "auth.landing.reset_form.heading": "Password reset",
+    "auth.landing.reset_form.page_title": "Reset password — Goyim Arena",
+    "auth.landing.reset_form.submit": "Save the new password",
+    "auth.landing.reset_success.action": "Go to my account",
+    "auth.landing.reset_success.detail": "Your password was updated and every previous session was revoked for your safety.",
+    "auth.landing.reset_success.heading": "Password reset successfully",
+    "auth.landing.reset_success.note": "You can sign in with your new credential now.",
+    "auth.landing.reset_success.page_title": "Password changed — Goyim Arena",
+    "auth.landing.verify_error.action": "Back to the start",
+    "auth.landing.verify_error.detail": "Your email could not be confirmed. The link may have expired or been used already.",
+    "auth.landing.verify_error.heading": "Verification link invalid or expired",
+    "auth.landing.verify_error.note": "Request a new confirmation link or contact support.",
+    "auth.landing.verify_error.page_title": "Verification failed — Goyim Arena",
+    "auth.landing.verify_success.action": "Go to sign in",
+    "auth.landing.verify_success.detail": "Your Goyim Arena account is active and your email address is confirmed.",
+    "auth.landing.verify_success.heading": "Email verified successfully",
+    "auth.landing.verify_success.note": "You can sign in with your credentials now.",
+    "auth.landing.verify_success.page_title": "Email verified — Goyim Arena",
+    "auth.login.busy": "Signing in…",
+    "auth.login.heading": "Sign in",
+    "auth.login.intro": "Use the email and the password of your account.",
+    "auth.login.page_title": "Sign in — Goyim Arena",
+    "auth.login.reset_action": "Forgot my password",
+    "auth.login.submit": "Sign in",
+    "auth.logout.busy": "Ending the session…",
+    "auth.logout.heading": "End session",
+    "auth.logout.intro": "Ending the session in this browser ends the access until you sign in again.",
+    "auth.logout.page_title": "End session — Goyim Arena",
+    "auth.logout.submit": "End session",
+    "auth.nav.label": "Account navigation",
+    "auth.nav.login": "Sign in",
+    "auth.nav.register": "Create account",
+    "auth.nav.reset": "Recover access",
+    "auth.nav.verify": "Confirm email",
+    "auth.register.busy": "Creating the account…",
+    "auth.register.heading": "Create account",
+    "auth.register.intro": "Create your account to take part in the Arenas. We will send a code to confirm your email.",
+    "auth.register.notice_action": "Confirm email",
+    "auth.register.notice_detail": "If this address does not already have a confirmed account, we sent a verification code. Use the code on the confirmation page.",
+    "auth.register.notice_heading": "Check your email",
+    "auth.register.page_title": "Create account — Goyim Arena",
+    "auth.register.submit": "Create account",
+    "auth.reset.busy": "Sending the code…",
+    "auth.reset.confirm_busy": "Saving the new password…",
+    "auth.reset.confirm_heading": "Set a new password",
+    "auth.reset.confirm_intro": "Enter the recovery code and the new password. Every older session will be ended.",
+    "auth.reset.confirm_page_title": "Set a new password — Goyim Arena",
+    "auth.reset.confirm_submit": "Save the new password",
+    "auth.reset.confirm_success_action": "Sign in",
+    "auth.reset.confirm_success_detail": "Your password was changed and every older session was ended.",
+    "auth.reset.confirm_success_heading": "Password changed",
+    "auth.reset.heading": "Recover access",
+    "auth.reset.intro": "Enter the email of your account to receive a recovery code.",
+    "auth.reset.notice_action": "I already have the code",
+    "auth.reset.notice_detail": "If an account exists for this address, we sent a recovery code. Use the code to set a new password.",
+    "auth.reset.notice_heading": "Check your email",
+    "auth.reset.page_title": "Recover access — Goyim Arena",
+    "auth.reset.submit": "Send code",
+    "auth.verify.busy": "Checking the code…",
+    "auth.verify.heading": "Confirm email",
+    "auth.verify.intro": "Enter the code we sent to your email to activate the account.",
+    "auth.verify.page_title": "Confirm email — Goyim Arena",
+    "auth.verify.submit": "Confirm",
+    "auth.verify.success_action": "Sign in",
+    "auth.verify.success_detail": "Your account is active and you can sign in.",
+    "auth.verify.success_heading": "Email confirmed",
     "email.greeting": "Hi,",
     "email.password_changed.lead": "Your account password was changed and every older session was ended. If this was not you, reset your password now and review the active sessions.",
     "email.password_changed.subject": "Your Goyim Arena password was changed",
@@ -190,6 +836,167 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "arenas.document.status.closed": "Fechada",
     "arenas.document.status.published": "Publicada",
     "arenas.document.status.restricted": "Restrita",
+    "arenas.participation.aggregate.checked": "Apurado em {instant}",
+    "arenas.participation.aggregate.current": "Posição atual",
+    "arenas.participation.aggregate.heading": "Resultado agregado",
+    "arenas.participation.aggregate.initial": "Posição inicial",
+    "arenas.participation.aggregate.reveal": "Revelar resultado agregado",
+    "arenas.participation.aggregate.suppressed": "A amostra é pequena demais para publicar o resultado.",
+    "arenas.participation.aggregate.total": "Participantes elegíveis: {total}",
+    "arenas.participation.arguments.empty": "Ainda não há argumento publicado nesta relação.",
+    "arenas.participation.arguments.publish_busy": "Publicando…",
+    "arenas.participation.arguments.publish_heading": "Publicar argumento",
+    "arenas.participation.arguments.publish_intro": "Publicar debita INK do seu saldo conforme o tamanho do texto.",
+    "arenas.participation.arguments.publish_submit": "Publicar",
+    "arenas.participation.arguments.replies": "Respostas: {count}",
+    "arenas.participation.attribution.busy": "Registrando…",
+    "arenas.participation.attribution.heading": "O que influenciou sua mudança",
+    "arenas.participation.attribution.intro": "Escolha até {max} argumentos que influenciaram a mudança.",
+    "arenas.participation.attribution.option": "{relation}: {excerpt}",
+    "arenas.participation.attribution.submit": "Registrar influência",
+    "arenas.participation.brand": "Goyim Arena",
+    "arenas.participation.choice.agree": "A favor",
+    "arenas.participation.choice.disagree": "Contra",
+    "arenas.participation.choice.undecided": "Sem posição",
+    "arenas.participation.errors.argument_not_found": "Um dos argumentos escolhidos não está mais disponível.",
+    "arenas.participation.errors.change_not_found": "Esta mudança não está mais disponível para atribuição.",
+    "arenas.participation.errors.csrf_detail": "Recarregue a página e envie o formulário de novo.",
+    "arenas.participation.errors.csrf_title": "Formulário expirado",
+    "arenas.participation.errors.immutable_position": "A posição inicial já foi confirmada com outro valor.",
+    "arenas.participation.errors.insufficient_ink": "Seu saldo de INK não cobre esta publicação.",
+    "arenas.participation.errors.invalid_choice": "Escolha uma das posições listadas.",
+    "arenas.participation.errors.invalid_content": "Escreva um argumento de até {max} grafemas.",
+    "arenas.participation.errors.invalid_relation": "Escolha uma das relações listadas.",
+    "arenas.participation.errors.required": "Informe um valor para este campo.",
+    "arenas.participation.errors.summary_title": "Corrija os campos indicados",
+    "arenas.participation.errors.too_many_attributions": "Escolha no máximo {max} argumentos.",
+    "arenas.participation.errors.version_conflict": "Sua posição mudou em outro lugar. Recarregue a página e envie de novo.",
+    "arenas.participation.field.content_hint": "Até {max} grafemas — o mesmo limite que o servidor aplica.",
+    "arenas.participation.field.content_label": "Argumento",
+    "arenas.participation.field.position_label": "Posição",
+    "arenas.participation.field.relation_label": "Relação com o enunciado",
+    "arenas.participation.local.heading": "Qual seria a sua posição?",
+    "arenas.participation.local.hint": "Sua escolha fica apenas neste navegador: nada é enviado até você entrar e confirmar.",
+    "arenas.participation.meta.category": "Categoria: {category}",
+    "arenas.participation.meta.language": "Idioma do conteúdo: {language}",
+    "arenas.participation.meta.published": "Publicada em {instant}",
+    "arenas.participation.meta.status": "Situação: {status}",
+    "arenas.participation.nav.arena": "Arena",
+    "arenas.participation.nav.document": "Documento público",
+    "arenas.participation.nav.label": "Navegação",
+    "arenas.participation.nav.login": "Entrar",
+    "arenas.participation.nav.register": "Criar conta",
+    "arenas.participation.nav.signout": "Sair",
+    "arenas.participation.notice.argument_published": "Argumento publicado.",
+    "arenas.participation.notice.attribution_recorded": "Influência registrada.",
+    "arenas.participation.notice.position_changed": "Posição alterada.",
+    "arenas.participation.notice.position_confirmed": "Posição inicial confirmada.",
+    "arenas.participation.page_title": "Participar — {subject}",
+    "arenas.participation.position.anonymous": "Para confirmar uma posição você precisa de uma conta.",
+    "arenas.participation.position.change_busy": "Mudando posição…",
+    "arenas.participation.position.change_heading": "Mudar posição",
+    "arenas.participation.position.change_intro": "A mudança entra no histórico e não pode ser desfeita.",
+    "arenas.participation.position.change_submit": "Mudar posição",
+    "arenas.participation.position.confirm_busy": "Confirmando posição…",
+    "arenas.participation.position.confirm_heading": "Confirmar posição inicial",
+    "arenas.participation.position.confirm_intro": "A posição inicial é imutável; as mudanças depois dela ficam registradas no histórico.",
+    "arenas.participation.position.confirm_submit": "Confirmar posição",
+    "arenas.participation.position.current": "Posição atual: {position}",
+    "arenas.participation.position.heading": "Sua posição",
+    "arenas.participation.position.initial": "Posição inicial: {position}",
+    "arenas.participation.refusal_page_title": "Participação — Goyim Arena",
+    "arenas.participation.relation.context": "Contexto",
+    "arenas.participation.relation.oppose": "Contra",
+    "arenas.participation.relation.support": "A favor",
+    "auth.brand": "Goyim Arena",
+    "auth.errors.csrf_detail": "A proteção do formulário expirou. Recarregue a página e envie novamente.",
+    "auth.errors.csrf_title": "A página perdeu a validade",
+    "auth.errors.invalid_code": "O código é inválido, expirou ou já foi usado.",
+    "auth.errors.invalid_credentials": "Email ou senha inválidos.",
+    "auth.errors.invalid_email": "Informe um endereço de email válido.",
+    "auth.errors.required": "Preencha este campo.",
+    "auth.errors.summary_title": "Corrija os campos indicados",
+    "auth.errors.weak_password": "A senha deve ter pelo menos {min} caracteres.",
+    "auth.field.code_hint": "Cole o código que enviamos por email.",
+    "auth.field.code_label": "Código",
+    "auth.field.email_hint": "Usamos este endereço para confirmar a conta e avisar sobre mudanças nela.",
+    "auth.field.email_label": "Email",
+    "auth.field.new_password_label": "Nova senha",
+    "auth.field.password_hint": "Mínimo de {min} caracteres.",
+    "auth.field.password_label": "Senha",
+    "auth.landing.reset_error.action": "Voltar ao início",
+    "auth.landing.reset_error.detail": "O token de recuperação é inválido, expirou ou já foi utilizado anteriormente.",
+    "auth.landing.reset_error.heading": "Não foi possível redefinir sua senha",
+    "auth.landing.reset_error.note": "Solicite uma nova recuperação de senha para continuar.",
+    "auth.landing.reset_error.page_title": "Erro na redefinição — Goyim Arena",
+    "auth.landing.reset_form.detail": "Informe sua nova senha para recuperar o acesso à sua conta.",
+    "auth.landing.reset_form.field_label": "Nova Senha (mínimo 8 caracteres):",
+    "auth.landing.reset_form.heading": "Redefinição de Senha",
+    "auth.landing.reset_form.page_title": "Redefinir senha — Goyim Arena",
+    "auth.landing.reset_form.submit": "Salvar nova senha",
+    "auth.landing.reset_success.action": "Acessar minha conta",
+    "auth.landing.reset_success.detail": "Sua senha foi atualizada com sucesso e todas as sessões anteriores foram revogadas por segurança.",
+    "auth.landing.reset_success.heading": "Senha redefinida com sucesso",
+    "auth.landing.reset_success.note": "Você já pode fazer login com sua nova credencial.",
+    "auth.landing.reset_success.page_title": "Senha alterada — Goyim Arena",
+    "auth.landing.verify_error.action": "Voltar ao início",
+    "auth.landing.verify_error.detail": "Não foi possível confirmar seu email. O link pode ter expirado ou já ter sido utilizado.",
+    "auth.landing.verify_error.heading": "Link de verificação inválido ou expirado",
+    "auth.landing.verify_error.note": "Solicite um novo link de confirmação ou entre em contato com o suporte.",
+    "auth.landing.verify_error.page_title": "Falha na verificação — Goyim Arena",
+    "auth.landing.verify_success.action": "Ir para o Login",
+    "auth.landing.verify_success.detail": "Sua conta no Goyim Arena foi ativada e seu endereço de email foi confirmado.",
+    "auth.landing.verify_success.heading": "Email verificado com sucesso",
+    "auth.landing.verify_success.note": "Você já pode acessar a plataforma utilizando suas credenciais.",
+    "auth.landing.verify_success.page_title": "Email verificado — Goyim Arena",
+    "auth.login.busy": "Entrando…",
+    "auth.login.heading": "Entrar",
+    "auth.login.intro": "Use o email e a senha da sua conta.",
+    "auth.login.page_title": "Entrar — Goyim Arena",
+    "auth.login.reset_action": "Esqueci minha senha",
+    "auth.login.submit": "Entrar",
+    "auth.logout.busy": "Encerrando a sessão…",
+    "auth.logout.heading": "Encerrar sessão",
+    "auth.logout.intro": "Encerrar a sessão neste navegador termina o acesso até você entrar novamente.",
+    "auth.logout.page_title": "Encerrar sessão — Goyim Arena",
+    "auth.logout.submit": "Encerrar sessão",
+    "auth.nav.label": "Navegação da conta",
+    "auth.nav.login": "Entrar",
+    "auth.nav.register": "Criar conta",
+    "auth.nav.reset": "Recuperar acesso",
+    "auth.nav.verify": "Confirmar email",
+    "auth.register.busy": "Criando a conta…",
+    "auth.register.heading": "Criar conta",
+    "auth.register.intro": "Crie sua conta para participar das Arenas. Enviaremos um código para confirmar seu email.",
+    "auth.register.notice_action": "Confirmar email",
+    "auth.register.notice_detail": "Se este endereço ainda não tiver uma conta confirmada, enviamos um código de verificação. Use o código na página de confirmação.",
+    "auth.register.notice_heading": "Confira seu email",
+    "auth.register.page_title": "Criar conta — Goyim Arena",
+    "auth.register.submit": "Criar conta",
+    "auth.reset.busy": "Enviando o código…",
+    "auth.reset.confirm_busy": "Salvando a nova senha…",
+    "auth.reset.confirm_heading": "Definir nova senha",
+    "auth.reset.confirm_intro": "Informe o código de recuperação e a nova senha. Todas as sessões anteriores serão encerradas.",
+    "auth.reset.confirm_page_title": "Definir nova senha — Goyim Arena",
+    "auth.reset.confirm_submit": "Salvar nova senha",
+    "auth.reset.confirm_success_action": "Entrar",
+    "auth.reset.confirm_success_detail": "Sua senha foi alterada e todas as sessões anteriores foram encerradas.",
+    "auth.reset.confirm_success_heading": "Senha alterada",
+    "auth.reset.heading": "Recuperar acesso",
+    "auth.reset.intro": "Informe o email da sua conta para receber um código de recuperação.",
+    "auth.reset.notice_action": "Já tenho o código",
+    "auth.reset.notice_detail": "Se existir uma conta para este endereço, enviamos um código de recuperação. Use o código para definir uma nova senha.",
+    "auth.reset.notice_heading": "Confira seu email",
+    "auth.reset.page_title": "Recuperar acesso — Goyim Arena",
+    "auth.reset.submit": "Enviar código",
+    "auth.verify.busy": "Confirmando o código…",
+    "auth.verify.heading": "Confirmar email",
+    "auth.verify.intro": "Informe o código que enviamos para o seu email para ativar a conta.",
+    "auth.verify.page_title": "Confirmar email — Goyim Arena",
+    "auth.verify.submit": "Confirmar",
+    "auth.verify.success_action": "Entrar",
+    "auth.verify.success_detail": "Sua conta está ativa e você já pode entrar.",
+    "auth.verify.success_heading": "Email confirmado",
     "email.greeting": "Olá,",
     "email.password_changed.lead": "A senha da sua conta foi alterada e todas as sessões antigas foram encerradas. Se não foi você, redefina a senha agora e revise as sessões ativas.",
     "email.password_changed.subject": "Sua senha do Goyim Arena foi alterada",

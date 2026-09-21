@@ -2238,6 +2238,470 @@
           "429": { "$ref": "#/components/responses/RateLimited" }
         }
       }
+    },
+    "/register": {
+      "get": {
+        "operationId": "showRegisterPage",
+        "summary": "Registration page (HTML)",
+        "description": "Renders the browser registration form: the fields with their labels, the platform CSRF token as a hidden field and the client module that only adds the busy state to a submission. The page is a document a person fills in and it works with JavaScript switched off, so it is private and never stored. The double submit travels in the form body because a browser form cannot set the CSRF header.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Registration form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitRegisterPage",
+        "summary": "Registration submission (HTML form)",
+        "description": "Creates the account from the submitted form. The answer is uniform: an address that already has an account and a fresh address both reach the confirmation page, so the surface cannot be asked whether an address is registered (the same guarantee the JSON route gives with its uniform 201). A submission whose email or password the domain refuses is answered with the same form, the field's message and a summary of what to fix.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthRegisterForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Uniform confirmation page: the registration was accepted.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "400": {
+            "description": "The form does not satisfy the rules; the page is re-rendered with the field messages.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/verify": {
+      "get": {
+        "operationId": "showVerifyPage",
+        "summary": "Email confirmation page (HTML)",
+        "description": "Renders the form that redeems the single-use confirmation code delivered by email. The code is carried by the email as a code rather than a link, so the page is reachable from the site itself.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Confirmation form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitVerifyPage",
+        "summary": "Email confirmation submission (HTML form)",
+        "description": "Consumes the single-use confirmation code and activates the account. Every rejection is one refusal — a code that is wrong, expired or already spent produces the same message — exactly as the JSON route answers.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthCodeForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmation page: the email is verified.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "400": {
+            "description": "The code is invalid, expired or already used; the page is re-rendered with the refusal.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/login": {
+      "get": {
+        "operationId": "showLoginPage",
+        "summary": "Sign-in page (HTML)",
+        "description": "Renders the browser sign-in form with its labels, the CSRF hidden field and the link to the recovery journey.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Sign-in form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitLoginPage",
+        "summary": "Sign-in submission (HTML form)",
+        "description": "Verifies credentials and opens the session, then answers a 303 redirect so a reload never resubmits the credentials. A refusal is one uniform message for every cause — wrong password, unknown address, suspended account — because the page must not become the oracle the JSON route refuses to be. The session cookie is rotated together with the CSRF token (post-login rotation), and the attempt is reported to the risk signal that gates the next hard challenge, exactly as the JSON route reports it.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthLoginForm" }
+            }
+          }
+        },
+        "responses": {
+          "303": {
+            "description": "Signed in: the browser is sent to the authenticated root with the new session cookie.",
+            "headers": {
+              "Location": {
+                "description": "The authenticated root (/).",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "401": {
+            "description": "Uniform credential refusal; the form is re-rendered without saying which part was wrong.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/logout": {
+      "get": {
+        "operationId": "showLogoutPage",
+        "summary": "Sign-out confirmation page (HTML)",
+        "description": "Renders the confirmation whose form ends the session, so a plain navigation to the address never ends a session by itself.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Sign-out confirmation.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitLogoutPage",
+        "summary": "Sign-out submission (HTML form)",
+        "description": "Revokes the session of the presented cookie and clears both the session and the CSRF cookies, then answers a 303 redirect to the sign-in page. The cookies are cleared even when the revocation fails, because a person who asked to end the session must not be left inside it by a transient storage fault; the failure is logged, not silently accepted.",
+        "tags": ["auth"],
+        "responses": {
+          "303": {
+            "description": "Session ended: the browser is sent to the sign-in page.",
+            "headers": {
+              "Location": {
+                "description": "The sign-in page (/login).",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" }
+        }
+      }
+    },
+    "/reset": {
+      "get": {
+        "operationId": "showPasswordResetRequestPage",
+        "summary": "Recovery request page (HTML)",
+        "description": "Renders the form that asks for a recovery code, with the CSRF hidden field and the link to the page that redeems the code.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "Recovery request form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitPasswordResetRequestPage",
+        "summary": "Recovery request submission (HTML form)",
+        "description": "Asks for a recovery code and answers the uniform notice for every outcome, including a sending failure: the answer is where the existence of the account would leak, so a mailer that is down is not a reason to start answering questions about accounts (the same non-enumeration rule the JSON route follows).",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthRecoveryRequestForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Uniform notice: a code was sent when the address has an account.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "400": {
+            "description": "The email field is empty; the page is re-rendered with the message.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/reset/confirm": {
+      "get": {
+        "operationId": "showPasswordResetConfirmPage",
+        "summary": "New password page (HTML)",
+        "description": "Renders the form that redeems the recovery code and sets the new password in one submission.",
+        "tags": ["auth"],
+        "responses": {
+          "200": {
+            "description": "New password form.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "submitPasswordResetConfirmPage",
+        "summary": "New password submission (HTML form)",
+        "description": "Consumes the recovery code, sets the new password and ends every older session of the account. Two failures are told apart on purpose and only these two: a password below the minimum is about the person's own input and must be actionable, while a code that is wrong, expired or already spent is one refusal. Nothing about the account is revealed either way.",
+        "tags": ["auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/AuthPasswordResetForm" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Confirmation page: the password was changed.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "400": {
+            "description": "The code or the password is refused; the page is re-rendered with the message.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/arenas/{slug}": {
+      "get": {
+        "operationId": "showArenaParticipationPage",
+        "summary": "Arena participation page (HTML)",
+        "description": "Renders the page a person acts on: the statement and the public metadata of the Arena, the aggregate result when the visitor asks for it (?reveal=1), the local position choice of a visitor without a session, the stored position of an authenticated person together with the forms that confirm or change it, the newest page of each relation's arguments, and the form that publishes one. The identity is optional here: a visitor without a session reads the page and chooses a position locally, and only the transitions require an account. The page is never publicly cacheable and is marked noindex, because the canonical public document of an Arena is /d/{slug}.",
+        "tags": ["arenas"],
+        "responses": {
+          "200": {
+            "description": "Participation page. The aggregate is omitted unless the request asked for it, and the personalized regions are omitted without a session.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "410": {
+            "description": "The Arena was removed by moderation.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      }
+    },
+    "/arenas/{slug}/position": {
+      "post": {
+        "operationId": "submitArenaInitialPosition",
+        "summary": "Confirm the initial position (HTML form)",
+        "description": "Records the first confirmed position of the account in the Arena and answers a 303 redirect to the page with the code of the transition. The initial choice is immutable: confirming it twice with another value is refused with the message of the form, while every other refusal the application can produce stays the refusal page of its kind. The submitted position is validated against the closed vocabulary of the page before the use case is called.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/ArenaPositionForm" }
+            }
+          }
+        },
+        "responses": {
+          "303": {
+            "description": "Position recorded: the browser is sent back to the page of the Arena.",
+            "headers": {
+              "Location": {
+                "description": "The participation page with the code of the transition.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": {
+            "description": "The field is empty or carries a position outside the vocabulary; the page is re-rendered with the message on the field.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": {
+            "description": "The initial position is already confirmed with another value; the page is re-rendered with the message of the refusal.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/arenas/{slug}/position/change": {
+      "post": {
+        "operationId": "submitArenaPositionChange",
+        "summary": "Change the confirmed position (HTML form)",
+        "description": "Appends one accepted change to the immutable history, moves the current-position projection in the same transaction and answers a 303 redirect to the page. A concurrent change fails the optimistic version check and is answered with the message of the form, never with a projection that diverges from the chain.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/ArenaPositionForm" }
+            }
+          }
+        },
+        "responses": {
+          "303": {
+            "description": "Change recorded: the browser is sent back to the page of the Arena.",
+            "headers": {
+              "Location": {
+                "description": "The participation page with the code of the transition.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": {
+            "description": "The field is empty or carries a position outside the vocabulary; the page is re-rendered with the message on the field.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": {
+            "description": "The version of the stored position moved meanwhile; the page is re-rendered with the message of the refusal.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/arenas/{slug}/arguments": {
+      "post": {
+        "operationId": "submitArenaArgument",
+        "summary": "Publish an argument (HTML form)",
+        "description": "Publishes one argument of an authenticated account and answers a 303 redirect to the page. The attempt key travels in the form, generated when the page was rendered, so a double submission of the same document resolves the argument that was already recorded instead of debiting INK twice; the debit itself happens inside the transaction of the publication, and this surface only reports the refusal when the balance does not cover it. The relation is validated against the closed vocabulary of the page before the use case is called.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/ArenaArgumentForm" }
+            }
+          }
+        },
+        "responses": {
+          "303": {
+            "description": "Argument published: the browser is sent back to the page of the Arena.",
+            "headers": {
+              "Location": {
+                "description": "The participation page with the code of the transition.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": {
+            "description": "A field is empty or carries a relation outside the vocabulary; the page is re-rendered with the message on the field.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": {
+            "description": "The publication is refused with a message for the form: content outside the accepted bounds, or a balance that does not cover it.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "429": { "$ref": "#/components/responses/RateLimited" }
+        }
+      }
+    },
+    "/arenas/{slug}/attributions": {
+      "post": {
+        "operationId": "submitArenaAttributions",
+        "summary": "Record what influenced a position change (HTML form)",
+        "description": "Records the arguments one position change is credited to, owner-only and idempotent per argument, and answers a 303 redirect to the page. The selection is bounded by the attribution policy of the change rather than by a repetition budget, which is why this transition carries no throttle of its own; the page refuses to render a selection larger than that policy.",
+        "tags": ["arenas"],
+        "security": [{ "SessionCookie": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": { "$ref": "#/components/schemas/ArenaAttributionForm" }
+            }
+          }
+        },
+        "responses": {
+          "303": {
+            "description": "Attribution recorded: the browser is sent back to the page of the Arena.",
+            "headers": {
+              "Location": {
+                "description": "The participation page with the code of the transition.",
+                "schema": { "type": "string" }
+              }
+            }
+          },
+          "400": {
+            "description": "No change and no argument was submitted, or the selection is larger than the attribution policy; the page is re-rendered with the message.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Unauthorized" },
+          "403": { "$ref": "#/components/responses/Forbidden" },
+          "404": { "$ref": "#/components/responses/NotFound" },
+          "409": {
+            "description": "The change or one of the chosen arguments is no longer available; the page is re-rendered with the message of the refusal.",
+            "content": {
+              "text/html": { "schema": { "type": "string" } }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2339,6 +2803,103 @@
         "required": ["status"],
         "properties": {
           "status": { "type": "string", "enum": ["pending_verification"] }
+        }
+      },
+      "ArenaPositionForm": {
+        "type": "object",
+        "required": ["position", "csrf_token"],
+        "properties": {
+          "position": {
+            "type": "string",
+            "enum": ["agree", "disagree", "undecided"],
+            "description": "The submitted position. It is validated against this closed vocabulary before the use case is called."
+          },
+          "csrf_token": {
+            "type": "string"
+          }
+        }
+      },
+      "ArenaArgumentForm": {
+        "type": "object",
+        "required": ["relation", "content", "attempt", "csrf_token"],
+        "properties": {
+          "relation": {
+            "type": "string",
+            "enum": ["support", "oppose", "context"],
+            "description": "Relation of the argument to the statement, validated against this closed vocabulary."
+          },
+          "content": {
+            "type": "string",
+            "description": "The argument itself, from one to three thousand grapheme clusters (UAX #29). The count is the server's; the form documents the limit instead of leaving it to the browser."
+          },
+          "attempt": {
+            "type": "string",
+            "description": "Attempt key generated when the page was rendered. A retry of the same document resolves the recorded argument instead of debiting INK again."
+          },
+          "csrf_token": {
+            "type": "string"
+          }
+        }
+      },
+      "ArenaAttributionForm": {
+        "type": "object",
+        "required": ["change_id", "argument_ids", "csrf_token"],
+        "properties": {
+          "change_id": {
+            "type": "string",
+            "description": "Identifier of the position change being credited; it travels as a hidden field of the rendered form."
+          },
+          "argument_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Arguments the change is credited to. A checkbox group submits one entry per selection, and the cumulative limit of the attribution policy is enforced by the application."
+          },
+          "csrf_token": {
+            "type": "string"
+          }
+        }
+      },
+      "AuthRegisterForm": {
+        "type": "object",
+        "required": ["email", "password", "csrf_token"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string", "minLength": 8 },
+          "csrf_token": { "type": "string", "description": "Double-submit token rendered by the form and read from the body, because a browser form cannot set the CSRF header." }
+        }
+      },
+      "AuthLoginForm": {
+        "type": "object",
+        "required": ["email", "password", "csrf_token"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string" },
+          "csrf_token": { "type": "string" }
+        }
+      },
+      "AuthCodeForm": {
+        "type": "object",
+        "required": ["token", "csrf_token"],
+        "properties": {
+          "token": { "type": "string", "description": "Single-use code delivered by email; it is never echoed back into the form." },
+          "csrf_token": { "type": "string" }
+        }
+      },
+      "AuthRecoveryRequestForm": {
+        "type": "object",
+        "required": ["email", "csrf_token"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "csrf_token": { "type": "string" }
+        }
+      },
+      "AuthPasswordResetForm": {
+        "type": "object",
+        "required": ["token", "password", "csrf_token"],
+        "properties": {
+          "token": { "type": "string" },
+          "password": { "type": "string", "minLength": 8 },
+          "csrf_token": { "type": "string" }
         }
       },
       "LoginRequest": {
