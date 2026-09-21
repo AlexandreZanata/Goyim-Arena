@@ -49,6 +49,16 @@ const contentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 
 // served with the wrong type into script execution.
 const contentTypeOptions = "nosniff"
 
+// ContentSecurityPolicy returns the exact policy the middleware delivers.
+//
+// It exists for the frontend gate of P18-T08 (`tools/webaudit`): the delivered
+// code has to be compatible with the policy of the binary that serves it, and a
+// gate cannot ask that question by keeping a second copy of the answer. The
+// value is the constant itself, not a parameter: a caller that could change it
+// would be changing the policy of every response, which is a reviewed edit to
+// this file and to docs/SECURITY.md section 4, never a local convenience.
+func ContentSecurityPolicy() string { return contentSecurityPolicy }
+
 // referrerPolicy keeps the referrer inside the origin: a request to another
 // origin carries none. Arena addresses carry the user's own published slug in
 // the path, and nothing in the product needs to tell a third-party site which

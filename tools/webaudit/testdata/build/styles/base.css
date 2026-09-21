@@ -1,0 +1,6 @@
+/* One stylesheet, measured as delivered and compressed on its own. */
+@layer base {
+    .entry {
+        color: var(--ink, #111);
+    }
+}

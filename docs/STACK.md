@@ -141,6 +141,7 @@ Um gerador interno em Go poderá ler o subconjunto versionado do contrato OpenAP
 ## 6. Ferramentas de desenvolvimento
 
 - `tsc --noEmit` para tipos e `tsc` para emissão ESM.
+- `tools/webaudit` (`make audit-web`, dentro de `make verify`) mede o build entregue contra os orçamentos de [FRONTEND.md](FRONTEND.md) §11 e as regras de dependência: JS comprimido por página pública, CSS inicial, imports externos, bare specifiers, imports não publicados, construtos que a CSP servida recusa e primitivas de rede fora de `web/src/core`.
 - APIs nativas de teste para unidades puras; Playwright para comportamento real do browser, no pacote isolado `tools/e2e` (`make test-e2e`), cujas jornadas dirigem o binário real contra um PostgreSQL descartável — nada do runner está em `web/`, no build referenciado pelas páginas ou no binário entregue.
 - `go test`, race detector, fuzzing dirigido e benchmarks.
 - `golangci-lint` e `govulncheck`.

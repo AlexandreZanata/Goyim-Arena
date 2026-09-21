@@ -124,12 +124,27 @@ Orçamentos são guardrails a validar:
 
 Exceções exigem medida, justificativa e revisão.
 
+### 11.1 O gate que mede
+
+`make audit-web` (`tools/webaudit`) mede o build entregue em `web/dist` e falha fechado. Cinco perguntas, cada uma com o artefato que interroga:
+
+1. **orçamentos** — a soma dos bytes comprimidos de cada módulo do fecho de uma página pública (`web/dist/pages/*.js` e tudo que ele importa) contra os 50 KB, e o total das folhas de estilo do build contra os 40 KB. A medida é por resposta, não por concatenação: o browser busca um módulo por request, cada um com seu próprio fluxo de compressão, então o que se soma é o que o visitante baixa — nunca o peso de um bundle, que não existe neste pipeline. A compressão é gzip: brotli exigiria uma dependência que a política de dependências não admite, e o orçamento é guarda de regressão, não promessa sobre o que a borda negocia. "KB" é lido como 1.000 bytes, a leitura mais restrita.
+2. **specifiers** — todo import do grafo entregue é relativo, resolve para um arquivo que o manifest publica e fica dentro do build: nada de origem externa (`https://…`, `//…`), de caminho absoluto, de bare specifier (o browser não tem resolver nem diretório de pacotes) nem de caminho não publicado.
+3. **csp** — o código entregue não carrega `eval`, `new Function`, `document.write`, `javascript:` nem sink de HTML (`innerHTML`, `outerHTML`, `insertAdjacentHTML`), e a política que o binário entrega (lida do próprio `internal/platform/securityheaders`) continua sem `'unsafe-inline'`, sem `'unsafe-eval'` e sem origem alguma. Os comentários são apagados antes da leitura — este repositório documenta as regras nos módulos que as obedecem, e o gate não pode reprovar a própria documentação — preservando as linhas do arquivo original, para que a violação aponte a linha certa.
+4. **network** — `fetch`, `XMLHttpRequest`, `WebSocket`, `EventSource` e `sendBeacon` aparecem somente sob `web/src/core/`: é o core que carrega timeout, CSRF, identidade de request e Problem Details, e uma página que busca por conta própria ignora todas essas garantias.
+5. **build** — o manifest existe, todo arquivo que ele declara existe e há ao menos um entry em `pages/`. Um gate que não consegue ver o que mede não prova nada: arquivo declarado e ausente é erro, não skip.
+
+O digest de cada registro do manifest é o contrato do servidor (`internal/platform/assets`, endereço imutável e `ETag`) e é verificado onde é usado; este gate mede conteúdo, não identidade.
+
+O gate roda no `make verify`; os testes de `tools/webaudit` provam cada regra sobre um build de fixture, de modo que uma sonda que quebra uma regra falha nomeando o módulo e a linha, e o build real volta a passar quando ela sai.
+
 ## 12. Testes
 
 - unidades para funções puras e state machines;
 - contract tests do client HTTP;
 - testes em browser real para lifecycle de Custom Elements;
 - E2E para jornadas críticas;
+- auditoria do build entregue para orçamentos e dependências (`make audit-web`);
 - axe ou auditoria equivalente no CI sem virar dependência de runtime;
 - screenshots para regressões de layout em páginas essenciais;
 - teste com JavaScript desabilitado para fluxos progressivos prometidos.

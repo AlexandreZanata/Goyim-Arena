@@ -15,7 +15,7 @@ ASSETGEN := $(GO) run ./cmd/assetgen
 # OpenAPI e emite web/src/contracts/generated.ts (nunca editado à mão).
 CONTRACTGEN := $(GO) run ./tools/contractgen
 
-.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web test-contract test-e2e test-load-smoke generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web test-contract test-e2e test-load-smoke generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -68,6 +68,17 @@ build-web:
 	@rm -rf web/dist
 	$(ASSETGEN) -input web/generated -input web/src -output web/dist -manifest web/dist/manifest.json
 	@echo "build-web: ok"
+
+# audit-web mede o build entregue contra os orçamentos e as regras de
+# dependência do frontend (P18-T08, docs/FRONTEND.md §11): custo comprimido por
+# página pública e do CSS inicial, imports externos, bare specifiers, imports
+# não publicados, construtos que a CSP servida recusa e primitivas de rede fora
+# de web/src/core. Ele depende de build-web porque mede o build que as páginas
+# referenciam, nunca as fontes: a árvore que compila e o build que é servido são
+# dois artefatos diferentes.
+audit-web: build-web
+	$(GO) run ./tools/webaudit -build web/dist
+	@echo "audit-web: ok"
 
 # test-contract valida o contrato OpenAPI versionado: o documento parseia,
 # satisfaz as convenções estruturais do plano (Problem Details, security
@@ -139,7 +150,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-contract test-security test-web typecheck build-web
+verify: fmt-check generate-check test-unit test-integration test-contract test-security test-web typecheck build-web audit-web
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint test-race vuln; do \
 		echo "  - $$gate"; \
