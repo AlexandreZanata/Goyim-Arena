@@ -20,7 +20,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke image-build image-verify image-scan generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke image-build image-verify image-scan compose-verify generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -118,6 +118,16 @@ image-verify:
 	ARENA_IMAGE=$(IMAGE) tools/imageaudit/verify.sh
 	@echo "image-verify: ok"
 
+# compose-verify é o gate da topologia de produção (P19-T02): constrói a
+# imagem, promove o artefato por digest num registry descartável, renderiza e
+# audita o documento que o Compose cria, sobe a stack, aplica as migrations com
+# a própria imagem, dirige um cadastro pelo ingress público e prova que os dados
+# sobrevivem a um restart e a uma recriação completa. Ele não entra em `verify`
+# porque exige um daemon Docker — o mesmo motivo de image-verify.
+compose-verify: image-build
+	ARENA_IMAGE=$(IMAGE) tools/composeaudit/verify.sh
+	@echo "compose-verify: ok"
+
 # image-scan procura vulnerabilidades conhecidas na imagem construída. Ele exige
 # um scanner instalado fora do repositório (o padrão é trivy), exatamente como
 # test-load-smoke exige k6; sem ele o alvo falha explicitamente e nunca retorna
@@ -204,7 +214,7 @@ verify: fmt-check generate-check test-unit test-integration test-contract test-s
 		echo "  - $$gate"; \
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
-	@for gate in test-e2e test-load-smoke image-verify image-scan; do \
+	@for gate in test-e2e test-load-smoke image-verify image-scan compose-verify; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."

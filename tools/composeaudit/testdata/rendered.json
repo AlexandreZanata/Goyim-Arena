@@ -1,0 +1,311 @@
+{
+  "name": "goyim-arena-production",
+  "networks": {
+    "edge": {
+      "ipam": {},
+      "name": "goyim-arena-production_edge"
+    },
+    "egress": {
+      "ipam": {},
+      "name": "goyim-arena-production_egress"
+    },
+    "internal": {
+      "internal": true,
+      "ipam": {},
+      "name": "goyim-arena-production_internal"
+    }
+  },
+  "secrets": {
+    "origin_certificate": {
+      "file": "/etc/arena/origin_certificate",
+      "name": "goyim-arena-production_origin_certificate"
+    },
+    "origin_key": {
+      "file": "/etc/arena/origin_key",
+      "name": "goyim-arena-production_origin_key"
+    }
+  },
+  "services": {
+    "app": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "command": [
+        "server"
+      ],
+      "depends_on": {
+        "db": {
+          "condition": "service_healthy",
+          "required": true
+        }
+      },
+      "deploy": {
+        "placement": {},
+        "resources": {
+          "limits": {
+            "cpus": 1.5,
+            "memory": "1073741824"
+          }
+        }
+      },
+      "entrypoint": null,
+      "environment": {
+        "ARENA_CURSOR_SECRET": "placeholder-cursor-secret-32-bytes",
+        "ARENA_DATABASE_URL": "postgres://arena:redaction-sentinel@db:5432/arena?sslmode=disable",
+        "ARENA_EMAIL_FROM": "Arena <no-reply@arena.invalid>",
+        "ARENA_ENV": "production",
+        "ARENA_RESEND_API_KEY": "re_placeholder_not_a_real_key",
+        "ARENA_STRIPE_SECRET_KEY": "sk_live_placeholder_not_a_real_key",
+        "COMPOSE_ARENA_IMAGE": "placeholder-compose_arena_image",
+        "COMPOSE_DB_ENV_FILE": "/etc/arena/compose_db_env_file",
+        "COMPOSE_ENV_FILE": "/etc/arena/compose_env_file",
+        "COMPOSE_HTTPS_PORT": "placeholder-compose_https_port",
+        "COMPOSE_HTTP_PORT": "placeholder-compose_http_port",
+        "COMPOSE_SITE_ADDRESS": "placeholder-compose_site_address",
+        "COMPOSE_TLS_CERT_FILE": "/etc/arena/compose_tls_cert_file",
+        "COMPOSE_TLS_KEY_FILE": "/etc/arena/compose_tls_key_file"
+      },
+      "image": "registry.invalid/goyim-arena@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "networks": {
+        "edge": null,
+        "egress": null,
+        "internal": null
+      },
+      "read_only": true,
+      "restart": "unless-stopped",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "stop_grace_period": "30s",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "tmpfs": [
+        "/tmp"
+      ]
+    },
+    "caddy": {
+      "command": null,
+      "deploy": {
+        "placement": {},
+        "resources": {
+          "limits": {
+            "cpus": 0.5,
+            "memory": "268435456"
+          }
+        }
+      },
+      "entrypoint": null,
+      "environment": {
+        "COMPOSE_SITE_ADDRESS": "placeholder-compose_site_address"
+      },
+      "healthcheck": {
+        "interval": "10s",
+        "retries": 6,
+        "start_period": "10s",
+        "test": [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--spider",
+          "http://127.0.0.1:2019/config/"
+        ],
+        "timeout": "5s"
+      },
+      "image": "caddy:2.10.0-alpine@sha256:ae4458638da8e1a91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c",
+      "networks": {
+        "edge": null
+      },
+      "ports": [
+        {
+          "host_ip": "127.0.0.1",
+          "mode": "ingress",
+          "protocol": "tcp",
+          "published": "55997",
+          "target": 80
+        },
+        {
+          "host_ip": "127.0.0.1",
+          "mode": "ingress",
+          "protocol": "tcp",
+          "published": "55998",
+          "target": 443
+        }
+      ],
+      "restart": "unless-stopped",
+      "secrets": [
+        {
+          "source": "origin_certificate",
+          "target": "/run/secrets/origin_certificate"
+        },
+        {
+          "source": "origin_key",
+          "target": "/run/secrets/origin_key"
+        }
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "stop_grace_period": "30s",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "volumes": [
+        {
+          "bind": {
+            "create_host_path": true
+          },
+          "read_only": true,
+          "source": "/home/iiii/PESSOAL-PROJETOS-ALEXANDRE/Goyim-Arena/deploy/caddy/Caddyfile",
+          "target": "/etc/caddy/Caddyfile",
+          "type": "bind"
+        },
+        {
+          "source": "caddy-data",
+          "target": "/data",
+          "type": "volume",
+          "volume": {}
+        },
+        {
+          "source": "caddy-config",
+          "target": "/config",
+          "type": "volume",
+          "volume": {}
+        }
+      ]
+    },
+    "db": {
+      "command": null,
+      "deploy": {
+        "placement": {},
+        "resources": {
+          "limits": {
+            "cpus": 2,
+            "memory": "4294967296"
+          }
+        }
+      },
+      "entrypoint": null,
+      "environment": {
+        "POSTGRES_DB": "arena",
+        "POSTGRES_INITDB_ARGS": "--encoding=UTF8 --locale=C",
+        "POSTGRES_PASSWORD": "database-sentinel",
+        "POSTGRES_USER": "arena"
+      },
+      "healthcheck": {
+        "interval": "10s",
+        "retries": 6,
+        "start_period": "30s",
+        "test": [
+          "CMD-SHELL",
+          "pg_isready -U arena -d arena"
+        ],
+        "timeout": "5s"
+      },
+      "image": "postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636",
+      "networks": {
+        "internal": null
+      },
+      "restart": "unless-stopped",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "stop_grace_period": "1m0s",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "volumes": [
+        {
+          "source": "db-data",
+          "target": "/var/lib/postgresql",
+          "type": "volume",
+          "volume": {}
+        }
+      ]
+    },
+    "worker": {
+      "cap_drop": [
+        "ALL"
+      ],
+      "command": [
+        "worker"
+      ],
+      "depends_on": {
+        "db": {
+          "condition": "service_healthy",
+          "required": true
+        }
+      },
+      "deploy": {
+        "placement": {},
+        "resources": {
+          "limits": {
+            "cpus": 1,
+            "memory": "1073741824"
+          }
+        }
+      },
+      "entrypoint": null,
+      "environment": {
+        "ARENA_CURSOR_SECRET": "placeholder-cursor-secret-32-bytes",
+        "ARENA_DATABASE_URL": "postgres://arena:redaction-sentinel@db:5432/arena?sslmode=disable",
+        "ARENA_EMAIL_FROM": "Arena <no-reply@arena.invalid>",
+        "ARENA_ENV": "production",
+        "ARENA_RESEND_API_KEY": "re_placeholder_not_a_real_key",
+        "ARENA_STRIPE_SECRET_KEY": "sk_live_placeholder_not_a_real_key",
+        "COMPOSE_ARENA_IMAGE": "placeholder-compose_arena_image",
+        "COMPOSE_DB_ENV_FILE": "/etc/arena/compose_db_env_file",
+        "COMPOSE_ENV_FILE": "/etc/arena/compose_env_file",
+        "COMPOSE_HTTPS_PORT": "placeholder-compose_https_port",
+        "COMPOSE_HTTP_PORT": "placeholder-compose_http_port",
+        "COMPOSE_SITE_ADDRESS": "placeholder-compose_site_address",
+        "COMPOSE_TLS_CERT_FILE": "/etc/arena/compose_tls_cert_file",
+        "COMPOSE_TLS_KEY_FILE": "/etc/arena/compose_tls_key_file"
+      },
+      "image": "registry.invalid/goyim-arena@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+      "networks": {
+        "egress": null,
+        "internal": null
+      },
+      "read_only": true,
+      "restart": "unless-stopped",
+      "security_opt": [
+        "no-new-privileges:true"
+      ],
+      "stop_grace_period": "1m0s",
+      "logging": {
+        "driver": "json-file",
+        "options": {
+          "max-file": "5",
+          "max-size": "10m"
+        }
+      },
+      "tmpfs": [
+        "/tmp"
+      ]
+    }
+  },
+  "volumes": {
+    "caddy-config": {
+      "name": "goyim-arena-production_caddy-config"
+    },
+    "caddy-data": {
+      "name": "goyim-arena-production_caddy-data"
+    },
+    "db-data": {
+      "name": "goyim-arena-production_db-data"
+    }
+  }
+}

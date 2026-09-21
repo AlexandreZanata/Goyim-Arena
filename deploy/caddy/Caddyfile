@@ -1,0 +1,28 @@
+# Caddy ingress — topology level (P19-T02).
+#
+# This configuration is deliberately thin, and the thinness is the design: it
+# answers the question "does the stack have a complete path from the internet
+# to the application", which is what the Compose task is responsible for.
+#
+# P19-T03 owns the hardening that belongs to the ingress itself: TLS Full
+# (strict) against the Cloudflare origin, explicit trusted proxies, security
+# headers, compression, route and cache behaviour, and upstream health checks.
+# P19-T05/T06 own the access logs and the alerting on them. None of that is
+# declared here, so that the file this task commits is only the part this task
+# can validate.
+#
+# Two properties are worth stating because they are decisions, not defaults:
+#
+#   - the certificate is a *file secret* mounted by Compose, not an ACME
+#     issuance: the origin accepts traffic only from Cloudflare, so a challenge
+#     that needs to be reachable from the internet would turn every renewal into
+#     an outage window (docs/DEPLOYMENT.md §3);
+#   - the upstream is named by service name on the edge network, and the
+#     application is the only other member of that network, so the name resolves
+#     to one address and a typo cannot silently proxy to something else.
+
+{$COMPOSE_SITE_ADDRESS} {
+	tls /run/secrets/origin_certificate /run/secrets/origin_key
+
+	reverse_proxy app:8080
+}
