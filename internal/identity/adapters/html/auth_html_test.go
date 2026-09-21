@@ -402,7 +402,7 @@ func TestReadPagesArePrivateAndCarryTheNoJavaScriptJourney(t *testing.T) {
 
 		document := recorder.Body.String()
 		for _, marker := range []string{
-			`<html lang="pt-BR">`,
+			`<html lang="pt-BR" dir="ltr">`,
 			`<form class="ga-auth__form" method="POST"`,
 			`name="csrf_token"`,
 			`type="hidden"`,
@@ -909,7 +909,7 @@ func TestPagesRenderInTheRequestLocale(t *testing.T) {
 		t.Fatalf("GET /login = %d, want 200", recorder.Code)
 	}
 	document := recorder.Body.String()
-	for _, marker := range []string{`<html lang="en-US">`, ">Sign in<", "At least 8 characters."} {
+	for _, marker := range []string{`<html lang="en-US" dir="ltr">`, ">Sign in<", "At least 8 characters."} {
 		if !strings.Contains(document, marker) {
 			t.Errorf("the en-US page does not render %q:\n%s", marker, document)
 		}

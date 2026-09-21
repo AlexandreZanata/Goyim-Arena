@@ -173,6 +173,7 @@ func getDocument(t *testing.T, mux *http.ServeMux, path string, ifNoneMatch stri
 type parsedDocument struct {
 	XMLName xml.Name   `xml:"html"`
 	Lang    string     `xml:"lang,attr"`
+	Dir     string     `xml:"dir,attr"`
 	Head    parsedHead `xml:"head"`
 	Body    parsedBody `xml:"body"`
 }
@@ -290,6 +291,13 @@ func TestArenaDocumentRendersCacheableHTML(t *testing.T) {
 	document := parseDocument(t, body)
 	if document.Lang != "pt-BR" {
 		t.Fatalf("html lang = %q, want the arena content language", document.Lang)
+	}
+	// The direction is declared from the same locale the document names
+	// (P18-T10): a cacheable document served to search engines and to link
+	// previews is read by clients that lay it out, and one without a
+	// direction would break the first time a right-to-left Arena exists.
+	if document.Dir != "ltr" {
+		t.Fatalf("html dir = %q, want ltr for the content language", document.Dir)
 	}
 
 	statement := arena.Statement().String()
@@ -409,6 +417,9 @@ func TestArenaDocumentUsesContentLanguage(t *testing.T) {
 	document := parseDocument(t, recorder.Body.String())
 	if document.Lang != "en-US" {
 		t.Fatalf("html lang = %q, want en-US", document.Lang)
+	}
+	if document.Dir != "ltr" {
+		t.Fatalf("html dir = %q, want ltr for the content language", document.Dir)
 	}
 	if got := metaContent(t, document.Head, "", "og:locale"); got != "en_US" {
 		t.Fatalf("og:locale = %q, want en_US", got)

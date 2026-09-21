@@ -15,7 +15,7 @@ ASSETGEN := $(GO) run ./cmd/assetgen
 # OpenAPI e emite web/src/contracts/generated.ts (nunca editado à mão).
 CONTRACTGEN := $(GO) run ./tools/contractgen
 
-.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web test-contract test-e2e test-load-smoke generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -37,8 +37,15 @@ fmt-check:
 
 # test-unit executa os testes unitários das capacidades existentes (Go).
 # O frontend ainda não possui runner de testes; será agregado quando existir.
+#
+# A segunda invocação é o build com a tag pseudolocale (P18-T10): é o catálogo
+# derivado que as jornadas de navegador dirigem, e ele tem testes próprios
+# (registro no allowlist, formatação de placeholders, catálogos reais
+# intactos). Sem ela, a tag só seria compilada dentro do harness — e um erro no
+# registro apareceria como jornada vermelha em vez de teste vermelho.
 test-unit:
 	$(GO) test ./...
+	$(GO) test -tags pseudolocale ./internal/i18n/...
 	@echo "test-unit: ok"
 
 # test-integration executa os testes de integração contra PostgreSQL real descartável (P03-T05, P03-T06).
@@ -79,6 +86,17 @@ build-web:
 audit-web: build-web
 	$(GO) run ./tools/webaudit -build web/dist
 	@echo "audit-web: ok"
+
+# audit-i18n varre a árvore entregue em busca do que o catálogo não pode
+# garantir sozinho (P18-T10): documento que escreve a própria linguagem (ou
+# nenhuma), documento que traz prosa fora do catálogo e folha de estilo com
+# propriedade física. Não depende de build porque lê o código-fonte entregue:
+# é a árvore que vai para produção, e um layout é uma propriedade dela, não do
+# artefato compilado. O scanner está fora do pacote entregue e nunca escreve
+# nada; a lista de regras e o porquê de cada uma estão em tools/i18naudit.
+audit-i18n:
+	$(GO) run ./tools/i18naudit -root .
+	@echo "audit-i18n: ok"
 
 # test-contract valida o contrato OpenAPI versionado: o documento parseia,
 # satisfaz as convenções estruturais do plano (Problem Details, security
@@ -150,7 +168,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-contract test-security test-web typecheck build-web audit-web
+verify: fmt-check generate-check test-unit test-integration test-contract test-security test-web typecheck build-web audit-web audit-i18n
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint test-race vuln; do \
 		echo "  - $$gate"; \

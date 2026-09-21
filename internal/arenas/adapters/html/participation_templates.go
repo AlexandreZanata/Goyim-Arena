@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/websurface"
 )
 
 // Logical names of the assets the participation page loads, as produced by
@@ -283,7 +284,7 @@ func NewParticipationTemplates(manifest assets.Manifest) (*ParticipationTemplate
 		}
 	}
 
-	set, err := template.New("participation").Funcs(manifest.TemplateFuncs()).Parse(participationTemplateSources)
+	set, err := template.New("participation").Funcs(websurface.WithFuncs(manifest.TemplateFuncs())).Parse(participationTemplateSources)
 	if err != nil {
 		return nil, err
 	}
@@ -422,7 +423,7 @@ const participationTemplateSources = `{{define "document_head"}}<head>
 	</section>{{end}}
 
 {{define "participation_page"}}<!DOCTYPE html>
-<html lang="{{.Lang}}">
+<html lang="{{.Lang}}" dir="{{dir .Lang}}">
 {{template "document_head" .}}
 <body>
 	{{template "document_header" .}}
@@ -507,7 +508,7 @@ const participationTemplateSources = `{{define "document_head"}}<head>
 </html>{{end}}
 
 {{define "notice_page"}}<!DOCTYPE html>
-<html lang="{{.Lang}}">
+<html lang="{{.Lang}}" dir="{{dir .Lang}}">
 {{template "document_head" .}}
 <body>
 	{{template "document_header" .}}

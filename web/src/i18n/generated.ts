@@ -102,6 +102,31 @@ export const messageKeys = {
     "auth.field.new_password_label",
     "auth.field.password_hint",
     "auth.field.password_label",
+    "auth.landing.reset_error.action",
+    "auth.landing.reset_error.detail",
+    "auth.landing.reset_error.heading",
+    "auth.landing.reset_error.note",
+    "auth.landing.reset_error.page_title",
+    "auth.landing.reset_form.detail",
+    "auth.landing.reset_form.field_label",
+    "auth.landing.reset_form.heading",
+    "auth.landing.reset_form.page_title",
+    "auth.landing.reset_form.submit",
+    "auth.landing.reset_success.action",
+    "auth.landing.reset_success.detail",
+    "auth.landing.reset_success.heading",
+    "auth.landing.reset_success.note",
+    "auth.landing.reset_success.page_title",
+    "auth.landing.verify_error.action",
+    "auth.landing.verify_error.detail",
+    "auth.landing.verify_error.heading",
+    "auth.landing.verify_error.note",
+    "auth.landing.verify_error.page_title",
+    "auth.landing.verify_success.action",
+    "auth.landing.verify_success.detail",
+    "auth.landing.verify_success.heading",
+    "auth.landing.verify_success.note",
+    "auth.landing.verify_success.page_title",
     "auth.login.busy",
     "auth.login.heading",
     "auth.login.intro",
@@ -288,6 +313,31 @@ export type MessageKey =
   | "auth.field.new_password_label"
   | "auth.field.password_hint"
   | "auth.field.password_label"
+  | "auth.landing.reset_error.action"
+  | "auth.landing.reset_error.detail"
+  | "auth.landing.reset_error.heading"
+  | "auth.landing.reset_error.note"
+  | "auth.landing.reset_error.page_title"
+  | "auth.landing.reset_form.detail"
+  | "auth.landing.reset_form.field_label"
+  | "auth.landing.reset_form.heading"
+  | "auth.landing.reset_form.page_title"
+  | "auth.landing.reset_form.submit"
+  | "auth.landing.reset_success.action"
+  | "auth.landing.reset_success.detail"
+  | "auth.landing.reset_success.heading"
+  | "auth.landing.reset_success.note"
+  | "auth.landing.reset_success.page_title"
+  | "auth.landing.verify_error.action"
+  | "auth.landing.verify_error.detail"
+  | "auth.landing.verify_error.heading"
+  | "auth.landing.verify_error.note"
+  | "auth.landing.verify_error.page_title"
+  | "auth.landing.verify_success.action"
+  | "auth.landing.verify_success.detail"
+  | "auth.landing.verify_success.heading"
+  | "auth.landing.verify_success.note"
+  | "auth.landing.verify_success.page_title"
   | "auth.login.busy"
   | "auth.login.heading"
   | "auth.login.intro"
@@ -467,6 +517,31 @@ export const messagePlaceholders = Object.freeze({
   "auth.field.new_password_label": [],
   "auth.field.password_hint": ["min"],
   "auth.field.password_label": [],
+  "auth.landing.reset_error.action": [],
+  "auth.landing.reset_error.detail": [],
+  "auth.landing.reset_error.heading": [],
+  "auth.landing.reset_error.note": [],
+  "auth.landing.reset_error.page_title": [],
+  "auth.landing.reset_form.detail": [],
+  "auth.landing.reset_form.field_label": [],
+  "auth.landing.reset_form.heading": [],
+  "auth.landing.reset_form.page_title": [],
+  "auth.landing.reset_form.submit": [],
+  "auth.landing.reset_success.action": [],
+  "auth.landing.reset_success.detail": [],
+  "auth.landing.reset_success.heading": [],
+  "auth.landing.reset_success.note": [],
+  "auth.landing.reset_success.page_title": [],
+  "auth.landing.verify_error.action": [],
+  "auth.landing.verify_error.detail": [],
+  "auth.landing.verify_error.heading": [],
+  "auth.landing.verify_error.note": [],
+  "auth.landing.verify_error.page_title": [],
+  "auth.landing.verify_success.action": [],
+  "auth.landing.verify_success.detail": [],
+  "auth.landing.verify_success.heading": [],
+  "auth.landing.verify_success.note": [],
+  "auth.landing.verify_success.page_title": [],
   "auth.login.busy": [],
   "auth.login.heading": [],
   "auth.login.intro": [],
@@ -647,6 +722,31 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "auth.field.new_password_label": "New password",
     "auth.field.password_hint": "At least {min} characters.",
     "auth.field.password_label": "Password",
+    "auth.landing.reset_error.action": "Back to the start",
+    "auth.landing.reset_error.detail": "The recovery token is invalid, expired or was used before.",
+    "auth.landing.reset_error.heading": "Your password could not be reset",
+    "auth.landing.reset_error.note": "Request a new password recovery to continue.",
+    "auth.landing.reset_error.page_title": "Reset failed — Goyim Arena",
+    "auth.landing.reset_form.detail": "Enter your new password to recover access to your account.",
+    "auth.landing.reset_form.field_label": "New password (at least 8 characters):",
+    "auth.landing.reset_form.heading": "Password reset",
+    "auth.landing.reset_form.page_title": "Reset password — Goyim Arena",
+    "auth.landing.reset_form.submit": "Save the new password",
+    "auth.landing.reset_success.action": "Go to my account",
+    "auth.landing.reset_success.detail": "Your password was updated and every previous session was revoked for your safety.",
+    "auth.landing.reset_success.heading": "Password reset successfully",
+    "auth.landing.reset_success.note": "You can sign in with your new credential now.",
+    "auth.landing.reset_success.page_title": "Password changed — Goyim Arena",
+    "auth.landing.verify_error.action": "Back to the start",
+    "auth.landing.verify_error.detail": "Your email could not be confirmed. The link may have expired or been used already.",
+    "auth.landing.verify_error.heading": "Verification link invalid or expired",
+    "auth.landing.verify_error.note": "Request a new confirmation link or contact support.",
+    "auth.landing.verify_error.page_title": "Verification failed — Goyim Arena",
+    "auth.landing.verify_success.action": "Go to sign in",
+    "auth.landing.verify_success.detail": "Your Goyim Arena account is active and your email address is confirmed.",
+    "auth.landing.verify_success.heading": "Email verified successfully",
+    "auth.landing.verify_success.note": "You can sign in with your credentials now.",
+    "auth.landing.verify_success.page_title": "Email verified — Goyim Arena",
     "auth.login.busy": "Signing in…",
     "auth.login.heading": "Sign in",
     "auth.login.intro": "Use the email and the password of your account.",
@@ -824,6 +924,31 @@ export const messages: Readonly<Record<string, Readonly<Record<string, string>>>
     "auth.field.new_password_label": "Nova senha",
     "auth.field.password_hint": "Mínimo de {min} caracteres.",
     "auth.field.password_label": "Senha",
+    "auth.landing.reset_error.action": "Voltar ao início",
+    "auth.landing.reset_error.detail": "O token de recuperação é inválido, expirou ou já foi utilizado anteriormente.",
+    "auth.landing.reset_error.heading": "Não foi possível redefinir sua senha",
+    "auth.landing.reset_error.note": "Solicite uma nova recuperação de senha para continuar.",
+    "auth.landing.reset_error.page_title": "Erro na redefinição — Goyim Arena",
+    "auth.landing.reset_form.detail": "Informe sua nova senha para recuperar o acesso à sua conta.",
+    "auth.landing.reset_form.field_label": "Nova Senha (mínimo 8 caracteres):",
+    "auth.landing.reset_form.heading": "Redefinição de Senha",
+    "auth.landing.reset_form.page_title": "Redefinir senha — Goyim Arena",
+    "auth.landing.reset_form.submit": "Salvar nova senha",
+    "auth.landing.reset_success.action": "Acessar minha conta",
+    "auth.landing.reset_success.detail": "Sua senha foi atualizada com sucesso e todas as sessões anteriores foram revogadas por segurança.",
+    "auth.landing.reset_success.heading": "Senha redefinida com sucesso",
+    "auth.landing.reset_success.note": "Você já pode fazer login com sua nova credencial.",
+    "auth.landing.reset_success.page_title": "Senha alterada — Goyim Arena",
+    "auth.landing.verify_error.action": "Voltar ao início",
+    "auth.landing.verify_error.detail": "Não foi possível confirmar seu email. O link pode ter expirado ou já ter sido utilizado.",
+    "auth.landing.verify_error.heading": "Link de verificação inválido ou expirado",
+    "auth.landing.verify_error.note": "Solicite um novo link de confirmação ou entre em contato com o suporte.",
+    "auth.landing.verify_error.page_title": "Falha na verificação — Goyim Arena",
+    "auth.landing.verify_success.action": "Ir para o Login",
+    "auth.landing.verify_success.detail": "Sua conta no Goyim Arena foi ativada e seu endereço de email foi confirmado.",
+    "auth.landing.verify_success.heading": "Email verificado com sucesso",
+    "auth.landing.verify_success.note": "Você já pode acessar a plataforma utilizando suas credenciais.",
+    "auth.landing.verify_success.page_title": "Email verificado — Goyim Arena",
     "auth.login.busy": "Entrando…",
     "auth.login.heading": "Entrar",
     "auth.login.intro": "Use o email e a senha da sua conta.",

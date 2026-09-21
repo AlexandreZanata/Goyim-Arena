@@ -100,8 +100,15 @@ else
 fi
 BASE_URL="http://127.0.0.1:$PORT"
 
-log "building the server, the seed and the database tooling (run $RUN_ID)"
-(cd "$ROOT" && go build -o "$BIN_DIR/arena" ./cmd/arena)
+# The pseudo-locale of the layout gate (P18-T10) is registered only in a build
+# that asks for it, and this is that build: the tag adds a derived catalog, so
+# the journeys can drive the pages with elongated, accented text while the
+# delivered binary keeps the locale out of its allowlist (proved by
+# `go test ./internal/i18n/...`, which runs without the tag in `make verify`).
+PSEUDO_LOCALE="qps-Ploc"
+
+log "building the server with the pseudo-locale, the seed and the database tooling (run $RUN_ID)"
+(cd "$ROOT" && go build -tags pseudolocale -o "$BIN_DIR/arena" ./cmd/arena)
 (cd "$ROOT" && go build -o "$BIN_DIR/e2e-seed" ./tools/e2e/seed)
 (cd "$ROOT" && go build -o "$BIN_DIR/e2e-database" ./tools/e2e/database)
 
@@ -172,6 +179,17 @@ if [ "$ready" -ne 1 ]; then
 	fail "the server did not become ready at $BASE_URL/health/ready within 30s"
 fi
 
+# The tagged build must really serve the pseudo-locale: if it did not, every
+# assertion of the layout gate would compare the default locale against itself
+# and the run would be green for the wrong reason.
+pseudo_page="$(curl --silent --max-time 5 -H "Accept-Language: $PSEUDO_LOCALE" "$BASE_URL/login")"
+case "$pseudo_page" in
+*"⟦"*) ;;
+*)
+	fail "the build with the pseudolocale tag did not serve the pseudo-locale at /login: the layout gate cannot run"
+	;;
+esac
+
 cd "$HARNESS_DIR"
 
 if [ ! -d node_modules ]; then
@@ -187,6 +205,7 @@ npx playwright install chromium
 
 log "running the journeys"
 export ARENA_E2E_BASE_URL="$BASE_URL"
+export ARENA_E2E_PSEUDO_LOCALE="$PSEUDO_LOCALE"
 export ARENA_EMAIL_SINK_DIR="$SINK_DIR"
 export ARENA_E2E_RUN_ID="$RUN_ID"
 export ARENA_E2E_ARENA_SLUG="$ARENA_SLUG"

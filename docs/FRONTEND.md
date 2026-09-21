@@ -133,6 +133,20 @@ Formatação implícita (`toLocaleString()` e companhia, sem argumentos) é proi
 
 Testes: `web/tests/i18n` (os dois locales, plural zero/one/other, BRL/USD/JPY/BHD, instante e fuso com transição de DST, lista, relative time, chave ausente, placeholder malicioso, troca de locale sem reload, separação entre páginas) e `web/tests/i18n/types.test.ts`, que usa `@ts-expect-error` para provar que as declarações geradas continuam literais — se uma delas deixar de ser erro, o `tsc` reprova a expectativa não usada.
 
+### 10.2 Pseudo-locale, direção e o gate de texto
+
+Os documentos que uma pessoa lê são renderizados pelo servidor, então é no lado do servidor que a resiliência do layout e a ausência de texto fora do catálogo têm de ser provadas — e é isso que P18-T10 acrescenta em três peças.
+
+**Pseudo-locale derivado, somente em build que o pede.** `internal/i18n/pseudo.go` deriva um catálogo do locale default: cada mensagem sai entre `⟦ ⟧`, com as letras acentuadas e o texto maior (a derivação é proporcional à mensagem inteira, placeholders incluídos, e os placeholders são copiados caractere a caractere — renomear `{max}` para `{máx}` quebraria a única build que o renderiza). O catálogo só é **registrado** com a tag de build `pseudolocale` (`internal/i18n/pseudo_enabled.go`): o binário entregue não carrega o locale, porque não o compila, e `internal/i18n/pseudo_disabled_test.go` prova a ausência no build padrão enquanto `pseudo_enabled_test.go` prova o registro no build com a tag. A derivação é pura e determinística, e o teste unitário do catálogo cobre todas as mensagens — uma tradução nova entra no gate no mesmo commit em que entra em `locales/`.
+
+**Direção do documento.** Toda tag `<html>` declara `lang` e `dir`, e o `dir` é calculado da mesma expressão que o `lang` — `dir="{{dir .Lang}}"` —, então os dois não podem discordar. `dir` é uma **função de template** (`websurface.Funcs`), não um campo de dados: um campo a mais é um campo a menos em alguma página nova. `internal/i18n.Direction` decide pela língua (subtag primária) e pelo script explícito quando existe (`ar`, `he`, `fa`, `az-Arab`), e o default é `ltr`: uma tag desconhecida nunca vira um layout da direita para a esquerda.
+
+**O gate.** `tools/i18naudit` (`make audit-i18n`, dentro de `make verify`) varre a árvore entregue e falha fechado em três regras: prosa em nó de texto fora do catálogo; `<html>` com `lang` literal, sem `dir` ou com `dir` derivado de outro campo; e propriedade **física** em folha entregue (`margin-left`, `left:`, `text-align: right`) em vez da lógica (`margin-inline-start`, `inset-inline-start`, `text-align: start`). O scanner lê o código-fonte, não o build: layout e texto são propriedades da árvore que vai para produção. Ele nunca reescreve nada, e a correção é sempre do autor, no commit que introduziu o documento.
+
+O que essa peça encontrou e corrigiu: as cinco páginas de destino dos links transacionais (`internal/identity/adapters/http`) eram fontes portuguesas hardcoded com `lang="pt-BR"` fixo — uma página que uma pessoa abre, num idioma que ninguém escolheu e que nenhum catálogo conhecia. Hoje são um documento e a seção `auth.landing.*` do catálogo, com a mesma regra de fallback das outras superfícies.
+
+**No navegador.** `tools/e2e/specs/localization.spec.js` dirige as páginas com `Accept-Language: qps-Ploc` (o harness compila o binário com a tag e falha de imediato se ele não servir o pseudo-locale) e verifica quatro propriedades por documento: o locale chegou (`lang` e os marcadores), a direção está declarada, nada transborda (ninguém passa da viewport e o documento não rola para o lado, em 1280px e em 360px) e a estrutura acessível continua de pé (toda referência de `label`/`aria-*` resolve, todo controle tem nome acessível). Uma execução de controle no locale default prova que os marcadores significam o catálogo pseudo, e não um colchete qualquer.
+
 ## 11. Orçamentos iniciais
 
 Orçamentos são guardrails a validar:

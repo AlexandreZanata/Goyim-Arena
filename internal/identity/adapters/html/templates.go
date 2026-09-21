@@ -31,6 +31,7 @@ import (
 	"strings"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/websurface"
 )
 
 // Logical names of the assets the pages load, as produced by cmd/assetgen
@@ -173,7 +174,7 @@ func NewTemplates(manifest assets.Manifest) (*Templates, error) {
 		resolved[name] = url
 	}
 
-	set, err := template.New("auth").Funcs(manifest.TemplateFuncs()).Parse(templateSources)
+	set, err := template.New("auth").Funcs(websurface.WithFuncs(manifest.TemplateFuncs())).Parse(templateSources)
 	if err != nil {
 		return nil, err
 	}
@@ -263,7 +264,7 @@ const templateSources = `{{define "document_head"}}<head>
 </ga-field>{{end}}
 
 {{define "form_page"}}<!DOCTYPE html>
-<html lang="{{.Lang}}">
+<html lang="{{.Lang}}" dir="{{dir .Lang}}">
 {{template "document_head" .}}
 <body>
 	{{template "document_nav" .}}
@@ -293,7 +294,7 @@ const templateSources = `{{define "document_head"}}<head>
 </html>{{end}}
 
 {{define "notice_page"}}<!DOCTYPE html>
-<html lang="{{.Lang}}">
+<html lang="{{.Lang}}" dir="{{dir .Lang}}">
 {{template "document_head" .}}
 <body>
 	{{template "document_nav" .}}

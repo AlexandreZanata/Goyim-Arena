@@ -195,7 +195,7 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 		if isHTML {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
-			_ = h.templates.RenderVerifyError(w)
+			_ = h.templates.RenderVerifyError(w, r)
 			return
 		}
 		_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindValidation, "invalid_token", "verification token is required"))
@@ -207,7 +207,7 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 			if isHTML {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusBadRequest)
-				_ = h.templates.RenderVerifyError(w)
+				_ = h.templates.RenderVerifyError(w, r)
 				return
 			}
 			_ = httperror.WriteProblem(w, r, apperr.New(apperr.KindValidation, "invalid_token", "token is invalid or expired").WithCause(err))
@@ -218,7 +218,7 @@ func (h *Handler) Verify(w http.ResponseWriter, r *http.Request) {
 	if isHTML {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_ = h.templates.RenderVerifySuccess(w)
+		_ = h.templates.RenderVerifySuccess(w, r)
 		return
 	}
 
@@ -346,7 +346,7 @@ func (h *Handler) ViewPasswordReset(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
-	_ = h.templates.RenderPasswordResetForm(w, PasswordResetFormData{
+	_ = h.templates.RenderPasswordResetForm(w, r, PasswordResetFormData{
 		Token:     token,
 		CSRFToken: csrfToken,
 	})
@@ -365,7 +365,7 @@ func (h *Handler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusBadRequest)
-			_ = h.templates.RenderPasswordResetError(w)
+			_ = h.templates.RenderPasswordResetError(w, r)
 			return
 		}
 		token = r.PostFormValue("token")
@@ -388,7 +388,7 @@ func (h *Handler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 			if isHTML {
 				w.Header().Set("Content-Type", "text/html; charset=utf-8")
 				w.WriteHeader(http.StatusBadRequest)
-				_ = h.templates.RenderPasswordResetError(w)
+				_ = h.templates.RenderPasswordResetError(w, r)
 				return
 			}
 			var appErr *apperr.Error
@@ -404,7 +404,7 @@ func (h *Handler) ConfirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	if isHTML {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_ = h.templates.RenderPasswordResetSuccess(w)
+		_ = h.templates.RenderPasswordResetSuccess(w, r)
 		return
 	}
 
