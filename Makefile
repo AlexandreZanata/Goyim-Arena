@@ -249,6 +249,20 @@ backup-verify:
 	ARENA_IMAGE=$(IMAGE) deploy/backup/verify.sh
 	@echo "backup-verify: ok"
 
+# disaster-drill é o exercício de desastre e carga da release (P20-T05):
+# restaura um backup de verdade num ambiente isolado com os próprios scripts da
+# operação (`deploy/backup/base-backup.sh` e `restore.sh`) sobre um PostgreSQL
+# descartável, sobe a aplicação nos dados que voltaram, mede a integridade
+# financeira contra a leitura de antes da perda, mede RPO e RTO, roda o baseline
+# de carga versionado e exercita o provedor de email e o de pagamento
+# indisponíveis. O que ele mediu vira `docs/DISASTER_DRILL.md`, julgado por
+# `drillaudit check` — que recusa um número fora do teto declarado, um limiar não
+# registrado ou um ledger que não voltou igual. Exige daemon Docker, k6,
+# navegador e uma build do frontend, como test-e2e e test-load-smoke.
+disaster-drill:
+	tools/drillaudit/verify.sh
+	@echo "disaster-drill: ok"
+
 # deploy-verify é o exercício do pipeline de deploy e rollback (P19-T07):
 # promove a imagem por digest através de um registry descartável, deixa o
 # pipeline aplicar as migrations, exige que a prontidão e as páginas respondam,
@@ -357,7 +371,7 @@ verify: fmt-check generate-check test-unit test-integration test-race test-migra
 		echo "  - $$gate"; \
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
-	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln; do \
+	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento e auditoria de segurança):"

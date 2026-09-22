@@ -214,6 +214,8 @@ O operador fornece três coisas que não entram no Git: `secrets/backup.key` (06
 
 Medido no exercício: **RTO de 2 s** (perda do primário até um servidor aceitando escrita no alvo) e RPO limitado por `archive_timeout=300`. A meta de 15 minutos continua meta: a verificação em ambiente isolado é manual (`make backup-verify`) e um alerta de atraso ou falha do arquivamento é a P19-T06.
 
+O exercício de desastre e carga do lançamento (`make disaster-drill`, P20-T05) mede a mesma recuperação com o dinheiro no meio: o dataset é criado pelos casos de uso do produto, a leitura financeira é tomada antes da perda e comparada depois da volta (carteira a carteira, digest a digest, agregado a agregado), o alvo não pode trazer as linhas escritas depois dele — inclusive uma conta inteira com INK —, e a aplicação sobe nos dados restaurados para responder as jornadas. Os números que ele mediu, e a prova de que nada foi criado ou perdido, estão em [DISASTER_DRILL.md](DISASTER_DRILL.md), que o próprio exercício escreve e `drillaudit check` julga: um RPO acima do teto do servidor ou da meta, um RTO acima da meta, um limiar de carga sem valor medido ou um provedor exercitado numa direção só reprovam o documento.
+
 Antes do primeiro usuário pagante, continuam pendentes:
 
 - exercício de restauração em agenda (hoje ele roda sob demanda);

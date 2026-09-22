@@ -44,6 +44,7 @@ Quando houver conflito, a ordem de precedência é:
 - [CI.md](CI.md) — verificação completa de release: gates exigidos, jobs, ações pinadas e orçamento do pipeline.
 - [MIGRATION_AUDIT.md](MIGRATION_AUDIT.md) — evidência do ciclo de vida das migrations, gerada por `tools/migrationaudit` (`make migration-audit`): tempos, dataset, locks observados, o resultado de cada regra e as exceções declaradas.
 - [SECURITY_AUDIT.md](SECURITY_AUDIT.md) — execução da auditoria de segurança do lançamento (P20-T04) por `tools/secaudit` (`make security-audit`): as doze áreas rodadas, as seis fronteiras de confiança revisadas à mão, os achados com dono e aceite e o registro executável que o portão lê.
+- [DISASTER_DRILL.md](DISASTER_DRILL.md) — evidência do exercício de desastre e carga (P20-T05), gerada pelo próprio exercício (`make disaster-drill`) e julgada por `tools/drillaudit`: o backup restaurado num ambiente isolado com os scripts da operação, a comparação do ledger antes e depois, RPO e RTO medidos, o baseline de carga registrado e o que os dois provedores fizeram com os seus jobs/financial rows quando ficaram inalcançáveis.
 - [COMMITS.md](COMMITS.md) — Conventional Commits, scopes e versionamento.
 - [ADRs](adr/README.md) — decisões arquiteturais e suas consequências.
 
