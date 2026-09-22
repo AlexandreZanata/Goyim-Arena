@@ -49,6 +49,7 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clientip"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/observability"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
@@ -104,6 +105,22 @@ type Options struct {
 	// composes its own: correct for a process that serves one journey, and the
 	// reason `arena server` hands the same one to all of them.
 	Security *security.Manager
+	// Analytics is the allowlisted event sink the surfaces record their
+	// product events through. It is composed by ComposeTelemetry; nil means
+	// the surface emits nothing, which is the case of a test that drives the
+	// journey without a process.
+	Analytics observability.EventSink
+	// SentryDSN is the error reporter credential. Empty disables reporting.
+	SentryDSN config.Secret
+	// PostHogAPIKey is the product analytics write key. Empty disables
+	// analytics.
+	PostHogAPIKey config.Secret
+	// PostHogHost overrides the analytics API origin; empty selects the
+	// provider default.
+	PostHogHost string
+	// AnalyticsSampleRate is the deterministic sampling percentage of
+	// analytics, 0..100.
+	AnalyticsSampleRate int
 }
 
 // AccountSurface is the composed browser journey of the account, ready to be
@@ -191,6 +208,7 @@ func ComposeAccount(options Options) (*AccountSurface, error) {
 		RateLimit:  throttle,
 		Templates:  templates,
 		RiskSignal: risk,
+		Analytics:  options.Analytics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: account journey: %w", err)

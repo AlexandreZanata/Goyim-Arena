@@ -47,6 +47,11 @@ type Config struct {
 	stripeTimeout     time.Duration
 	resendAPIKey      Secret
 	emailFrom         string
+
+	sentryDSN           Secret
+	posthogAPIKey       Secret
+	posthogHost         string
+	analyticsSampleRate int
 }
 
 // Env is the deployment environment of the process.
@@ -180,6 +185,10 @@ func Load(environ []string) (Config, error) {
 		stripeTimeoutVariable:         true,
 		ResendAPIKeyVariable:          true,
 		EmailFromVariable:             true,
+		SentryDSNVariable:             true,
+		PostHogAPIKeyVariable:         true,
+		PostHogHostVariable:           true,
+		AnalyticsSampleRateVariable:   true,
 	}
 	var validationErrors ValidationErrors
 	for name := range values {
@@ -202,6 +211,8 @@ func Load(environ []string) (Config, error) {
 		dbMaxConnIdleTime: 30 * time.Minute,
 		dbAcquireTimeout:  5 * time.Second,
 		stripeTimeout:     10 * time.Second,
+
+		analyticsSampleRate: DefaultAnalyticsSampleRate,
 	}
 
 	if raw, present := values["ARENA_ENV"]; present {
@@ -417,6 +428,34 @@ func Load(environ []string) (Config, error) {
 		address, problems := parseEmailFrom(raw)
 		if len(problems) == 0 {
 			config.emailFrom = address
+		}
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[SentryDSNVariable]; present {
+		secret, problems := parseSentryDSN(raw)
+		config.sentryDSN = secret
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[PostHogAPIKeyVariable]; present {
+		secret, problems := parsePostHogAPIKey(raw)
+		config.posthogAPIKey = secret
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[PostHogHostVariable]; present {
+		host, problems := parsePostHogHost(raw)
+		if len(problems) == 0 {
+			config.posthogHost = host
+		}
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[AnalyticsSampleRateVariable]; present {
+		rate, problems := parseAnalyticsSampleRate(raw)
+		if len(problems) == 0 {
+			config.analyticsSampleRate = rate
 		}
 		validationErrors = append(validationErrors, problems...)
 	}

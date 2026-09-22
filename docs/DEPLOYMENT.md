@@ -199,6 +199,42 @@ Meta inicial: RPO de até 15 minutos e RTO de até 4 horas. A meta só pode ser 
 - alertas para disco, falha de backup, erros 5xx, fila atrasada e webhook falhando;
 - PostHog separado de logs operacionais e sem PII.
 
+### Telemetria no processo (P19-T05)
+
+Sentry e PostHog são **opcionais** e configurados por variável; sem elas o
+processo serve o produto e não registra nada. Sentry e PostHog são alcançados
+pelas suas APIs HTTP atrás de ports (`internal/platform/observability`), sem
+SDK de fornecedor no processo.
+
+| Variável | Papel |
+|---|---|
+| `ARENA_SENTRY_DSN` | credencial do repórter de erros (segredo; formato `https://<key>@<host>/<project>`) |
+| `ARENA_POSTHOG_API_KEY` | chave de escrita do projeto de analytics (segredo; prefixo `phc_`) |
+| `ARENA_POSTHOG_HOST` | origem da API de analytics (padrão: nuvem US; `https`, exceto loopback local) |
+| `ARENA_ANALYTICS_SAMPLE_RATE` | percentual determinístico de amostragem de analytics, 0–100 (padrão 100) |
+
+Regras que o adapter garante, por construção e não por lista de bloqueio: os
+eventos são **allowlisted** em código (nome e propriedades admitidas), o que
+trafega é apenas um locale validado e um inteiro limitado, e o relatório de
+erro carrega só a mensagem e tags operacionais — **nunca** email, corpo de
+mensagem, token ou payload de provedor (ex.: Stripe). Analytics **nunca
+bloqueia** uma requisição: cada sink tem fila limitada e uma fila cheia
+descarta e conta o descarte.
+
+As métricas **nunca são enviadas a um provedor**: o registry é renderizado em
+texto Prometheus e servido apenas no **listener administrativo**
+(`ARENA_ADMIN_ADDR`), junto de `/debug/pprof/`:
+
+- `GET /metrics` — RED dos requests (`http_requests_total`,
+  `http_request_duration_seconds`, `http_requests_in_flight`) e USE do pool
+  (`db_pool_*`) e da fila (`jobs_queue`, `jobs_lag_seconds`,
+  `jobs_oldest_dead_seconds`);
+- a leitura da fila é **uma query por scrape** (cacheada), limitada no tempo, e
+  uma leitura recusada é contada em `jobs_health_scrape_errors_total`.
+
+O listener administrativo vive só em loopback e não é montado no endereço
+público; sem `ARENA_ADMIN_ADDR` não há `/metrics` exposto.
+
 Adicionar uma stack própria de métricas só quando a solução do provedor deixar lacuna mensurável.
 
 ## 9. Cache

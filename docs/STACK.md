@@ -46,8 +46,9 @@ Goyim Arena será uma aplicação API-first com backend Go e frontend baseado so
 - **Email:** Resend.
 - **Storage de backup:** armazenamento compatível com S3 (o exercício usa MinIO fixado por digest); guarda o WAL e os base backups selados da P19-T04.
 - **Storage futuro:** Cloudflare R2 quando arquivos forem necessários.
-- **Analytics:** PostHog com eventos mínimos e sem conteúdo privado.
-- **Erros:** Sentry, isolado por adapter.
+- **Analytics:** PostHog, alcançado por HTTP atrás de um port, com eventos **allowlisted** (allowlist em código, revisada) e sem conteúdo privado: só viajam um locale validado e um inteiro limitado.
+- **Erros:** Sentry, alcançado por HTTP atrás de um port, isolado por adapter; nenhum payload de requisição viaja com o relatório.
+- **Métricas:** registry RED (HTTP) e USE (pool, fila) no processo, exposto em texto Prometheus só no listener administrativo.
 - **Logs:** `log/slog` em JSON.
 - **Deploy:** Docker Compose em Debian estável ou Ubuntu LTS.
 - **CI/CD:** GitHub Actions.
@@ -123,7 +124,7 @@ O backend não é “100% sem acoplamento”, pois todo software possui dependê
 - `adapters/out/postgres`: pgx, sqlc, queries e locks.
 - `adapters/out/stripe`: pagamento e webhooks.
 - `adapters/out/email`: Resend.
-- `adapters/out/observability`: Sentry, PostHog e métricas.
+- `platform/observability`: ports (`ErrorReporter`, `EventSink`) e os adapters de Sentry e PostHog sobre `net/http`, além do registry de métricas (RED/USE) e do allowlist de eventos analytics. Os provedores são chamados por HTTP (`net/http`), sem SDK, e os tipos deles nunca saem do adapter.
 - `bootstrap`: composição das implementações; nenhuma regra de negócio.
 
 Interfaces pertencem ao consumidor, não ao adapter. Evitar repositories genéricos; cada port expressa intenção do caso de uso. HTTP, worker, CLI e futuros clientes reutilizam os mesmos casos de uso.

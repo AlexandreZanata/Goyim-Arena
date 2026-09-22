@@ -63,6 +63,18 @@ func runWorker(args []string, stdout *os.File) error {
 	}
 	defer pool.Close()
 
+	// The worker is a telemetry producer too: it reports handler failures to
+	// the error reporter and exposes its own metrics, so a dead queue is
+	// visible in the process that drains it (P19-T05).
+	telemetry, err := startTelemetry(cfg, logger, clock)
+	if err != nil {
+		return err
+	}
+	defer telemetry.Close()
+	if err := registerDatabaseMetrics(telemetry, pool, clock); err != nil {
+		return err
+	}
+
 	repo := jobsrepo.NewRepository(pool.Pool())
 	workerCfg := jobsapp.DefaultWorkerConfig()
 
@@ -137,23 +149,34 @@ func runWorker(args []string, stdout *os.File) error {
 		return err
 	}
 
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if adminAddr := cfg.AdminAddr(); adminAddr != "" {
+		if err := startAdminListener(ctx, adminAddr, adminHandler(telemetry.MetricsHandler()), logger); err != nil {
+			return err
+		}
+	}
+
 	worker, err := jobsapp.NewWorker(jobsapp.WorkerDeps{
 		Lease:    lease,
 		Complete: complete,
 		Fail:     fail,
 		Recover:  recoverLeases,
-		Registry: registry,
-		Clock:    clock,
-		Random:   clockseed.NewRandom(),
-		Logger:   logger,
-		Config:   workerCfg,
+		Registry: &observedRegistry{
+			inner:    registry,
+			metrics:  telemetry.Metrics,
+			reporter: telemetry.Errors,
+			clock:    clock,
+		},
+		Clock:  clock,
+		Random: clockseed.NewRandom(),
+		Logger: logger,
+		Config: workerCfg,
 	})
 	if err != nil {
 		return err
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	logger.Info("job worker: started",
 		slog.Int("concurrency", workerCfg.Concurrency),
