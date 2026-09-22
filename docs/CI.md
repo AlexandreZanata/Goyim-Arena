@@ -86,10 +86,12 @@ Cada job é uma linha de shell, então o pipeline é reproduzível na máquina:
 
 - Go, Node e os `make` de `foundation`: instalar `sqlc@v1.29.0` e rodar `make verify`, com `ARENA_DATABASE_URL` apontando para um PostgreSQL alcançável;
 - as jornadas de browser: `npm ci --prefix tools/e2e`, `npx --prefix tools/e2e playwright install-deps chromium` e `make test-e2e`;
-- os gates que exigem daemon Docker: `make image-verify`, `make caddy-verify`, `make compose-verify`, `make backup-verify`, `make deploy-verify` (todos instalam o que precisam de Go);
+- os gates que exigem daemon Docker: `make image-verify`, `make caddy-verify`, `make compose-verify`, `make backup-verify`, `make deploy-verify`, `make migration-audit` (todos instalam o que precisam de Go);
 - os scans: `make vuln` exige `govulncheck@v1.8.0`, `make image-scan` exige `trivy`, e ambos falham com mensagem explícita quando a ferramenta não está instalada.
 
 `make verify` é a mesma coisa que o job `foundation` roda: o CI não tem um caminho de verificação próprio.
+
+`make migration-audit` (P20-T03) é uma exceção declarada: sobe um PostgreSQL 18.4 descartável fixado por digest, exercita o ciclo de vida das migrations com o runner que a aplicação usa e recusa com base no que mediu. Ele **não** está ligado a nenhum job; hoje é um gate que o operador roda, e a ligação a um job — com o ajuste correspondente em `tools/ciaudit`, que é quem exige que todo gate do plano esteja em algum job — pertence à verificação reproduzível da fase. A evidência que ele produz é [MIGRATION_AUDIT.md](MIGRATION_AUDIT.md).
 
 ## 8. Regra de manutenção
 

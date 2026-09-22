@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -171,6 +171,21 @@ release-gate:
 image-build:
 	docker build --file Dockerfile --tag $(IMAGE) .
 	@echo "image-build: ok"
+
+# migration-audit é o gate do ciclo de vida das migrations (P20-T03): exercita
+# um PostgreSQL 18.4 descartável com o próprio runner — banco vazio, um degrau
+# que aplica cada migration com um leitor ativo segurando ACCESS SHARE,
+# snapshot de cada versão copiado e rolado para o head, e uma migration que
+# falha pela metade com a recuperação em seguida. Depois disso julga o catálogo
+# que a história produziu: grants por classe (append-only, só leitura,
+# apagável), a role de runtime, sequences, índices, chaves estrangeiras,
+# cascatas e a correspondência entre as tabelas declaradas e as do catálogo.
+# Ele não entra em `verify` porque exige um daemon Docker — o mesmo motivo de
+# image-verify —, e a evidência versionada que ele produz é
+# `docs/MIGRATION_AUDIT.md`.
+migration-audit:
+	ARENA_MIGRATION_AUDIT_REPORT=docs/MIGRATION_AUDIT.md tools/migrationaudit/verify.sh
+	@echo "migration-audit: ok"
 
 # image-verify é o gate da imagem (P19-T01): constrói, sobe o container com
 # filesystem somente leitura contra um PostgreSQL descartável, prova que ele
@@ -327,7 +342,7 @@ verify: fmt-check generate-check test-unit test-integration test-race test-migra
 		echo "  - $$gate"; \
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
-	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln; do \
+	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento):"
