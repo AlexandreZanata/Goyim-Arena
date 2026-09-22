@@ -104,9 +104,13 @@ docker compose -f compose.production.yaml logs --since 15m caddy | grep -i -E ' 
 ```
 
 **Mitigação.** Se o pico coincide com um deploy, **reverta a imagem para o
-digest anterior** (P19-T07) — é reversível e não mexe em dados. Se a rota
-quebrada é de leitura, ela pode ser desabilitada no edge (Caddy) enquanto a
-causa é corrigida.
+digest anterior** com `./deploy/deploy.sh rollback --env-file .env.production
+--health-url https://<site>` (P19-T07): ele promove o digest que o arquivo de
+estado registra como anterior e só considera a reversão feita depois de a
+prontidão responder 200. É reversível e não mexe em dados — e o schema fica
+onde o passo *expand* o deixou, porque o runner não tem caminho de volta
+(docs/DEPLOYMENT.md §5). Se a rota quebrada é de leitura, ela pode ser
+desabilitada no edge (Caddy) enquanto a causa é corrigida.
 
 **Correção.** Reler `http_requests_total` por rota e status para saber se o
 erro é de uma rota ou de toda a superfície; se for *panic*, o Sentry aponta o

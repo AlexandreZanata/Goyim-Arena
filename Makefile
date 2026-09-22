@@ -20,7 +20,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -156,6 +156,18 @@ backup-verify:
 	ARENA_IMAGE=$(IMAGE) deploy/backup/verify.sh
 	@echo "backup-verify: ok"
 
+# deploy-verify é o exercício do pipeline de deploy e rollback (P19-T07):
+# promove a imagem por digest através de um registry descartável, deixa o
+# pipeline aplicar as migrations, exige que a prontidão e as páginas respondam,
+# recusa uma tag, recusa um documento que roda outro artefato, recusa subir sem
+# banco, e depois promove releases que *não* ficam prontas — uma que nunca
+# responde à prontidão, outra que responde e perdeu a página — afirmando que
+# nenhuma delas é promovida, que a versão anterior volta a servir e que o
+# arquivo de estado não avança. Exige daemon Docker, como image-verify.
+deploy-verify: image-build
+	ARENA_IMAGE=$(IMAGE) tools/deployaudit/verify.sh
+	@echo "deploy-verify: ok"
+
 # image-scan procura vulnerabilidades conhecidas na imagem construída. Ele exige
 # um scanner instalado fora do repositório (o padrão é trivy), exatamente como
 # test-load-smoke exige k6; sem ele o alvo falha explicitamente e nunca retorna
@@ -242,7 +254,7 @@ verify: fmt-check generate-check test-unit test-integration test-contract test-s
 		echo "  - $$gate"; \
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
-	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify backup-verify; do \
+	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."
