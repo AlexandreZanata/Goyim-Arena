@@ -437,6 +437,78 @@ func TestArenaDocumentUsesContentLanguage(t *testing.T) {
 	}
 }
 
+// TestCacheableDocumentDoesNotVaryByRequestedLocale is the cache half of the
+// internationalization audit (P20-T09).
+//
+// I18N_STANDARD.md §4 requires a public cache to vary only by a controlled
+// locale dimension and never by the raw `Accept-Language` header. The only
+// public surface of this adapter is the Arena document, and it is rendered in
+// its *content* language: the header cannot reach it. That is a claim about
+// bytes, so it is asserted in bytes — two requests for the same Arena, one
+// asking for each interface locale, must produce the same body, the same
+// validator and the same cache policy.
+//
+// The control is the other half, and it is what keeps the assertion from being
+// a statement that the page never changes: the same request against an Arena
+// whose content language is `en-US` renders different bytes, so the
+// representation is a function of what the content is written in — which is
+// exactly why `Vary: Accept-Encoding` alone is the right policy here, and why a
+// surface that did negotiate the interface locale would have to declare a
+// locale dimension of its own before it could be cached.
+func TestCacheableDocumentDoesNotVaryByRequestedLocale(t *testing.T) {
+	harness := setupSEOHarness(t)
+	portuguese := harness.publishArena(t,
+		"A AGI existirá até 2040",
+		"Debate sobre prazos e evidências da inteligência geral.",
+		"pt-BR", "technology")
+	english := harness.publishArena(t,
+		"AGI will exist by 2040",
+		"A debate about the deadlines and the evidence of general intelligence.",
+		"en-US", "technology")
+
+	request := func(path, acceptLanguage string) *httptest.ResponseRecorder {
+		recorded := httptest.NewRequest(http.MethodGet, path, nil)
+		recorded.Header.Set("Accept-Language", acceptLanguage)
+		recorder := httptest.NewRecorder()
+		harness.mux.ServeHTTP(recorder, recorded)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("GET %s with Accept-Language %s: status = %d (body: %s)",
+				path, acceptLanguage, recorder.Code, recorder.Body.String())
+		}
+		return recorder
+	}
+
+	document := "/d/" + portuguese.Slug().String()
+	defaultLocale := request(document, "pt-BR")
+	otherLocale := request(document, "en-US")
+
+	if defaultLocale.Body.String() != otherLocale.Body.String() {
+		t.Fatalf("the cacheable document changed with Accept-Language: a shared cache would answer pt-BR to an en-US reader")
+	}
+	if defaultLocale.Header().Get("ETag") != otherLocale.Header().Get("ETag") {
+		t.Fatalf("ETag = %q and %q: the validator of a cacheable document may not depend on the header it does not vary by",
+			defaultLocale.Header().Get("ETag"), otherLocale.Header().Get("ETag"))
+	}
+	for _, recorder := range []*httptest.ResponseRecorder{defaultLocale, otherLocale} {
+		vary := recorder.Header().Get("Vary")
+		if !strings.Contains(vary, "Accept-Encoding") {
+			t.Fatalf("Vary = %q, want Accept-Encoding", vary)
+		}
+		if strings.Contains(vary, "Accept-Language") {
+			t.Fatalf("Vary = %q: the raw Accept-Language header must never select a cached representation", vary)
+		}
+	}
+
+	// The control: the document does change with the language of its content.
+	otherContent := request("/d/"+english.Slug().String(), "pt-BR")
+	if otherContent.Body.String() == defaultLocale.Body.String() {
+		t.Fatalf("two Arenas of different content languages rendered the same document: the equality above would prove nothing")
+	}
+	if !strings.Contains(otherContent.Body.String(), `lang="en-US"`) {
+		t.Fatalf("the en-US Arena does not declare its content language")
+	}
+}
+
 func TestArenaDocumentEscapesMaliciousContent(t *testing.T) {
 	harness := setupSEOHarness(t)
 	statement := `"><script>alert(1)</script><img src=x onerror=alert(2)>`

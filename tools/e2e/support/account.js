@@ -12,8 +12,13 @@
  * needed: the forms have real actions, so a click submits them with or without
  * a script, and the browser-side guard only decides the busy state of a
  * submission that is already on its way.
+ *
+ * Every page the journey reaches is held to the language the context asked for
+ * (`expectInterfaceLanguage`), so the same journey is a different assertion in
+ * each interface locale and not the same run twice.
  */
 import { expect } from "@playwright/test";
+import { expectInterfaceLanguage } from "./locales.js";
 
 /** The session cookie the security boundary issues (see internal/platform/security). */
 export const SESSION_COOKIE = "arena_session";
@@ -57,8 +62,10 @@ async function fillForm(page, fields) {
  */
 export async function register(page, { email, password }) {
   await page.goto("/register");
+  await expectInterfaceLanguage(page, "the registration form");
   await fillForm(page, { email, password });
   await expect(noticeAction(page, "/verify")).toBeVisible();
+  await expectInterfaceLanguage(page, "the registration notice");
 }
 
 /**
@@ -68,8 +75,10 @@ export async function register(page, { email, password }) {
  */
 export async function confirm(page, code) {
   await page.goto("/verify");
+  await expectInterfaceLanguage(page, "the confirmation form");
   await fillForm(page, { token: code });
   await expect(noticeAction(page, "/login")).toBeVisible();
+  await expectInterfaceLanguage(page, "the confirmation notice");
 }
 
 /**
@@ -81,6 +90,7 @@ export async function confirm(page, code) {
  */
 export async function signIn(page, { email, password }) {
   await page.goto("/login");
+  await expectInterfaceLanguage(page, "the sign-in form");
   await fillForm(page, { email, password });
   await page.waitForURL("/");
   await expect.poll(() => sessionCookie(page)).not.toBeNull();
@@ -89,8 +99,12 @@ export async function signIn(page, { email, password }) {
 /** signOut ends the session through the confirmation form of `/logout`. */
 export async function signOut(page) {
   await page.goto("/logout");
+  await expectInterfaceLanguage(page, "the sign-out form");
   await Promise.all([page.waitForURL(/\/login$/), page.locator(SUBMIT).click()]);
   await expect.poll(() => sessionCookie(page)).toBeNull();
+  // The page the sign-out landed on is the one a signed-out person starts from
+  // again, so it is asserted too: it is a page of the journey, not a redirect.
+  await expectInterfaceLanguage(page, "the page the sign-out landed on");
 }
 
 /** sessionCookie returns the session cookie the context is holding, if any. */

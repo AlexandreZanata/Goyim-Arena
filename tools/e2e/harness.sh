@@ -100,6 +100,11 @@ else
 fi
 BASE_URL="http://127.0.0.1:$PORT"
 
+# Every journey is driven once per interface locale the product ships
+# (`tools/e2e/support/locales.js`), and the pilot locale of the runner is the
+# default one: the per-journey contexts ask for their own, so the value here
+# only decides the pages the runner itself opens.
+#
 # The pseudo-locale of the layout gate (P18-T10) is registered only in a build
 # that asks for it, and this is that build: the tag adds a derived catalog, so
 # the journeys can drive the pages with elongated, accented text while the
@@ -129,6 +134,21 @@ PARTNER_EMAIL="e2e-partner-${RUN_ID}@example.test"
 CREATOR_EMAIL="e2e-creator-${RUN_ID}@example.test"
 PASSWORD="correct horse battery staple"
 ARENA_SLUG="e2e-arena-${RUN_ID}"
+# The interface locales the suites iterate over, read from the module that
+# declares them (support/locales.js) instead of repeated here: a harness that
+# seeded a different list than the journeys drive would leave a journey asking
+# for an Arena nobody published. The extraction is fail-closed.
+JOURNEY_LOCALES="$(grep -o 'JOURNEY_LOCALES = \[[^]]*\]' "$HARNESS_DIR/support/locales.js" |
+	grep -o '"[^"]*"' | tr -d '"' | tr '\n' ' ')"
+if [ -z "$JOURNEY_LOCALES" ]; then
+	fail "tools/e2e/support/locales.js declares no JOURNEY_LOCALES: the harness cannot know which Arenas to publish"
+fi
+# The language the arena of the run is seeded in, and therefore the language its
+# document declares whatever interface locale a journey asks for (I18N_STANDARD
+# §7). It is the same fact `tools/e2e/seed` declares, and `tools/i18nrelease`
+# reads both and refuses the run when the two disagree: a journey comparing a
+# document against a copy of the fact that drifted is a journey proving nothing.
+CONTENT_LANGUAGE="pt-BR"
 
 # scrubbed runs one command with an environment this script composed: the
 # configuration of the process and the seed is strict about unknown ARENA_*
@@ -143,13 +163,31 @@ scrubbed() {
 		"$@"
 }
 
-log "seeding two confirmed accounts with INK and one published Arena"
+log "seeding two confirmed accounts with INK and one published Arena per interface locale"
 scrubbed ARENA_ENV=test ARENA_DATABASE_URL="$DATABASE_DSN" "$BIN_DIR/e2e-seed" account \
 	--email "$PARTICIPANT_EMAIL" --password "$PASSWORD" --ink 1000 >/dev/null
 scrubbed ARENA_ENV=test ARENA_DATABASE_URL="$DATABASE_DSN" "$BIN_DIR/e2e-seed" account \
 	--email "$PARTNER_EMAIL" --password "$PASSWORD" --ink 1000 >/dev/null
-scrubbed ARENA_ENV=test ARENA_DATABASE_URL="$DATABASE_DSN" "$BIN_DIR/e2e-seed" arena \
-	--slug "$ARENA_SLUG" --creator-email "$CREATOR_EMAIL" >/dev/null
+
+# One Arena per locale (P20-T09): a position is immutable and an argument is
+# published once, so the second run of a journey against the Arena the first run
+# used would start from a state that run left behind. The base slug keeps naming
+# the Arena of the first locale, which is what the layout gate drives.
+ARENAS_JSON="{"
+for JOURNEY_LOCALE in $JOURNEY_LOCALES; do
+	# The slug of an Arena is lower case by domain rule; the locale it belongs to
+	# keeps its canonical form as the key of the map, because that is the value a
+	# context asks for.
+	ARENA_FOR_LOCALE="$ARENA_SLUG-$(printf '%s' "$JOURNEY_LOCALE" | tr 'A-Z' 'a-z')"
+	scrubbed ARENA_ENV=test ARENA_DATABASE_URL="$DATABASE_DSN" "$BIN_DIR/e2e-seed" arena \
+		--slug "$ARENA_FOR_LOCALE" --creator-email "$CREATOR_EMAIL" >/dev/null
+	if [ "$ARENAS_JSON" != "{" ]; then
+		ARENAS_JSON="$ARENAS_JSON,"
+	fi
+	ARENAS_JSON="$ARENAS_JSON\"$JOURNEY_LOCALE\":\"$ARENA_FOR_LOCALE\""
+done
+ARENAS_JSON="$ARENAS_JSON}"
+ARENA_SLUG="$ARENA_SLUG-$(printf '%s' "$JOURNEY_LOCALES" | cut -d' ' -f1 | tr 'A-Z' 'a-z')"
 
 log "starting the server on $BASE_URL"
 scrubbed ARENA_ENV=test \
@@ -209,6 +247,8 @@ export ARENA_E2E_PSEUDO_LOCALE="$PSEUDO_LOCALE"
 export ARENA_EMAIL_SINK_DIR="$SINK_DIR"
 export ARENA_E2E_RUN_ID="$RUN_ID"
 export ARENA_E2E_ARENA_SLUG="$ARENA_SLUG"
+export ARENA_E2E_CONTENT_LANGUAGE="$CONTENT_LANGUAGE"
+export ARENA_E2E_ARENAS="$ARENAS_JSON"
 export ARENA_E2E_PARTICIPANT_EMAIL="$PARTICIPANT_EMAIL"
 export ARENA_E2E_PARTICIPANT_PASSWORD="$PASSWORD"
 export ARENA_E2E_PARTNER_EMAIL="$PARTNER_EMAIL"

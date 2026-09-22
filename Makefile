@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -125,6 +125,19 @@ audit-web: build-web
 audit-i18n:
 	$(GO) run ./tools/i18naudit -root .
 	@echo "audit-i18n: ok"
+
+# i18n-audit é a auditoria final de internacionalização (P20-T09): executa as
+# áreas que a fase nomeia — cobertura de catálogo, pseudo-locale, snapshots,
+# emails, Problem Details, SEO, moeda, plural, timezone, cache e texto
+# hardcoded — e depois julga o registro versionado (`docs/I18N_AUDIT.md`: prosa
+# para o leitor, bloco de máquina para a ferramenta) contra a árvore medida
+# agora. O registro não é reescrito por ele: as afirmações são do autor, e o que
+# o portão faz é recusar cada uma que a árvore contradiz. As jornadas de
+# navegador são a única área fora dele, porque exigem Chromium e PostgreSQL
+# descartável: o CI as roda em `make test-e2e` e o registro guarda a execução.
+i18n-audit:
+	tools/i18nrelease/verify.sh
+	@echo "i18n-audit: ok"
 
 # audit-ci valida os workflows entregues (P19-T08): cada gate que a fase exige
 # tem de estar ligado ao CI, toda ação de terceiro fixada por SHA, as permissões
@@ -421,7 +434,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n audit-ci audit-req handoff-check
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req handoff-check
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint; do \
 		echo "  - $$gate"; \
