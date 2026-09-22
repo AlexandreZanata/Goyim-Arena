@@ -81,7 +81,8 @@ Regras que acompanham o cronograma:
 - **retenção legal e contratual:** uma retenção ativa (`app.retention_holds`) nomeia uma classe e um titular, ou a classe inteira, e suspende a ação sobre os registros cobertos; retenções são evidência, nunca são apagadas e a liberação é única e datada;
 - **classes são independentes:** uma retenção na classe `sessions` preserva a linha da sessão, mas não impede a anonimização do IP e do user agent, que pertencem à classe `abuse_signals`;
 - **idempotência:** repetir a execução no mesmo instante resolve o registro já gravado, e executar mais tarde encontra apenas o que ainda está fora da janela;
-- **provas:** `internal/profiles/domain/retention_test.go`, `internal/profiles/application/retention_test.go`, `internal/platform/postgres/retention_schema_test.go` e `internal/profiles/adapters/postgres/retention_test.go` cobrem limites exatos, retenção legal simulada, idempotência e contagens; qualquer mudança de janela ou ação é uma mudança de política e exige revisão jurídica registrada.
+- **provas:** `internal/profiles/domain/retention_test.go`, `internal/profiles/application/retention_test.go`, `internal/platform/postgres/retention_schema_test.go` e `internal/profiles/adapters/postgres/retention_test.go` cobrem limites exatos, retenção legal simulada, idempotência e contagens; qualquer mudança de janela ou ação é uma mudança de política e exige revisão jurídica registrada;
+- **ratificação:** as janelas acima não são apenas a implementação atual — foram ratificadas pelo proprietário como política em vigor em [GOVERNANCE.md](GOVERNANCE.md) (`retention-policy`), e mudar uma delas é decisão nova registrada lá.
 
 ## 6. Exportações
 
@@ -107,21 +108,23 @@ Eventos devem usar identificadores pseudônimos e propriedades mínimas. Gravaç
 
 ## 8. Internacionalização e fornecedores
 
-Antes de operar fora do Brasil, mapear onde dados são processados, mecanismos de transferência internacional e responsabilidades de cada fornecedor. Publicar lista de subprocessadores e avisar mudanças relevantes.
+Os mercados de lançamento estão **decididos**: Brasil **e** internacional desde o beta, em português do Brasil e inglês dos Estados Unidos ([GOVERNANCE.md](GOVERNANCE.md), `launch-markets`). Como o beta já atende fora do Brasil, mapear onde os dados são processados, os mecanismos de transferência internacional e as responsabilidades de cada fornecedor deixa de ser pré-requisito apenas de operar no exterior e passa a ser pré-requisito do **próprio beta**, junto da publicação da lista de subprocessadores e do aviso de mudanças relevantes.
 
 ## 9. Crianças e adolescentes
 
-A idade mínima e o tratamento de menores são questões bloqueadoras para o beta público. Até revisão jurídica, a recomendação conservadora é não direcionar o serviço a crianças e não criar fluxos que incentivem sua participação.
+A idade mínima é **dezoito anos**, em todos os mercados, sem exceção por mercado e sem fluxo para menores — decisão do proprietário registrada em [GOVERNANCE.md](GOVERNANCE.md) (`age-minimum`). O serviço não direciona a menores, não cria fluxos que incentivem sua participação e não coleta data de nascimento para checá-la: a declaração vive no cadastro e nos termos, e a verificação é responsabilidade de quem os aceita.
 
 ## 10. Checklist antes do beta
 
+Cada item abaixo aponta para a decisão que o governa em [GOVERNANCE.md](GOVERNANCE.md); os que dependem de decisão ainda **não tomada** são bloqueios, e o portão `make release-gate` fica vermelho enquanto existirem.
+
 - inventário de dados e finalidades;
 - base legal por tratamento;
-- política de retenção com o cronograma executável revisado juridicamente;
-- canal para titulares;
-- contratos e subprocessadores;
+- política de retenção com o cronograma executável revisado juridicamente — a política está ratificada (`retention-policy`), a revisão jurídica é **pendência**;
+- canal para titulares: alias de e-mail dedicado, criado e mantido pelo proprietário (`data-subject-channel`) — **pendência** até o alias existir e ser publicado nos dois idiomas;
+- contratos e subprocessadores — **pendência**: a lista precisa ser publicada antes do beta, porque o beta já atende fora do Brasil;
 - resposta a incidentes;
 - procedimento de exclusão e anonimização;
 - aviso de privacidade em pt-BR e en-US;
-- termos de uso e regras de conteúdo;
-- revisão jurídica nos mercados de lançamento.
+- termos de uso e regras de conteúdo — **bloqueio** (`terms-of-use`): falta decidir se o beta público os exige publicados nos dois idiomas, quem os redige e sob que revisão jurídica;
+- revisão jurídica nos mercados de lançamento — os mercados são Brasil e internacional (`launch-markets`).

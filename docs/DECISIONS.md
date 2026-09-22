@@ -99,3 +99,73 @@ Este arquivo registra decisões que alteram comportamento ou incentivos. Cada en
 **Consequência:** auditoria pública não poderá reconstruir votos individuais; controles internos e metodologia pública precisarão sustentar a confiança sem expor participantes.
 
 **Revisar quando:** pesquisa mostrar demanda segura por endosso público opcional. Opt-in, se criado, não pode tornar-se requisito para contagem.
+
+## PD-008 — Idade mínima de dezoito anos
+
+**Data:** 2026-09-22
+
+**Status:** aceita
+
+**Contexto:** a idade mínima e o tratamento de menores estavam entre as questões bloqueadoras do beta público, e a recomendação conservadora anterior admitia exceção por mercado.
+
+**Decisão:** dezoito anos, em todos os mercados, sem exceção por mercado e sem fluxo para menores. O produto não coleta data de nascimento para checar idade: a declaração vive no cadastro e nos termos, e a verificação é responsabilidade de quem os aceita.
+
+**Consequência:** não existe consentimento parental a implementar nem fluxo que incentive a participação de menores; um mercado que exigir tratamento diferente é decisão nova, não ajuste de texto.
+
+**Revisar quando:** um mercado exigir tratamento diferente para menores.
+
+## PD-009 — Licença do código do projeto é AGPL-3.0
+
+**Data:** 2026-09-22
+
+**Status:** aceita
+
+**Contexto:** o repositório não declarava a licença do próprio código, e a política de licenças existente governa apenas as **dependências** — inclusive proibindo copyleft forte no runtime.
+
+**Decisão:** o código do projeto é licenciado em AGPL-3.0, identificador SPDX `AGPL-3.0-only`. A proibição de dependências copyleft fortes continua valendo e não é afetada: são os dois lados de uma mesma política, não uma contradição.
+
+**Consequência:** quem oferecer o serviço pela rede, modificado, precisa publicar as modificações. O produto continua comercial; a contrapartida é que a operação do serviço modificado fica aberta. Falta o arquivo `LICENSE` com o texto canônico, que depende do nome do titular do direito autoral.
+
+**Revisar quando:** houver decisão de relicenciar; a mudança é nova entrada aqui e em `GOVERNANCE.md`.
+
+## PD-010 — Pedidos de titular por alias dedicado
+
+**Data:** 2026-09-22
+
+**Status:** aceita
+
+**Contexto:** os direitos do titular exigem um canal público e rastreável, distinto do canal privado de segurança.
+
+**Decisão:** pedidos de acesso, correção, exclusão e informação sobre tratamento, e o contato de privacidade, chegam por um alias de e-mail dedicado, criado e mantido pelo proprietário. O endereço não é inventado em documento: é publicado quando o alias existir.
+
+**Consequência:** o canal está decidido e ainda não é alcançável; enquanto não existir, o item correspondente do checklist de pré-beta permanece aberto.
+
+**Revisar quando:** o alias existir e for publicado nos dois idiomas, ou se o volume de pedidos exigir outro processo.
+
+## PD-011 — Retenção em vigor ratificada como política
+
+**Data:** 2026-09-22
+
+**Status:** aceita
+
+**Contexto:** as janelas de retenção já rodavam no código, mas como implementação; `PRIVACY.md` §5 exigia revisão jurídica registrada para mudá-las.
+
+**Decisão:** ratificar como política aprovada as janelas em vigor: `tokens` e `sessions` 30 dias após o término, `abuse_signals` 7 dias (anonimização), `exports` 24 horas, `referential_logs` e `billing` retidos como evidência sem prazo. Retenção legal ativa continua suspendendo a ação e as classes continuam independentes.
+
+**Consequência:** mudar uma janela ou uma ação deixa de ser ajuste de código e passa a ser mudança de política, com decisão nova registrada. A revisão jurídica do cronograma é pendência do checklist de pré-beta e não altera a política em vigor até produzir uma decisão.
+
+**Revisar quando:** a revisão jurídica concluir, ou quando uma classe nova passar a existir.
+
+## PD-012 — Brasil e internacional desde o beta
+
+**Data:** 2026-09-22
+
+**Status:** aceita
+
+**Contexto:** o README declarava mercados iniciais como intenção, sem decisão do proprietário; a transferência internacional de dados aparecia como pré-requisito apenas de operar fora do Brasil.
+
+**Decisão:** o beta atende Brasil **e** internacional, em português do Brasil e inglês dos Estados Unidos.
+
+**Consequência:** o mapeamento de onde os dados são processados, os mecanismos de transferência internacional e a lista de subprocessadores passam a ser pré-requisito do próprio beta, e não de uma etapa seguinte.
+
+**Revisar quando:** a lista de subprocessadores for publicada, ou se um mercado exigir tratamento próprio.

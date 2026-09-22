@@ -47,6 +47,7 @@ Quando houver conflito, a ordem de precedência é:
 
 ## Aprendizado e governança
 
+- [GOVERNANCE.md](GOVERNANCE.md) — decisões humanas do lançamento: o que está decidido, onde cada decisão é aplicada e o que ainda bloqueia o release (`make release-gate`).
 - [METRICS.md](METRICS.md) — métricas de produto e guardrails.
 - [RISKS_AND_ASSUMPTIONS.md](RISKS_AND_ASSUMPTIONS.md) — riscos, hipóteses e plano de validação.
 - [DECISIONS.md](DECISIONS.md) — log de decisões de produto.

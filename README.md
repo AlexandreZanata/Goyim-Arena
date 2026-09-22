@@ -22,7 +22,7 @@ O projeto está na fase de definição do produto e da arquitetura. Ainda não h
 
 **Nome:** Goyim Arena
 
-**Mercados iniciais:** Brasil e internacional, em português do Brasil e inglês dos Estados Unidos
+**Mercados iniciais:** Brasil e internacional, em português do Brasil e inglês dos Estados Unidos — decisão do titular registrada em [docs/GOVERNANCE.md](docs/GOVERNANCE.md) (`launch-markets`), que também registra o que ainda bloqueia o beta
 
 **Stack aprovada:** TypeScript 7 e CSS nativo no frontend; Go e PostgreSQL no backend; Caddy e Cloudflare na operação
 

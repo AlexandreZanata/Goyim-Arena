@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -136,6 +136,22 @@ audit-i18n:
 audit-ci:
 	$(GO) run ./tools/ciaudit -root .
 	@echo "audit-ci: ok"
+
+# release-gate é o portão das decisões humanas do lançamento (P20-T01): lê o
+# registro versionado (docs/GOVERNANCE.md) e **falha** enquanto qualquer uma das
+# sete decisões da fase estiver em aberto, nomeando o que falta decidir, quem
+# deve decidir e o que a decisão impede. Ele não entra em `verify` de propósito:
+# `verify` é o gate de integração de cada merge, e um merge não é um release —
+# incluir aqui faria toda tarefa da fase ficar vermelha por uma decisão que não é
+# dela. Ele é o que se roda antes de publicar, e é isso que a P20 verifica de
+# ponta a ponta (`docs/RELEASE_CHECKLIST.md`).
+#
+# O modo `-check` julga o documento (esquema, as sete decisões presentes, prosa
+# de acordo com o bloco) sem tratar bloqueio aberto como falha: é o modo dos
+# testes da ferramenta, e nunca um modo de release.
+release-gate:
+	$(GO) run ./tools/governanceaudit -root .
+	@echo "release-gate: ok"
 
 # image-build constrói a imagem de produção a partir do Dockerfile. As bases
 # estão fixadas por digest, então o mesmo commit gera a mesma árvore.
@@ -299,6 +315,10 @@ verify: fmt-check generate-check test-unit test-integration test-race test-migra
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln; do \
+		echo "  - $$gate"; \
+	done
+	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento):"
+	@for gate in release-gate; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."

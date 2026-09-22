@@ -197,3 +197,5 @@ Limites conhecidos, que precisam de decisão antes de escalar ou antes do widget
 ## 12. Reporte de vulnerabilidade
 
 Não publicar vulnerabilidade explorável em issue. Usar o canal privado de segurança do GitHub definido no arquivo `SECURITY.md` da raiz. Detalhes podem ser publicados após correção coordenada.
+
+O canal **oficial do lançamento** e a publicação (ou não) de prazos de resposta são decisão do proprietário ainda **em aberto**: bloqueio `security-channel` de [GOVERNANCE.md](GOVERNANCE.md). Enquanto ele existir, o item “contato privado de segurança disponível” do checklist da §11 não pode ser marcado — o canal privado existe, mas ninguém decidiu que ele é o oficial nem o que ele promete a quem reporta.
