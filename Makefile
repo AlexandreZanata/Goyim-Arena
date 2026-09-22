@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate security-audit test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -165,6 +165,21 @@ audit-req:
 release-gate:
 	$(GO) run ./tools/governanceaudit -root .
 	@echo "release-gate: ok"
+
+# security-audit é o portão da auditoria de segurança (P20-T04): lê o registro
+# versionado (docs/SECURITY_AUDIT.md), resolve cada evidência que ele cita,
+# confere o registro contra o modelo de ameaças (mesmo conjunto, mesma
+# severidade, nenhuma ameaça Crítica respondida só com monitoramento), recusa
+# achado Crítico ou Alto em aberto e aceite sem dono e data, varre a árvore em
+# busca de segredo estrutural e roda as doze execuções que a fase nomeia.
+#
+# Ele não entra em `verify` de propósito, pelo mesmo motivo do release-gate: as
+# execuções incluem `make vuln` e suítes com -race, e um gate de merge não é um
+# release. O modo `-check` julga o registro sem executar nada — é o modo dos
+# testes da ferramenta.
+security-audit:
+	$(GO) run ./tools/secaudit -root .
+	@echo "security-audit: ok"
 
 # image-build constrói a imagem de produção a partir do Dockerfile. As bases
 # estão fixadas por digest, então o mesmo commit gera a mesma árvore.
@@ -345,8 +360,8 @@ verify: fmt-check generate-check test-unit test-integration test-race test-migra
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln; do \
 		echo "  - $$gate"; \
 	done
-	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento):"
-	@for gate in release-gate; do \
+	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento e auditoria de segurança):"
+	@for gate in release-gate security-audit; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."

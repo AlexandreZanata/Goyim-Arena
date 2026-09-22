@@ -43,6 +43,7 @@ Quando houver conflito, a ordem de precedência é:
 - [RUNBOOKS.md](RUNBOOKS.md) — alertas iniciais, thresholds e runbooks de incidente.
 - [CI.md](CI.md) — verificação completa de release: gates exigidos, jobs, ações pinadas e orçamento do pipeline.
 - [MIGRATION_AUDIT.md](MIGRATION_AUDIT.md) — evidência do ciclo de vida das migrations, gerada por `tools/migrationaudit` (`make migration-audit`): tempos, dataset, locks observados, o resultado de cada regra e as exceções declaradas.
+- [SECURITY_AUDIT.md](SECURITY_AUDIT.md) — execução da auditoria de segurança do lançamento (P20-T04) por `tools/secaudit` (`make security-audit`): as doze áreas rodadas, as seis fronteiras de confiança revisadas à mão, os achados com dono e aceite e o registro executável que o portão lê.
 - [COMMITS.md](COMMITS.md) — Conventional Commits, scopes e versionamento.
 - [ADRs](adr/README.md) — decisões arquiteturais e suas consequências.
 

@@ -169,3 +169,23 @@ Este arquivo registra decisões que alteram comportamento ou incentivos. Cada en
 **Consequência:** o mapeamento de onde os dados são processados, os mecanismos de transferência internacional e a lista de subprocessadores passam a ser pré-requisito do próprio beta, e não de uma etapa seguinte.
 
 **Revisar quando:** a lista de subprocessadores for publicada, ou se um mercado exigir tratamento próprio.
+
+## PD-013 — Um achado registrado vale mais do que um modelo editado
+
+**Data:** 2026-09-22 · **Fase:** P20-T04
+
+O modelo de ameaças declara, em `THR-AUTH-01`, que os cookies de sessão carregam o prefixo `__Host-`. O prefixo não existe no código: o cookie é `arena_session`, host-only, e a composição não define `Domain`. A auditoria executou o modelo inteiro e registrou a diferença como achado **SEC-01** (Média), aceito pelo titular com o trabalho seguinte nomeado (`P20-T04A`), em vez de corrigir a prosa do modelo para descrever o que existe ou de implementar o prefixo dentro de uma microtarefa de auditoria. O mesmo vale para **SEC-02**: `THR-ADM-01` nomeia um namespace `/api/v1/admin/*` que o contrato servido não tem — a superfície real é `/api/v1/moderation/*` com capacidades, e a administração de papéis é comando — e o achado fica para a revisão de privacidade e moderação corrigir a descrição.
+
+**Decisão:** uma diferença entre o que o modelo declara e o que o código faz entra em `docs/SECURITY_AUDIT.md` §4 com dono, data e aceite, e o portão passa a recusar se ela desaparecer sem que o trabalho seguinte a feche. **Consequência:** se o desejo for o prefixo ou o namespace como o modelo o descreve, isso é trabalho nomeado, não ajuste de redação — e a fase proíbe reduzir limiar ou criar waiver para obter verde.
+
+**Revisar quando:** `P20-T04A` implementar o prefixo do cookie e a revisão de privacidade corrigir a prosa de `THR-ADM-01`.
+
+## PD-014 — A auditoria de segurança roda na publicação, não no merge
+
+**Data:** 2026-09-22 · **Fase:** P20-T04
+
+`make security-audit` ficou fora de `make verify` deliberadamente. Ele é a soma das doze áreas da fase, e duas delas já estão na esteira como jobs próprios (`make test-security` no `foundation`, `make vuln` no `source-scans`); as outras — sessões, MFA, Stripe, IDOR, cache, CSRF e container — rodam dentro dele, com `-race` onde importa. Colocá-lo em `verify` faria cada merge pagar o custo de um release e confundiria dois portões com respostas diferentes.
+
+**Decisão:** o alvo existe no `Makefile` e é do operador, como o `release-gate` das decisões humanas; o **registro** entra em `verify` pela porta que já existe, porque `TestDeliveredRegisterStands` audita o documento entregue dentro de `go test ./tools/secaudit/...`. **Consequência:** uma evidência citada que deixa de existir quebra o CI no próximo merge que a tocar, e nenhum merge passa a pagar `make vuln` duas vezes.
+
+**Revisar quando:** a verificação reproduzível da fase (P20-T07) decidir se o portão completo vira job.
