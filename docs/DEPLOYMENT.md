@@ -70,7 +70,7 @@ Nunca copiar banco de produção integral para desenvolvimento. Fixtures e dados
 
 ## 5. Pipeline
 
-1. PR executa TypeScript estrito, build ESM, testes Go/browser, contrato, migrations, segurança e build da imagem.
+1. PR executa a verificação completa: formatação, drift dos artefatos gerados, testes unitários, integração PostgreSQL, race selecionado, migrations, contrato OpenAPI, segurança, TypeScript estrito, build e medição do frontend, auditoria de i18n, jornadas de browser, vulnerabilidades das dependências, a imagem de produção e seu scan, ingress, topologia, backup/PITR e deploy/rollback ([CI.md](CI.md)). Um PR em rascunho é **adiado**, não aprovado: a suíte começa quando ele é marcado como pronto, e o merge espera o CI verde.
 2. Merge em `main` produz imagem OCI no GitHub Container Registry.
 3. Release promove uma imagem por digest, não recompila na VPS.
 4. Backup e verificações pré-deploy são executados.
@@ -171,7 +171,7 @@ A release que *não* fica pronta é um **stand-in** (`tools/deployaudit/stub`), 
 
 Medido: `make deploy-verify` exit 0; `go test ./tools/deployaudit/...` cobre o mapeamento modo/caminho do stand-in dentro de `make verify` (um modo desconhecido nunca alega prontidão); e **três falsificações pelo fio**, cada uma reprovando na asserção pretendida e restaurada por `diff` — remover a prova da promoção (“a release que nunca responde à prontidão foi promovida”), remover o passo de smoke (“um release cujas páginas não respondem foi promovida”) e registrar a release que falhou (“o arquivo de estado mudou depois de uma release que não foi promovida”).
 
-Deploy automático em produção continua **desativado**: o que existe é um pipeline que um operador roda à mão, e que só promove depois de a release se provar. Antes de ligar promoção automática continuam pendentes: o CI completo exigindo todos os gates (P19-T08), o bootstrap administrativo auditado (P19-T09), a regra de firewall que recusa a origem fora do Cloudflare (§3.1) e um coletor que leia o listener administrativo de fora do host — hoje `/metrics` só existe em loopback dentro de um contêiner distroless, então o alerta de 5xx de [RUNBOOKS.md](RUNBOOKS.md) não pode depender dele.
+Deploy automático em produção continua **desativado**: o que existe é um pipeline que um operador roda à mão, e que só promove depois de a release se provar. A verificação completa de release passou a existir na P19-T08 ([CI.md](CI.md)): dez jobs, os gates da fase todos ligados a algum job, `tools/ciaudit` recusando o workflow que perde um deles. Antes de ligar promoção automática continuam pendentes: o bootstrap administrativo auditado (P19-T09), a regra de firewall que recusa a origem fora do Cloudflare (§3.1) e um coletor que leia o listener administrativo de fora do host — hoje `/metrics` só existe em loopback dentro de um contêiner distroless, então o alerta de 5xx de [RUNBOOKS.md](RUNBOOKS.md) não pode depender dele. E a superfície HTTP operacional de jobs (`GET /api/v1/admin/jobs/health`, `/dead`, `POST …/retry`) existe e tem teste desde a P15-T06, mas não está composta em `arena server` nem no contrato: o alerta de fila depende dessa fiação.
 
 ## 6. Estratégia de migrations
 

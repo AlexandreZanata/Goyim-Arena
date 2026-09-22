@@ -8,6 +8,7 @@ GO ?= go
 GOFMT ?= gofmt
 NPM ?= npm
 K6 ?= k6
+GOVULNCHECK ?= govulncheck
 SQLC ?= $(shell which sqlc 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/sqlc")
 ASSETGEN := $(GO) run ./cmd/assetgen
 
@@ -20,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -57,6 +58,28 @@ test-unit:
 test-integration:
 	$(GO) test -v -race ./internal/platform/dbpool/... ./internal/platform/dbtest/... ./internal/platform/postgres/...
 	@echo "test-integration: ok"
+
+# test-race é o gate de concorrência **selecionado** (P19-T08; docs/THREAT_MODEL.md
+# §7): o detector de corridas nos caminhos onde mais de um processo disputa a
+# mesma linha — o ledger e a carteira (THR-WAL-01, THR-WAL-02), a publicação e a
+# retirada de argumento, e o agendador da fila, cuja semântica é lease/claim.
+# "Selecionado" é deliberado: `-race` na árvore inteira custa muito e não
+# pergunta nada novo a pacotes sem concorrência. Exige um PostgreSQL alcançável
+# em `ARENA_DATABASE_URL` (o harness cria bancos descartáveis ao lado dele),
+# como test-integration.
+test-race:
+	$(GO) test -race -count=1 ./internal/wallet/... ./internal/arguments/... ./internal/jobs/application/...
+	@echo "test-race: ok"
+
+# test-migration é o nome que o CI dá às migrations (P19-T08): o runner (fontes
+# ordenadas, tabela de versão, nenhum caminho de volta) e o harness que aplica
+# as migrations embutidas a um banco virgem descartável. Ele não substitui a
+# prova profunda — as 32 migrations aplicadas pela própria imagem, num cluster
+# vazio, são `image-verify` e `compose-verify` —, e existe para que o gate tenha
+# um nome no Makefile e no workflow em vez de ficar implícito dentro de outro.
+test-migration:
+	$(GO) test -count=1 ./internal/platform/dbmigrate/... ./internal/platform/dbtest/...
+	@echo "test-migration: ok"
 
 # test-web compila o frontend e seus testes com o tsc oficial (strict) e os
 # executa no runner nativo do Node. Nenhuma dependência nova: o runtime
@@ -102,6 +125,17 @@ audit-web: build-web
 audit-i18n:
 	$(GO) run ./tools/i18naudit -root .
 	@echo "audit-i18n: ok"
+
+# audit-ci valida os workflows entregues (P19-T08): cada gate que a fase exige
+# tem de estar ligado ao CI, toda ação de terceiro fixada por SHA, as permissões
+# mínimas, nenhum passo pode mascarar a própria falha, todo alvo invocado tem de
+# existir no Makefile, todo job que precisa de banco declara o serviço, e o CI
+# completo pula PR em rascunho **sem** reduzir o gate final. Ele lê os arquivos
+# como eles são, roda dentro de `make verify` e é o que impede o workflow de
+# divergir do Makefile que ele invoca.
+audit-ci:
+	$(GO) run ./tools/ciaudit -root .
+	@echo "audit-ci: ok"
 
 # image-build constrói a imagem de produção a partir do Dockerfile. As bases
 # estão fixadas por digest, então o mesmo commit gera a mesma árvore.
@@ -167,6 +201,16 @@ backup-verify:
 deploy-verify: image-build
 	ARENA_IMAGE=$(IMAGE) tools/deployaudit/verify.sh
 	@echo "deploy-verify: ok"
+
+# vuln procura vulnerabilidades conhecidas nas dependências Go (P19-T08).
+# Exige govulncheck instalado fora do repositório, como image-scan exige o
+# scanner e test-load-smoke exige k6: sem ele o alvo falha explicitamente e nunca
+# retorna sucesso falso. O workflow de supply chain instala a versão fixada e
+# chama **este** alvo, para que o CI rode o mesmo comando que o operador roda.
+vuln:
+	@command -v "$(GOVULNCHECK)" >/dev/null 2>&1 || (echo "vuln: govulncheck is required; install it outside the repository (go install golang.org/x/vuln/cmd/govulncheck@v1.8.0)" >&2; exit 1)
+	$(GOVULNCHECK) ./...
+	@echo "vuln: ok"
 
 # image-scan procura vulnerabilidades conhecidas na imagem construída. Ele exige
 # um scanner instalado fora do repositório (o padrão é trivy), exatamente como
@@ -248,13 +292,13 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-contract test-security test-web typecheck build-web audit-web audit-i18n
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n audit-ci
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
-	@for gate in lint test-race vuln; do \
+	@for gate in lint; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
-	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify; do \
+	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."
