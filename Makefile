@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate security-audit privacy-audit test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate security-audit privacy-audit release-verify test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -197,6 +197,22 @@ security-audit:
 privacy-audit:
 	$(GO) run ./tools/privacyaudit -root .
 	@echo "privacy-audit: ok"
+
+# release-verify é a verificação final reproduzível do backend (P20-T07): cria
+# um checkout limpo do commit atual, instala as dependências **somente** pelos
+# lockfiles, sobe um PostgreSQL 18.4 descartável, roda `make verify`, constrói a
+# imagem e a exercita com o smoke — cada comando **duas vezes** — e confere a
+# árvore, o `git fsck` e o portão de release. O que ele mediu vira o registro
+# versionado `docs/RELEASE_CHECKLIST.md`, renderizado pelo próprio run (a prosa
+# sai das medições, nunca da mão de quem escreve), e um vermelho aborta antes de
+# escrever qualquer coisa: uma verificação que falha nunca deixa para trás um
+# documento que se lê como aprovado.
+#
+# Ele não entra em `verify`: exige daemon Docker, um checkout limpo e roda o
+# próprio `verify` duas vezes. É o que se roda antes de publicar.
+release-verify:
+	tools/releaseverify/verify.sh
+	@echo "release-verify: ok"
 
 # image-build constrói a imagem de produção a partir do Dockerfile. As bases
 # estão fixadas por digest, então o mesmo commit gera a mesma árvore.
@@ -391,8 +407,8 @@ verify: fmt-check generate-check test-unit test-integration test-race test-migra
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \
 	done
-	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento, auditoria de segurança e revisão de privacidade):"
-	@for gate in release-gate security-audit privacy-audit; do \
+	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento, auditoria de segurança, revisão de privacidade e verificação reproduzível):"
+	@for gate in release-gate security-audit privacy-audit release-verify; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."
