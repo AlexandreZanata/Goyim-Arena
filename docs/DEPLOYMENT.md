@@ -197,6 +197,10 @@ Usar expand/contract:
 
 Migrations destrutivas exigem backup, estimativa de lock, janela e ADR quando material.
 
+A estimativa de lock não é estimada: `make migration-audit` (P20-T03) aplica a história uma migration por vez enquanto outra sessão segura `ACCESS SHARE` — o lock de um `SELECT` — em todas as tabelas do schema, e registra em que relação cada migration esperou. As **doze** versões que esperam estão nomeadas uma a uma em [MIGRATION_AUDIT.md](MIGRATION_AUDIT.md) com o motivo, e são elas que precisam de janela; uma migration que passe a esperar sem estar na lista faz o portão recusar.
+
+O mesmo portão prova as duas metades do expand/contract: um snapshot copiado **depois de cada versão** e rolado para o head tem de ser exatamente o banco que uma instalação nova produz, sem perder linha nem coluna que a versão do snapshot já tinha; e uma migration que falha pela metade — numa base que ainda tinha migrations reais pendentes — tem de não deixar tabela, linha nem registro de versão, com o banco continuando rolável para o head, porque `migrate down` não existe no runner: a volta é o processo e o schema segue em frente (§7).
+
 ## 7. Backup
 
 WAL contínuo e base backup para storage externo compatível com S3 (P19-T04). O exercício `deploy/backup/verify.sh` — `ARENA_IMAGE=<tag> make backup-verify`, exige daemon Docker — é o gate: julga o `compose.production.yaml` commitado, sobe o servidor com os argumentos que o próprio arquivo declara, mede o arquivamento pelo `pg_stat_archiver`, envia um base backup selado, **destrói o primário**, restaura num cluster vazio até um instante escolhido e compara o que voltou com o que existia.
@@ -209,6 +213,8 @@ WAL contínuo e base backup para storage externo compatível com S3 (P19-T04). O
 O operador fornece três coisas que não entram no Git: `secrets/backup.key` (0600, ignorado pelo Git), o binário `backupctl` montado em `/opt/backup-tool/backupctl` (caminho em `BACKUP_BIN`; não fica sob `/opt/backup` porque um bind mount aninhado dentro de um bind mount somente leitura não sobe) e o endpoint, bucket e credencial do armazenamento (`BACKUP_S3_*`). Como `archive_command` roda como o usuário `postgres` dentro do contêiner, a chave **dele** é um arquivo próprio, dono `postgres`, modo 0600 — alargar o modo do arquivo do operador para o servidor ler seria entregar a chave a todo processo do host.
 
 Medido no exercício: **RTO de 2 s** (perda do primário até um servidor aceitando escrita no alvo) e RPO limitado por `archive_timeout=300`. A meta de 15 minutos continua meta: a verificação em ambiente isolado é manual (`make backup-verify`) e um alerta de atraso ou falha do arquivamento é a P19-T06.
+
+O exercício de desastre e carga do lançamento (`make disaster-drill`, P20-T05) mede a mesma recuperação com o dinheiro no meio: o dataset é criado pelos casos de uso do produto, a leitura financeira é tomada antes da perda e comparada depois da volta (carteira a carteira, digest a digest, agregado a agregado), o alvo não pode trazer as linhas escritas depois dele — inclusive uma conta inteira com INK —, e a aplicação sobe nos dados restaurados para responder as jornadas. Os números que ele mediu, e a prova de que nada foi criado ou perdido, estão em [DISASTER_DRILL.md](DISASTER_DRILL.md), que o próprio exercício escreve e `drillaudit check` julga: um RPO acima do teto do servidor ou da meta, um RTO acima da meta, um limiar de carga sem valor medido ou um provedor exercitado numa direção só reprovam o documento.
 
 Antes do primeiro usuário pagante, continuam pendentes:
 

@@ -102,9 +102,10 @@ Cada dependência admitida no projeto possui uma classe clara, um owner respons�
 
 ## 6. Política de licenças
 
-O repositório adota licenças abertas permissivas para seu código e componentes runtime:
+O código do projeto não é uma dependência dele. A licença do **código deste repositório** é decisão do proprietário, registrada em [GOVERNANCE.md](GOVERNANCE.md) (`repository-license`): AGPL-3.0, identificador SPDX `AGPL-3.0-only`. Esta seção governa o outro lado — as licenças dos terceiros que o projeto incorpora ou executa:
+
 - **Licenças homologadas para runtime e bibliotecas:** MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC e PostgreSQL License.
-- **Licenças restritas/proibidas no runtime:** Licenças copyleft com cláusulas fortes de reciprocidade (como AGPL, GPL, SSPL, EUPL) são expressamente proibidas no código fonte compilado da aplicação.
+- **Licenças restritas/proibidas no runtime:** Licenças copyleft com cláusulas fortes de reciprocidade (como AGPL, GPL, SSPL, EUPL) são expressamente proibidas no código fonte compilado da aplicação. A reciprocidade da licença do projeto é uma obrigação de quem opera o serviço pela rede, **não** uma permissão para incorporar dependência copyleft: as duas listas não se contaminam.
 - **Ferramentas de desenvolvimento e teste isoladas:** Softwares e executáveis de suporte executados externamente ao binário (ex.: `golangci-lint`, `k6`) podem utilizar licenças como GPL ou AGPL, visto que não são linkados nem distribuídos junto à aplicação.
 
 ---

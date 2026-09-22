@@ -199,7 +199,9 @@ Estas regras não podem ser violadas por nenhum fluxo:
 
 ## 12. Questões ainda abertas
 
-- Existe idade mínima geral ou por mercado?
+As decisões humanas do lançamento — idade mínima, licença, contato de privacidade, retenção, mercados, termos e canal de segurança — vivem em [GOVERNANCE.md](GOVERNANCE.md), e não em cópias espalhadas por este e pelos demais documentos.
+
+- ~~Existe idade mínima geral ou por mercado?~~ **Respondida:** dezoito anos em todos os mercados, sem exceção por mercado e sem fluxo para menores (`GOVERNANCE.md`, `age-minimum`).
 - Certas categorias exigirão aviso, limitação etária ou revisão prévia?
 - Quando uma Arena pode ser duplicada versus considerada continuação?
 - Qual limite de fontes por argumento equilibra utilidade e spam?

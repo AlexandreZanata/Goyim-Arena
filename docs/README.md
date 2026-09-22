@@ -15,6 +15,8 @@ Quando houver conflito, a ordem de precedência é:
 4. [Visão do produto](PRODUCT.md);
 5. materiais históricos.
 
+Quem chega agora começa pelo [README da raiz](../README.md): ele é o handoff do backend — arquitetura final, configuração, desenvolvimento, teste e operação com os comandos reais —, e o que ele afirma é conferido contra a árvore por `make handoff-check` e seguido num checkout limpo por `make handoff-walkthrough`.
+
 ## Produto
 
 - [PRODUCT.md](PRODUCT.md) — problema, proposta de valor, público e posicionamento.
@@ -42,11 +44,18 @@ Quando houver conflito, a ordem de precedência é:
 - [DEPLOYMENT.md](DEPLOYMENT.md) — topologia, ambientes, backup e evolução.
 - [RUNBOOKS.md](RUNBOOKS.md) — alertas iniciais, thresholds e runbooks de incidente.
 - [CI.md](CI.md) — verificação completa de release: gates exigidos, jobs, ações pinadas e orçamento do pipeline.
+- [MIGRATION_AUDIT.md](MIGRATION_AUDIT.md) — evidência do ciclo de vida das migrations, gerada por `tools/migrationaudit` (`make migration-audit`): tempos, dataset, locks observados, o resultado de cada regra e as exceções declaradas.
+- [SECURITY_AUDIT.md](SECURITY_AUDIT.md) — execução da auditoria de segurança do lançamento (P20-T04) por `tools/secaudit` (`make security-audit`): as doze áreas rodadas, as seis fronteiras de confiança revisadas à mão, os achados com dono e aceite e o registro executável que o portão lê.
+- [PRIVACY_AUDIT.md](PRIVACY_AUDIT.md) — revisão de privacidade e moderação do lançamento (P20-T06) por `tools/privacyaudit` (`make privacy-audit`): as sete áreas de ciclo de vida de dados, as duas contas sintéticas que procuram mistura de dados, as allowlists das exportações conferidas contra o código, a tabela de retenção conferida contra o cronograma que o job aplica e os achados com dono e aceite.
+- [DISASTER_DRILL.md](DISASTER_DRILL.md) — evidência do exercício de desastre e carga (P20-T05), gerada pelo próprio exercício (`make disaster-drill`) e julgada por `tools/drillaudit`: o backup restaurado num ambiente isolado com os scripts da operação, a comparação do ledger antes e depois, RPO e RTO medidos, o baseline de carga registrado e o que os dois provedores fizeram com os seus jobs/financial rows quando ficaram inalcançáveis.
+- [I18N_AUDIT.md](I18N_AUDIT.md) — auditoria final de internacionalização (P20-T09) por `tools/i18nrelease` (`make i18n-audit`, dentro de `make verify`): cobertura das 200 mensagens nos dois locais pela segunda medição independente do gerador, snapshots de email, códigos estáveis de Problem Details, SEO e `hreflang`, cache sem mistura de locale, texto hardcoded, pseudo-locale — e as jornadas de navegador dirigidas em **cada** idioma, com a cobrança do idioma declarado em cada página. Traz os achados com dono e a revisão humana do `en-US`, que segue pendente.
+- [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) — verificação final reproduzível do backend (P20-T07), gerada por `tools/releaseverify` (`make release-verify`): o checkout limpo do commit, as dependências instaladas só pelos lockfiles, cada comando da fase rodado **duas vezes**, a imagem e o smoke, o `git fsck`, o veredito do portão de release e as limitações reais.
 - [COMMITS.md](COMMITS.md) — Conventional Commits, scopes e versionamento.
 - [ADRs](adr/README.md) — decisões arquiteturais e suas consequências.
 
 ## Aprendizado e governança
 
+- [GOVERNANCE.md](GOVERNANCE.md) — decisões humanas do lançamento: o que está decidido, onde cada decisão é aplicada e o que ainda bloqueia o release (`make release-gate`).
 - [METRICS.md](METRICS.md) — métricas de produto e guardrails.
 - [RISKS_AND_ASSUMPTIONS.md](RISKS_AND_ASSUMPTIONS.md) — riscos, hipóteses e plano de validação.
 - [DECISIONS.md](DECISIONS.md) — log de decisões de produto.

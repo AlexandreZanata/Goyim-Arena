@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -126,6 +126,19 @@ audit-i18n:
 	$(GO) run ./tools/i18naudit -root .
 	@echo "audit-i18n: ok"
 
+# i18n-audit é a auditoria final de internacionalização (P20-T09): executa as
+# áreas que a fase nomeia — cobertura de catálogo, pseudo-locale, snapshots,
+# emails, Problem Details, SEO, moeda, plural, timezone, cache e texto
+# hardcoded — e depois julga o registro versionado (`docs/I18N_AUDIT.md`: prosa
+# para o leitor, bloco de máquina para a ferramenta) contra a árvore medida
+# agora. O registro não é reescrito por ele: as afirmações são do autor, e o que
+# o portão faz é recusar cada uma que a árvore contradiz. As jornadas de
+# navegador são a única área fora dele, porque exigem Chromium e PostgreSQL
+# descartável: o CI as roda em `make test-e2e` e o registro guarda a execução.
+i18n-audit:
+	tools/i18nrelease/verify.sh
+	@echo "i18n-audit: ok"
+
 # audit-ci valida os workflows entregues (P19-T08): cada gate que a fase exige
 # tem de estar ligado ao CI, toda ação de terceiro fixada por SHA, as permissões
 # mínimas, nenhum passo pode mascarar a própria falha, todo alvo invocado tem de
@@ -137,11 +150,126 @@ audit-ci:
 	$(GO) run ./tools/ciaudit -root .
 	@echo "audit-ci: ok"
 
+# audit-req é o portão da rastreabilidade dos requisitos (P20-T02): lê
+# docs/REQUIREMENTS.md e resolve cada referência que ela faz — a rota contra o
+# contrato servido, o caso de uso e a migration contra os arquivos que existem,
+# o teste contra a função que está de fato no arquivo — além das duas direções
+# da tabela de cobertura, das dez invariantes de BR §11, dos itens de
+# docs/MVP.md e da ausência de vocabulário de adiamento nas células. Ele entra em
+# `verify` porque é gate de merge: matriz sem teste automatizado é requisito não
+# rastreado, e o desenho da cobertura não pode envelhecer em silêncio. Ele nunca
+# escreve: a correção pertence a quem mudou o código ou o documento.
+audit-req:
+	$(GO) run ./tools/reqaudit -root .
+	@echo "audit-req: ok"
+
+# release-gate é o portão das decisões humanas do lançamento (P20-T01): lê o
+# registro versionado (docs/GOVERNANCE.md) e **falha** enquanto qualquer uma das
+# sete decisões da fase estiver em aberto, nomeando o que falta decidir, quem
+# deve decidir e o que a decisão impede. Ele não entra em `verify` de propósito:
+# `verify` é o gate de integração de cada merge, e um merge não é um release —
+# incluir aqui faria toda tarefa da fase ficar vermelha por uma decisão que não é
+# dela. Ele é o que se roda antes de publicar, e é isso que a P20 verifica de
+# ponta a ponta (`docs/RELEASE_CHECKLIST.md`).
+#
+# O modo `-check` julga o documento (esquema, as sete decisões presentes, prosa
+# de acordo com o bloco) sem tratar bloqueio aberto como falha: é o modo dos
+# testes da ferramenta, e nunca um modo de release.
+release-gate:
+	$(GO) run ./tools/governanceaudit -root .
+	@echo "release-gate: ok"
+
+# security-audit é o portão da auditoria de segurança (P20-T04): lê o registro
+# versionado (docs/SECURITY_AUDIT.md), resolve cada evidência que ele cita,
+# confere o registro contra o modelo de ameaças (mesmo conjunto, mesma
+# severidade, nenhuma ameaça Crítica respondida só com monitoramento), recusa
+# achado Crítico ou Alto em aberto e aceite sem dono e data, varre a árvore em
+# busca de segredo estrutural e roda as doze execuções que a fase nomeia.
+#
+# Ele não entra em `verify` de propósito, pelo mesmo motivo do release-gate: as
+# execuções incluem `make vuln` e suítes com -race, e um gate de merge não é um
+# release. O modo `-check` julga o registro sem executar nada — é o modo dos
+# testes da ferramenta.
+security-audit:
+	$(GO) run ./tools/secaudit -root .
+	@echo "security-audit: ok"
+
+# privacy-audit é o portão da auditoria de privacidade e moderação (P20-T06):
+# lê o registro versionado (docs/PRIVACY_AUDIT.md), recusa conta sintética fora
+# de domínio reservado, caminho citado que não existe, área da fase sem
+# auditoria e achado Crítico ou Alto em aberto, e confere o documento *contra o
+# código que ele descreve*, nos dois sentidos: as chaves JSON que cada superfície
+# de exportação pode emitir contra a allowlist declarada, a tabela de retenção
+# contra o cronograma que o job aplica, o limiar de baixa contagem contra o que
+# os agregados usam e o vocabulário de analytics contra a allowlist do
+# despachante. Depois roda as sete execuções que a fase nomeia.
+#
+# Ele não entra em `verify`, como o release-gate e o security-audit: o julgamento
+# é uma revisão de release, e o modo `-check` (que os testes da ferramenta usam)
+# julga o registro sem executar nada.
+privacy-audit:
+	$(GO) run ./tools/privacyaudit -root .
+	@echo "privacy-audit: ok"
+
+# release-verify é a verificação final reproduzível do backend (P20-T07): cria
+# um checkout limpo do commit atual, instala as dependências **somente** pelos
+# lockfiles, sobe um PostgreSQL 18.4 descartável, roda `make verify`, constrói a
+# imagem e a exercita com o smoke — cada comando **duas vezes** — e confere a
+# árvore, o `git fsck` e o portão de release. O que ele mediu vira o registro
+# versionado `docs/RELEASE_CHECKLIST.md`, renderizado pelo próprio run (a prosa
+# sai das medições, nunca da mão de quem escreve), e um vermelho aborta antes de
+# escrever qualquer coisa: uma verificação que falha nunca deixa para trás um
+# documento que se lê como aprovado.
+#
+# Ele não entra em `verify`: exige daemon Docker, um checkout limpo e roda o
+# próprio `verify` duas vezes. É o que se roda antes de publicar.
+release-verify:
+	tools/releaseverify/verify.sh
+	@echo "release-verify: ok"
+
+# handoff-check é o portão do handoff local (P20-T08): lê o README e recusa
+# toda afirmação que a árvore contradiz — comando que não existe no Makefile,
+# variável que não está no `.env.example`, caminho que não está lá, subcomando
+# que o binário não tem — mais as declarações que a caminhada precisa (os
+# marcadores do bloco, os passos que ele executa e as superfícies que ele
+# sonda). Ele entra em `verify` porque é gate de merge: renomear um alvo sem
+# atualizar o README é exatamente o que ele existe para recusar.
+handoff-check:
+	$(GO) run ./tools/handoffaudit check -root .
+	@echo "handoff-check: ok"
+
+# handoff-walkthrough é a outra metade: segue os blocos que o próprio README
+# declara num checkout limpo do commit (a ferramenta e o documento entram por
+# sobreposição declarada, com digest), roda a jornada de comandos que a página
+# manda colar, sobe o servidor como a página manda e sonda as superfícies que
+# ela nomeia. Nada aqui inventa um comando: a sequência vem do documento, e é
+# por isso que uma página que não funciona fica vermelha em vez de virar um
+# parágrafo em que alguém acredita. Ele não entra em `verify`: exige daemon
+# Docker, um checkout limpo e a porta que o documento usa livre.
+handoff-walkthrough:
+	$(GO) run ./tools/handoffaudit walkthrough -root .
+	@echo "handoff-walkthrough: ok"
+
 # image-build constrói a imagem de produção a partir do Dockerfile. As bases
 # estão fixadas por digest, então o mesmo commit gera a mesma árvore.
 image-build:
 	docker build --file Dockerfile --tag $(IMAGE) .
 	@echo "image-build: ok"
+
+# migration-audit é o gate do ciclo de vida das migrations (P20-T03): exercita
+# um PostgreSQL 18.4 descartável com o próprio runner — banco vazio, um degrau
+# que aplica cada migration com um leitor ativo segurando ACCESS SHARE,
+# snapshot de cada versão copiado e rolado para o head, e uma migration que
+# falha pela metade com a recuperação em seguida. Depois disso julga o catálogo
+# que a história produziu: grants por classe (append-only, só leitura,
+# apagável), a role de runtime, sequences, índices, chaves estrangeiras,
+# cascatas e a correspondência entre as tabelas declaradas e as do catálogo.
+# Ele não entra em `verify` porque exige um daemon Docker — o mesmo motivo de
+# image-verify —, e a evidência versionada que ele produz é
+# `docs/MIGRATION_AUDIT.md`.
+migration-audit:
+	ARENA_MIGRATION_AUDIT_REPORT=docs/MIGRATION_AUDIT.md tools/migrationaudit/verify.sh
+	@echo "migration-audit: ok"
 
 # image-verify é o gate da imagem (P19-T01): constrói, sobe o container com
 # filesystem somente leitura contra um PostgreSQL descartável, prova que ele
@@ -189,6 +317,20 @@ caddy-verify:
 backup-verify:
 	ARENA_IMAGE=$(IMAGE) deploy/backup/verify.sh
 	@echo "backup-verify: ok"
+
+# disaster-drill é o exercício de desastre e carga da release (P20-T05):
+# restaura um backup de verdade num ambiente isolado com os próprios scripts da
+# operação (`deploy/backup/base-backup.sh` e `restore.sh`) sobre um PostgreSQL
+# descartável, sobe a aplicação nos dados que voltaram, mede a integridade
+# financeira contra a leitura de antes da perda, mede RPO e RTO, roda o baseline
+# de carga versionado e exercita o provedor de email e o de pagamento
+# indisponíveis. O que ele mediu vira `docs/DISASTER_DRILL.md`, julgado por
+# `drillaudit check` — que recusa um número fora do teto declarado, um limiar não
+# registrado ou um ledger que não voltou igual. Exige daemon Docker, k6,
+# navegador e uma build do frontend, como test-e2e e test-load-smoke.
+disaster-drill:
+	tools/drillaudit/verify.sh
+	@echo "disaster-drill: ok"
 
 # deploy-verify é o exercício do pipeline de deploy e rollback (P19-T07):
 # promove a imagem por digest através de um registry descartável, deixa o
@@ -292,13 +434,17 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n audit-ci
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req handoff-check
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
-	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln; do \
+	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
+		echo "  - $$gate"; \
+	done
+	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento, auditoria de segurança, revisão de privacidade e verificação reproduzível):"
+	@for gate in release-gate security-audit privacy-audit release-verify; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."

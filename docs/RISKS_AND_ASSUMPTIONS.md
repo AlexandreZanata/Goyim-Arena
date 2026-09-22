@@ -120,9 +120,9 @@ Selecionar temas que permitam discordância de boa-fé, tenham participantes com
 
 ## 4. Questões bloqueadoras antes do beta público
 
-- idade mínima e política para menores;
+- idade mínima e política para menores — **resolvida:** dezoito anos em todos os mercados, sem exceção (`GOVERNANCE.md`, `age-minimum`);
 - tratamento jurídico de conteúdo público após exclusão;
-- termos, privacidade e base legal por tratamento;
+- termos, privacidade e base legal por tratamento — **em aberto:** a decisão sobre termos de uso e aviso de privacidade no beta público é o bloqueio `terms-of-use` de `GOVERNANCE.md`;
 - categorias de conteúdo de alto risco;
 - regra de região e moeda;
 - política de reembolso e chargeback;

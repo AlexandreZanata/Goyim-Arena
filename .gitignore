@@ -28,6 +28,12 @@ node_modules/
 # Test artifacts
 /test-results/
 /playwright-report/
+# The browser harness runs from tools/e2e, so the runner it drives writes its
+# results beside itself and not at the root: the drill runs that harness, and a
+# gate that dirtied the tree would leave the next run with a repository that is
+# not clean.
+/tools/e2e/test-results/
+/tools/e2e/playwright-report/
 
 # Backup material the operator owns
 /secrets/

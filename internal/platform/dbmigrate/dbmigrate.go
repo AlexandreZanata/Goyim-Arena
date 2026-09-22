@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -137,10 +139,82 @@ func Status(ctx context.Context, db *sql.DB) ([]StatusRow, error) {
 	return rows, nil
 }
 
+// Versions lists the forward migration versions embedded in the binary, in
+// ascending order. Reading the history is the runner's question, not the
+// caller's: an operator or an audit that walked the directory itself could
+// describe a migration the binary never applies, and the two would only
+// disagree in production.
+func Versions() ([]int64, error) {
+	entries, err := fs.ReadDir(migrationsFS, "migrations")
+	if err != nil {
+		return nil, fmt.Errorf("dbmigrate: list embedded migrations: %w", err)
+	}
+	versions := make([]int64, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".sql") {
+			continue
+		}
+		underscore := strings.IndexByte(entry.Name(), '_')
+		if underscore <= 0 {
+			return nil, fmt.Errorf("dbmigrate: %s carries no version", entry.Name())
+		}
+		version, err := strconv.ParseInt(entry.Name()[:underscore], 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("dbmigrate: %s: version is not a number: %w", entry.Name(), err)
+		}
+		versions = append(versions, version)
+	}
+	if len(versions) == 0 {
+		return nil, errors.New("dbmigrate: the embedded history is empty")
+	}
+	sort.Slice(versions, func(i, j int) bool { return versions[i] < versions[j] })
+	for i := 1; i < len(versions); i++ {
+		if versions[i] == versions[i-1] {
+			return nil, fmt.Errorf("dbmigrate: version %d appears twice", versions[i])
+		}
+	}
+	return versions, nil
+}
+
 // Up applies all pending migrations in order and reports how many were
 // newly applied. Re-running with nothing pending is a no-op (returns 0).
 // A failed migration is rolled back and never recorded as applied.
 func Up(ctx context.Context, db *sql.DB, logWriter io.Writer) (int, error) {
+	return up(ctx, db, logWriter, func(provider *goose.Provider) ([]*goose.MigrationResult, error) {
+		return provider.Up(ctx)
+	})
+}
+
+// UpTo applies every pending migration up to and including version and reports
+// how many were newly applied. It exists so that a database can be advanced to
+// a chosen point of the history through the same audited path as Up — the
+// migration audit builds its snapshots with it, and an operator restoring a
+// snapshot rolls forward with it — instead of running migration files by hand.
+func UpTo(ctx context.Context, db *sql.DB, version int64, logWriter io.Writer) (int, error) {
+	versions, err := Versions()
+	if err != nil {
+		return 0, err
+	}
+	known := false
+	for _, candidate := range versions {
+		if candidate == version {
+			known = true
+			break
+		}
+	}
+	if !known {
+		// A version the history does not carry would otherwise stop at
+		// whatever precedes it, which reads like success.
+		return 0, fmt.Errorf("dbmigrate: %d is not a version of the embedded history", version)
+	}
+	return up(ctx, db, logWriter, func(provider *goose.Provider) ([]*goose.MigrationResult, error) {
+		return provider.UpTo(ctx, version)
+	})
+}
+
+// up runs one forward operation through the provider and reports it the way
+// the operator sees it: one line per migration, with what it cost.
+func up(ctx context.Context, db *sql.DB, logWriter io.Writer, apply func(*goose.Provider) ([]*goose.MigrationResult, error)) (int, error) {
 	if logWriter == nil {
 		logWriter = io.Discard
 	}
@@ -153,7 +227,7 @@ func Up(ctx context.Context, db *sql.DB, logWriter io.Writer) (int, error) {
 	}
 	defer provider.Close()
 
-	results, err := provider.Up(ctx)
+	results, err := apply(provider)
 	applied := 0
 	for _, result := range results {
 		if result.Error != nil {

@@ -194,6 +194,10 @@ Limites conhecidos, que precisam de decisão antes de escalar ou antes do widget
 - origem e PostgreSQL não expostos;
 - contato privado de segurança disponível.
 
+A checklist acima não é uma leitura: `make security-audit` (P20-T04) roda as doze áreas e confere o registro [SECURITY_AUDIT.md](SECURITY_AUDIT.md) contra o [modelo de ameaças](THREAT_MODEL.md) — mesmo conjunto de ameaças, mesma severidade, nenhuma ameaça Crítica respondida apenas com monitoramento, nenhum achado Crítico ou Alto em aberto e nenhum aceite sem dono e data — resolvendo cada caminho de evidência citado contra a árvore. O que ele **não** cobre da checklist está em [SECURITY_AUDIT.md](SECURITY_AUDIT.md) §5: a esteira cobre o resto (`gitleaks` em `source-scans`, `trivy` em `image-scan`, `make image-verify`), e o gate confere que esses jobs existem em vez de presumi-los.
+
 ## 12. Reporte de vulnerabilidade
 
 Não publicar vulnerabilidade explorável em issue. Usar o canal privado de segurança do GitHub definido no arquivo `SECURITY.md` da raiz. Detalhes podem ser publicados após correção coordenada.
+
+O canal **oficial do lançamento** e a publicação (ou não) de prazos de resposta são decisão do proprietário ainda **em aberto**: bloqueio `security-channel` de [GOVERNANCE.md](GOVERNANCE.md). Enquanto ele existir, o item “contato privado de segurança disponível” do checklist da §11 não pode ser marcado — o canal privado existe, mas ninguém decidiu que ele é o oficial nem o que ele promete a quem reporta.
