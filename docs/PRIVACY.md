@@ -93,6 +93,8 @@ Há duas exportações distintas:
 
 Emails, identificadores de pagamento, IPs, sinais de dispositivo, notas de moderação e payloads de pagamento jamais entram em exportações públicas.
 
+Essa frase é verificável, não só declarada: `docs/PRIVACY_AUDIT.md` publica a allowlist fechada de cada exportação — as chaves JSON exatas que a superfície pode emitir — e `make privacy-audit` a confere contra o código **nos dois sentidos**, recusando uma chave que o código ganhou sem revisão e uma chave declarada que o código não emite mais. O mesmo portão recusa qualquer nome de campo com forma de pessoa, de dispositivo, de provedor de pagamento ou de segredo.
+
 ## 7. Analytics e observabilidade
 
 Não enviar a ferramentas de analytics:
@@ -105,6 +107,8 @@ Não enviar a ferramentas de analytics:
 - segredos.
 
 Eventos devem usar identificadores pseudônimos e propriedades mínimas. Gravação de sessão, se algum dia considerada, exige avaliação separada e nunca deve capturar campos sensíveis por padrão.
+
+A allowlist é fechada e vive em revisão, não no ponto de chamada: `internal/platform/observability/events.go` declara cada evento com o domínio de valor de cada propriedade, e não existe forma livre de texto — a única string admitida é um locale validado contra o catálogo. A revisão de privacidade do lançamento (`docs/PRIVACY_AUDIT.md`, `make privacy-audit`) compara o vocabulário publicado com o que o despachante aceita, evento a evento, e recusa qualquer propriedade com forma de pessoa, dispositivo ou segredo.
 
 ## 8. Internacionalização e fornecedores
 

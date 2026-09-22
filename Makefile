@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate security-audit test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate security-audit privacy-audit test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -180,6 +180,23 @@ release-gate:
 security-audit:
 	$(GO) run ./tools/secaudit -root .
 	@echo "security-audit: ok"
+
+# privacy-audit é o portão da auditoria de privacidade e moderação (P20-T06):
+# lê o registro versionado (docs/PRIVACY_AUDIT.md), recusa conta sintética fora
+# de domínio reservado, caminho citado que não existe, área da fase sem
+# auditoria e achado Crítico ou Alto em aberto, e confere o documento *contra o
+# código que ele descreve*, nos dois sentidos: as chaves JSON que cada superfície
+# de exportação pode emitir contra a allowlist declarada, a tabela de retenção
+# contra o cronograma que o job aplica, o limiar de baixa contagem contra o que
+# os agregados usam e o vocabulário de analytics contra a allowlist do
+# despachante. Depois roda as sete execuções que a fase nomeia.
+#
+# Ele não entra em `verify`, como o release-gate e o security-audit: o julgamento
+# é uma revisão de release, e o modo `-check` (que os testes da ferramenta usam)
+# julga o registro sem executar nada.
+privacy-audit:
+	$(GO) run ./tools/privacyaudit -root .
+	@echo "privacy-audit: ok"
 
 # image-build constrói a imagem de produção a partir do Dockerfile. As bases
 # estão fixadas por digest, então o mesmo commit gera a mesma árvore.
@@ -374,8 +391,8 @@ verify: fmt-check generate-check test-unit test-integration test-race test-migra
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \
 	done
-	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento e auditoria de segurança):"
-	@for gate in release-gate security-audit; do \
+	@echo "verify: portão de release, que não pertence a um merge (decisões humanas do lançamento, auditoria de segurança e revisão de privacidade):"
+	@for gate in release-gate security-audit privacy-audit; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."
