@@ -629,6 +629,57 @@ func (q *Queries) GetSessionCreatedAt(ctx context.Context, id pgtype.UUID) (pgty
 	return created_at, err
 }
 
+const grantAdminRole = `-- name: GrantAdminRole :one
+
+INSERT INTO app.admin_roles (account_id, role, granted_by, granted_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (account_id) DO UPDATE SET role = EXCLUDED.role, revoked_at = NULL
+RETURNING account_id, role, granted_by, granted_at, revoked_at
+`
+
+type GrantAdminRoleParams struct {
+	AccountID pgtype.UUID
+	Role      string
+	GrantedBy pgtype.UUID
+	GrantedAt pgtype.Timestamptz
+}
+
+// Administrative assignment writes (P19-T09). The bootstrap of the first
+// administrator is the only writer of this table, it runs from the local
+// command line and it is audited; the schema is never written by HTTP.
+//
+// Grant keeps the origin of an assignment: granting to an account whose
+// assignment was revoked revives it (revoked_at returns to NULL) without
+// rewriting granted_by or granted_at, which the schema declares immutable.
+func (q *Queries) GrantAdminRole(ctx context.Context, arg GrantAdminRoleParams) (AppAdminRole, error) {
+	row := q.db.QueryRow(ctx, grantAdminRole,
+		arg.AccountID,
+		arg.Role,
+		arg.GrantedBy,
+		arg.GrantedAt,
+	)
+	var i AppAdminRole
+	err := row.Scan(
+		&i.AccountID,
+		&i.Role,
+		&i.GrantedBy,
+		&i.GrantedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const hasActiveAdminRole = `-- name: HasActiveAdminRole :one
+SELECT EXISTS (SELECT 1 FROM app.admin_roles WHERE revoked_at IS NULL) AS has_active
+`
+
+func (q *Queries) HasActiveAdminRole(ctx context.Context) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveAdminRole)
+	var has_active bool
+	err := row.Scan(&has_active)
+	return has_active, err
+}
+
 const insertModerationAppeal = `-- name: InsertModerationAppeal :one
 INSERT INTO app.moderation_appeals (action_id, appellant_id, context)
 VALUES ($1, $2, $3)
@@ -873,6 +924,25 @@ func (q *Queries) RestoreArgumentForAppeal(ctx context.Context, id pgtype.UUID) 
 	var i RestoreArgumentForAppealRow
 	err := row.Scan(&i.ID, &i.Status)
 	return i, err
+}
+
+const revokeActiveAdminRole = `-- name: RevokeActiveAdminRole :execrows
+UPDATE app.admin_roles
+SET revoked_at = $2
+WHERE account_id = $1 AND revoked_at IS NULL
+`
+
+type RevokeActiveAdminRoleParams struct {
+	AccountID pgtype.UUID
+	RevokedAt pgtype.Timestamptz
+}
+
+func (q *Queries) RevokeActiveAdminRole(ctx context.Context, arg RevokeActiveAdminRoleParams) (int64, error) {
+	result, err := q.db.Exec(ctx, revokeActiveAdminRole, arg.AccountID, arg.RevokedAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const suspendAccountForModeration = `-- name: SuspendAccountForModeration :one

@@ -441,6 +441,15 @@ type Querier interface {
 	// identifier. The event must exist: a conflict without a stored event is an
 	// integrity problem.
 	GetWebhookEventByEventID(ctx context.Context, stripeEventID string) (AppStripeEvent, error)
+	// Administrative assignment writes (P19-T09). The bootstrap of the first
+	// administrator is the only writer of this table, it runs from the local
+	// command line and it is audited; the schema is never written by HTTP.
+	//
+	// Grant keeps the origin of an assignment: granting to an account whose
+	// assignment was revoked revives it (revoked_at returns to NULL) without
+	// rewriting granted_by or granted_at, which the schema declares immutable.
+	GrantAdminRole(ctx context.Context, arg GrantAdminRoleParams) (AppAdminRole, error)
+	HasActiveAdminRole(ctx context.Context) (bool, error)
 	// Platform administrative audit trail (P14-T01). The runtime inserts facts
 	// and reads them back for support and auditors; updates and deletes are
 	// rejected by triggers for every role, so no query here mutates history.
@@ -791,6 +800,7 @@ type Querier interface {
 	// single statement is what makes two concurrent revokes of the same row agree
 	// (one reports a change, the other reports none) without a read-modify-write.
 	RevokeAccountSessionByID(ctx context.Context, arg RevokeAccountSessionByIDParams) (int64, error)
+	RevokeActiveAdminRole(ctx context.Context, arg RevokeActiveAdminRoleParams) (int64, error)
 	RevokeAllAccountSessions(ctx context.Context, accountID pgtype.UUID) error
 	// RevokeDeletedAccountAdminRoles revokes any active administrative role of
 	// the deleted account. The assignment row is retained as restricted audit

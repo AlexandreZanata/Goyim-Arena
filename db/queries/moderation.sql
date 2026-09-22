@@ -9,6 +9,28 @@ SELECT account_id, role, granted_by, granted_at, revoked_at
 FROM app.admin_roles
 WHERE account_id = $1;
 
+-- Administrative assignment writes (P19-T09). The bootstrap of the first
+-- administrator is the only writer of this table, it runs from the local
+-- command line and it is audited; the schema is never written by HTTP.
+--
+-- Grant keeps the origin of an assignment: granting to an account whose
+-- assignment was revoked revives it (revoked_at returns to NULL) without
+-- rewriting granted_by or granted_at, which the schema declares immutable.
+
+-- name: GrantAdminRole :one
+INSERT INTO app.admin_roles (account_id, role, granted_by, granted_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (account_id) DO UPDATE SET role = EXCLUDED.role, revoked_at = NULL
+RETURNING account_id, role, granted_by, granted_at, revoked_at;
+
+-- name: RevokeActiveAdminRole :execrows
+UPDATE app.admin_roles
+SET revoked_at = $2
+WHERE account_id = $1 AND revoked_at IS NULL;
+
+-- name: HasActiveAdminRole :one
+SELECT EXISTS (SELECT 1 FROM app.admin_roles WHERE revoked_at IS NULL) AS has_active;
+
 -- Structured report queries for the PostgreSQL platform adapter (P13-T03).
 --
 -- Reports are restricted evidence: inserts carry reporter, target, reason

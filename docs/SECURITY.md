@@ -55,6 +55,23 @@ Limites conhecidos, que precisam de decisão antes do beta:
 - Contas pagantes não recebem bypass de regras.
 - Acesso direto ao banco usa papel sem permissão de migration ou superuser.
 
+### Bootstrap do primeiro administrador (P19-T09)
+
+Uma instalação nasce sem administrador, e é a promoção do primeiro que a cria. Esse ato é o único do produto que **não** é um pedido HTTP: acontece na linha de comando, em `arena admin bootstrap`, por quem já detém o DSN — e o processo que o executa não serve página nenhuma. A superfície de moderação continua sem rota que conceda papel, e um teste percorre a árvore para reprovar qualquer adaptador HTTP ou HTML que **nomeie** o caso de uso, então ligar o comando a uma rota não é um descuido possível: é um teste vermelho.
+
+As regras da promoção fecham buracos distintos, e nenhuma delas é decorativa:
+
+- **a conta precisa existir e ter endereço verificado.** Um endereço digitado errado, ou um cadastro que nunca foi confirmado, não promove ninguém;
+- **a conta precisa poder autenticar.** Suspensa ou excluída mantém o endereço verificado, então sem esta regra a instalação ganharia um administrador que não consegue entrar — e que bloquearia o bootstrap sem conceder nada;
+- **a conta precisa de fator confirmado.** O gate administrativo exige sessão que apresentou o segundo fator (§2), então promover uma conta sem matrícula criaria um administrador que não consegue agir e entregaria capacidade administrativa a uma conta protegida por um segredo só;
+- **a instalação não pode ter atribuição ativa — de nenhum papel.** É o que faz do comando um *bootstrap*, e não um caminho para conceder o papel a quem lê o DSN: com atribuição ativa o comando recusa, e é a destituição que devolve a instalação ao estado que o comando exige. O caso de canto (uma instalação com moderador ativo e nenhum administrador) recusa junto e a recuperação é destituir essa atribuição: o comando nunca concede administração por cima de uma atribuição existente. Uma promoção de uma conta cuja atribuição foi revogada revive a linha, mantendo intactos `granted_by` e `granted_at` — o schema declara a origem imutável;
+- **a decisão e a escrita são um passo atômico.** A leitura "não há administrador" é feita sob um lock de tabela por transação, então dois comandos simultâneos não criam dois primeiros administradores: um insere, o outro encontra o administrador que o primeiro criou;
+- **nada é gravado sem a trilha.** O evento de auditoria commita na mesma transação que a atribuição — uma promoção que a trilha não podia registrar não acontece. As ações são `administration.role_granted` e `administration.role_revoked`, com o motivo em código estável (`administrative_bootstrap`, `administrative_demotion`) e metadados que só admitem identificador, papel e a transição: não existe chave para endereço, sessão, segredo ou frase livre, então a trilha não pode carregar o endereço da pessoa; o **ator** registrado é a própria conta promovida, porque um comando local não tem conta de operador e inventar uma identidade que não agiu seria um registro pior que o honesto.
+
+`arena admin revoke` é a volta, auditada pela mesma trilha. Ele **não** exige endereço verificado nem fator: perder acesso tem de ser sempre possível, e uma destituição que pudesse ser recusada porque a conta perdeu o fator deixaria a instalação com um administrador que ninguém consegue remover. Nenhum dos dois subcomandos funciona sem confirmação: com terminal, o operador digita o endereço de volta; sem terminal, a mudança exige a flag explícita `--yes`, porque silêncio nunca autoriza mudança de privilégio.
+
+O que verifica isso: os testes do caso de uso (cada requisito recusado nomeadamente, replay sem segundo fato, corrida do primeiro administrador), os testes de integração contra PostgreSQL (o lock, o *upsert* que revive sem reescrever a origem, a destituição datada uma única vez, seis comandos simultâneos produzindo **um** administrador), o teste do bridge de auditoria sobre a allowlist da trilha, e o teste de ponta a ponta do `cmd/arena`, que promove pelo comando real e lê a linha e o evento gravados.
+
 ## 4. Aplicação web
 
 - HTML inicial usa `html/template` com escaping padrão; HTML arbitrário de usuário é proibido.
@@ -173,7 +190,7 @@ Limites conhecidos, que precisam de decisão antes de escalar ou antes do widget
 - restauração de backup comprovada;
 - secrets scan limpo;
 - dependências sem vulnerabilidade crítica conhecida;
-- conta admin com MFA;
+- conta admin com MFA, promovida pelo comando local auditado (§3);
 - origem e PostgreSQL não expostos;
 - contato privado de segurança disponível.
 

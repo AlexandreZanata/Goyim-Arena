@@ -120,4 +120,60 @@ var (
 	// unknown to the session store. Step-up freshness cannot be evaluated
 	// without it.
 	ErrUnknownSession = errors.New("application: session is unknown")
+
+	// ErrEmptyAdministrationTarget indicates the local command named no
+	// account. It is distinct from an address that resolves nowhere: the
+	// operator typed nothing, and the refusal says so.
+	ErrEmptyAdministrationTarget = errors.New("application: the administration names no account")
+
+	// ErrInvalidAdministrationTarget indicates the named address is not a
+	// valid email address at all.
+	ErrInvalidAdministrationTarget = errors.New("application: the administration names no valid email address")
+
+	// ErrAdministrationTargetNotFound indicates the address identifies no
+	// account. A mistyped address promotes nobody.
+	ErrAdministrationTargetNotFound = errors.New("application: the address identifies no account")
+
+	// ErrAdministrationTargetEmailUnverified indicates the account exists
+	// but its email was never verified. An address nobody proved ownership
+	// of does not become an administrator.
+	ErrAdministrationTargetEmailUnverified = errors.New("application: the account email is not verified")
+
+	// ErrAdministrationTargetWithoutSecondFactor indicates the account holds
+	// no confirmed second factor. The administrative gate requires a session
+	// that presented one, so promoting this account would create an
+	// administrator that cannot act and hands a capability to an account
+	// protected by a single secret.
+	ErrAdministrationTargetWithoutSecondFactor = errors.New("application: the account has no confirmed second factor")
+
+	// ErrAdministrationTargetNotActive indicates the account cannot sign in
+	// (suspended or deleted). A verified address survives suspension, so
+	// without this rule the installation could acquire an administrator that
+	// can never authenticate — and one that blocks the bootstrap while
+	// granting nothing.
+	ErrAdministrationTargetNotActive = errors.New("application: the account cannot authenticate")
+
+	// ErrAdministratorAlreadyExists indicates the installation already has
+	// an active administrative assignment. Granting here would turn the
+	// bootstrap into a privilege escalator for whoever reads the DSN.
+	ErrAdministratorAlreadyExists = errors.New("application: the installation already has an administrator")
+
+	// ErrAssignmentAlreadyActive indicates the named account already holds
+	// an active assignment.
+	ErrAssignmentAlreadyActive = errors.New("application: the account already holds an active administrative assignment")
+
+	// ErrNoActiveAssignment indicates the demotion named an account with
+	// nothing to revoke. It is how a repeated demotion resolves: no second
+	// write and no second audit event.
+	ErrNoActiveAssignment = errors.New("application: the account holds no active administrative assignment")
+
+	// ErrAdministrationOutsideTransaction indicates an administrative write
+	// arrived without a transaction. The decision "this installation has no
+	// administrator" and the write that follows it must be one atomic step,
+	// and a write outside a transaction cannot be.
+	ErrAdministrationOutsideTransaction = errors.New("application: administrative assignments are written inside a transaction")
+
+	// ErrInvalidRoleAdministrationConfig indicates the use cases could not be
+	// built from the given dependencies.
+	ErrInvalidRoleAdministrationConfig = errors.New("application: administrative role configuration is invalid")
 )
