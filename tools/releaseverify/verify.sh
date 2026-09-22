@@ -120,9 +120,10 @@ fi
 # The instrument cannot be inside the commit it verifies: this task adds the
 # tooling, so the tree that gets committed is the commit **plus these files**,
 # and the run verifies that tree instead of the one before it. Every copied file
-# is recorded with its digest, and anything outside the tooling, the evidence and
-# the Makefile is refused: a production file smuggled in here would make the
-# whole verification a statement about a tree nobody reviewed.
+# is recorded with its digest, and anything outside what cannot change the
+# behaviour being verified — the instrumentation, the evidence, the Makefile and
+# the prose of the repository — is refused: a production file smuggled in here
+# would make the whole verification a statement about a tree nobody reviewed.
 OVERLAY=""
 while IFS= read -r line; do
 	[ -n "$line" ] || continue
@@ -130,12 +131,12 @@ while IFS= read -r line; do
 	should_skip=false
 	case "$path" in
 	"$GENERATED") should_skip=true ;;
-	Makefile | tools/releaseverify/* | docs/*) ;;
+	Makefile | tools/* | docs/* | README.md | CONTRIBUTING.md | AGENTS.md | SECURITY.md) ;;
 	*) should_skip=true ;;
 	esac
 	if [ "$should_skip" = true ]; then
 		if [ "$path" != "$GENERATED" ]; then
-			echo "release-verify: $path is not the tooling, the evidence or the Makefile: the commit is the product code" >&2
+			echo "release-verify: $path is not instrumentation, evidence, the Makefile or the repository's prose: the commit is the product code" >&2
 			fail "the run refuses to copy $path over the commit"
 		fi
 		continue
@@ -152,6 +153,15 @@ else
 	CHECKOUT_KIND="git worktree limpo no commit, criado por tools/releaseverify/verify.sh e descartado no fim"
 fi
 log "overlay: ${OVERLAY:-none}"
+
+# The document this run produces is not part of the tree it verifies: it is the
+# output of the run. A previous run's document is committed — the phase re-runs
+# the verification after the last commit of the phase, which is what keeps a
+# reader from believing a number measured three commits ago — and leaving it in
+# the checkout would make `make verify` judge that page against the tree it is
+# about to document again, refusing the run that exists to replace it. The
+# checkout is the commit plus the overlay; the page is the one written below.
+rm -f "$WORK/$GENERATED"
 
 # ---------------------------------------------------------------------------
 # 2. Measuring. Every command the phase names runs **twice**. A red run is

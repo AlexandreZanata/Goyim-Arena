@@ -1,7 +1,7 @@
 # Checklist de release do backend (P20-T07)
 
 Verificação reproduzível de ponta a ponta, rodada em uma árvore limpa no
-commit `e63dc2911defbfda7a6db3c98fe0ec54bed1ca7c`, com cada comando da fase executado **duas vezes**. Este documento é
+commit `2a3cd1b6ffa46fedff9257e692ff293703acd52f`, com cada comando da fase executado **duas vezes**. Este documento é
 gerado por essa execução (`tools/releaseverify/verify.sh`): a prosa descreve o que
 foi medido e o bloco no fim carrega os números, para que a frase e a medição não
 possam divergir. Para rodar de novo: `make release-verify`.
@@ -30,7 +30,7 @@ motivo de recusa):
 ## 2. Onde e com o quê
 
 - **Árvore:** git worktree limpo no commit, com sobreposição declarada dos arquivos desta tarefa copiados por cima.
-- **Commit:** `e63dc2911defbfda7a6db3c98fe0ec54bed1ca7c` na branch `phase-20-release-readiness`. O documento entra no commit seguinte: a árvore
+- **Commit:** `2a3cd1b6ffa46fedff9257e692ff293703acd52f` na branch `phase-20-release-readiness`. O documento entra no commit seguinte: a árvore
   verificada é a desse commit, e o único arquivo que muda depois dela é este.
 
 Os arquivos desta tarefa, copiados sobre o commit e verificados junto com ele: a
@@ -39,22 +39,25 @@ documento que produz.
 
 | Arquivo | Digest (sha256) |
 |---|---|
-| `Makefile` | `sha256:b67aa37e0fa08…` |
-| `docs/CI.md` | `sha256:be8a73d3b58d0…` |
-| `docs/README.md` | `sha256:6b5c97971a503…` |
-| `docs/STACK.md` | `sha256:f64fe2707ed2d…` |
-| `tools/releaseverify/audit_test.go` | `sha256:a97ff47c4630a…` |
-| `tools/releaseverify/document.go` | `sha256:eeb595ae842a2…` |
-| `tools/releaseverify/facts.go` | `sha256:c68ee2da6df69…` |
-| `tools/releaseverify/main.go` | `sha256:b229127d128b1…` |
-| `tools/releaseverify/rules.go` | `sha256:7d9ae2e649152…` |
-| `tools/releaseverify/verify.sh` | `sha256:425278acc83d9…` |
+| `Makefile` | `sha256:b840186b5cadc…` |
+| `README.md` | `sha256:19c10fe78306d…` |
+| `docs/CI.md` | `sha256:550cfb1499d1c…` |
+| `docs/README.md` | `sha256:e53377aa7c585…` |
+| `docs/STACK.md` | `sha256:54dfd2bbb1b9b…` |
+| `tools/releaseverify/audit_test.go` | `sha256:1ddc5ece3106f…` |
+| `tools/releaseverify/rules.go` | `sha256:f94243255410a…` |
+| `tools/releaseverify/verify.sh` | `sha256:023caa929511f…` |
+| `tools/handoffaudit/audit_test.go` | `sha256:48a627563e5a7…` |
+| `tools/handoffaudit/document.go` | `sha256:bed16c5632334…` |
+| `tools/handoffaudit/main.go` | `sha256:b9f9fd8c1db65…` |
+| `tools/handoffaudit/rules.go` | `sha256:48be5b224f23d…` |
+| `tools/handoffaudit/walkthrough.go` | `sha256:f0f9f8549bab6…` |
 
 - **Máquina:** Linux 7.1.5-76070105-generic/x86_64, 16 processador(es).
 - **Toolchain:** go1.27.1, Node v24.15.0, npm 11.14.1, Docker 29.1.3/29.1.3, sqlc v1.29.0.
 - **PostgreSQL:** 18.4 (Debian 18.4-1.pgdg13+1).
 - **Origem do banco:** Os harnesses de integração procuram o PostgreSQL em 127.0.0.1:54329 — a porta que o compose.yaml publica e que o CI declara como serviço —, e este run usou o PostgreSQL que já respondia na porta.
-- **Repositório:** 1061 arquivo(s) rastreado(s); `git fsck` ok com 0 erro(s).
+- **Repositório:** 1068 arquivo(s) rastreado(s); `git fsck` ok com 0 erro(s).
 - **Diretório local:** 0 arquivo(s) rastreado(s) (tem de ser zero: o plano local nunca
   vai para o Git).
 
@@ -73,17 +76,17 @@ versiona, e o portão recusa o documento em que algum comando instale fora de um
 
 | Comando | Execuções | Tempo |
 |---|---|---|
-| `GOBIN='/tmp/arena-release-verify-C8IrRq/bin' go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0` | 2 | 4.7s |
+| `GOBIN='/tmp/arena-release-verify-rbA5vF/bin' go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0` | 2 | 5.2s |
 | `go mod download` | 2 | 0.0s |
-| `npm ci --prefix web` | 2 | 1.1s |
+| `npm ci --prefix web` | 2 | 1.6s |
 | `npm ci --prefix tools/e2e` | 2 | 0.6s |
 | `docker run --rm --network host --env PGPASSWORD --env PGHOST=127.0.0.1 --env PGPORT=54329 --env PGUSER=arena --env PGDATABASE=arena postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636 psql --tuples-only --no-align --command 'SHOW server_version'` | 2 | 0.4s |
-| `ARENA_DATABASE_URL='postgres://arena:arena-local-dev@127.0.0.1:54329/arena?sslmode=disable' make verify` | 2 | 134.6s |
-| `IMAGE='goyim-arena:release-verify' make image-build` | 2 | 1.1s |
-| `ARENA_POSTGRES_IMAGE='postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636' IMAGE='goyim-arena:release-verify' make image-verify` | 2 | 8.3s |
+| `ARENA_DATABASE_URL='postgres://arena:arena-local-dev@127.0.0.1:54329/arena?sslmode=disable' make verify` | 2 | 129.8s |
+| `IMAGE='goyim-arena:release-verify' make image-build` | 2 | 0.8s |
+| `ARENA_POSTGRES_IMAGE='postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636' IMAGE='goyim-arena:release-verify' make image-verify` | 2 | 8.2s |
 | `git fsck --no-progress` | 2 | 0.4s |
 
-Tempo somado dos comandos: **151.2s**. Cada linha é o que a fase exige: o mesmo
+Tempo somado dos comandos: **147.0s**. Cada linha é o que a fase exige: o mesmo
 comando duas vezes, com o mesmo resultado.
 
 ## 5. A imagem e o smoke
@@ -111,7 +114,7 @@ O que esta verificação **não** estabelece, declarado em vez de omitido:
 {
   "version": 1,
   "verified_on": "2026-09-22",
-  "commit": "e63dc2911defbfda7a6db3c98fe0ec54bed1ca7c",
+  "commit": "2a3cd1b6ffa46fedff9257e692ff293703acd52f",
   "branch": "phase-20-release-readiness",
   "checkout": {
     "kind": "git worktree limpo no commit, com sobreposição declarada dos arquivos desta tarefa copiados por cima",
@@ -124,53 +127,68 @@ O que esta verificação **não** estabelece, declarado em vez de omitido:
       "docs/RELEASE_CHECKLIST.md",
       "docs/STACK.md",
       "Makefile",
+      "README.md",
+      "tools/handoffaudit/audit_test.go",
+      "tools/handoffaudit/document.go",
+      "tools/handoffaudit/main.go",
+      "tools/handoffaudit/rules.go",
+      "tools/handoffaudit/walkthrough.go",
       "tools/releaseverify/audit_test.go",
-      "tools/releaseverify/document.go",
-      "tools/releaseverify/facts.go",
-      "tools/releaseverify/main.go",
       "tools/releaseverify/rules.go",
       "tools/releaseverify/verify.sh"
     ],
     "overlay": [
       {
         "path": "Makefile",
-        "sha256": "sha256:b67aa37e0fa0893bea120a2699d7d58e0aaea95f48f2a27b11d034488eb5a513"
+        "sha256": "sha256:b840186b5cadca100159e234c763e4732c0876752f44b880d07056c320ddd4d9"
+      },
+      {
+        "path": "README.md",
+        "sha256": "sha256:19c10fe78306d8344b413c95a8b8b581f593889434dbec500154f19997364fbf"
       },
       {
         "path": "docs/CI.md",
-        "sha256": "sha256:be8a73d3b58d0cd8e9c0113667dcfca2fdb11c727abe3afa97bd69de35e186da"
+        "sha256": "sha256:550cfb1499d1c08e071bf68ebea8b0648287663a30423e4033a53b8514391deb"
       },
       {
         "path": "docs/README.md",
-        "sha256": "sha256:6b5c97971a50331d85f80194a6d927ccecc9132da69128edbb82d2f5640745ec"
+        "sha256": "sha256:e53377aa7c58519a01b3de31ad176c5aae09f0976ee8d8bcb8fdf7be4b5587d4"
       },
       {
         "path": "docs/STACK.md",
-        "sha256": "sha256:f64fe2707ed2d453ee2280106d5018ffac57dceda52ea046e4d27d51725519e8"
+        "sha256": "sha256:54dfd2bbb1b9b2dcfe73c8cf2b1eb87de2a95765f15a0b8f2dcc7b32f54f7cd6"
       },
       {
         "path": "tools/releaseverify/audit_test.go",
-        "sha256": "sha256:a97ff47c4630a18d872ae20b8fbae5e78860f6ec15f7d8e37dc09f6ee6542805"
-      },
-      {
-        "path": "tools/releaseverify/document.go",
-        "sha256": "sha256:eeb595ae842a2c507c2f296e14fb75d545188c7684b9683584ce5ed4b251ca36"
-      },
-      {
-        "path": "tools/releaseverify/facts.go",
-        "sha256": "sha256:c68ee2da6df693ffe288d95aaceb5ab1837190d8930f63dc38e19cd04d571f6f"
-      },
-      {
-        "path": "tools/releaseverify/main.go",
-        "sha256": "sha256:b229127d128b1ea6c1d626a5c08124294e1f8e39c8221a3442e1fa7da81f65ae"
+        "sha256": "sha256:1ddc5ece3106f949622b574fc943c1f09cae3268967f55591e3132ced1700cbd"
       },
       {
         "path": "tools/releaseverify/rules.go",
-        "sha256": "sha256:7d9ae2e649152cbed5e11e3144f56bb2be7ea87b1aeeb0f8ffa0bd23574c3473"
+        "sha256": "sha256:f94243255410a782b4a020a9c1c30df06d37d14f7223f10d508b937e0e6a5b95"
       },
       {
         "path": "tools/releaseverify/verify.sh",
-        "sha256": "sha256:425278acc83d97a0a7c50af2e3ed8fc806a7f56d8ab120ece2b56d242b4c34fc"
+        "sha256": "sha256:023caa929511f0794bf4e6c4739d8d9bcca02ea9d7ebdde965fb93b909e08e63"
+      },
+      {
+        "path": "tools/handoffaudit/audit_test.go",
+        "sha256": "sha256:48a627563e5a71e17a626c07a76c89cdc3abb49018bb88be9ec94fab63c307f8"
+      },
+      {
+        "path": "tools/handoffaudit/document.go",
+        "sha256": "sha256:bed16c5632334dd72e41a26402293a076894e2e6002e533398a50ab70118e941"
+      },
+      {
+        "path": "tools/handoffaudit/main.go",
+        "sha256": "sha256:b9f9fd8c1db65f848ad385ffa3432f96df6fea44e8fc65928fc593b1ad5d25d1"
+      },
+      {
+        "path": "tools/handoffaudit/rules.go",
+        "sha256": "sha256:48be5b224f23dcae100c3aaee593cae3fe79b4753d3f652826666bf5e05efed1"
+      },
+      {
+        "path": "tools/handoffaudit/walkthrough.go",
+        "sha256": "sha256:f0f9f8549bab64ff416f884d11a7951968b84b272224feeebe90578c06df8dd7"
       }
     ]
   },
@@ -208,10 +226,10 @@ O que esta verificação **não** estabelece, declarado em vez de omitido:
   "commands": [
     {
       "key": "sqlc-toolchain",
-      "command": "GOBIN='/tmp/arena-release-verify-C8IrRq/bin' go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0",
+      "command": "GOBIN='/tmp/arena-release-verify-rbA5vF/bin' go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0",
       "runs": [
         {
-          "seconds": 4.1,
+          "seconds": 4.6,
           "exit_code": 0
         },
         {
@@ -241,7 +259,7 @@ O que esta verificação **não** estabelece, declarado em vez de omitido:
       "command": "npm ci --prefix web",
       "runs": [
         {
-          "seconds": 0.8,
+          "seconds": 1.3,
           "exit_code": 0
         },
         {
@@ -286,11 +304,11 @@ O que esta verificação **não** estabelece, declarado em vez de omitido:
       "command": "ARENA_DATABASE_URL='postgres://arena:arena-local-dev@127.0.0.1:54329/arena?sslmode=disable' make verify",
       "runs": [
         {
-          "seconds": 104.6,
+          "seconds": 101.2,
           "exit_code": 0
         },
         {
-          "seconds": 30,
+          "seconds": 28.6,
           "exit_code": 0
         }
       ],
@@ -301,11 +319,11 @@ O que esta verificação **não** estabelece, declarado em vez de omitido:
       "command": "IMAGE='goyim-arena:release-verify' make image-build",
       "runs": [
         {
-          "seconds": 0.5,
+          "seconds": 0.4,
           "exit_code": 0
         },
         {
-          "seconds": 0.6,
+          "seconds": 0.4,
           "exit_code": 0
         }
       ],
@@ -320,7 +338,7 @@ O que esta verificação **não** estabelece, declarado em vez de omitido:
           "exit_code": 0
         },
         {
-          "seconds": 4.1,
+          "seconds": 4,
           "exit_code": 0
         }
       ],
@@ -352,7 +370,7 @@ O que esta verificação **não** estabelece, declarado em vez de omitido:
     "smoke_ok": true
   },
   "repository": {
-    "tracked_files": 1061,
+    "tracked_files": 1068,
     "fsck": "ok",
     "fsck_errors": 0,
     "main_behind_origin": false

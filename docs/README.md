@@ -15,6 +15,8 @@ Quando houver conflito, a ordem de precedência é:
 4. [Visão do produto](PRODUCT.md);
 5. materiais históricos.
 
+Quem chega agora começa pelo [README da raiz](../README.md): ele é o handoff do backend — arquitetura final, configuração, desenvolvimento, teste e operação com os comandos reais —, e o que ele afirma é conferido contra a árvore por `make handoff-check` e seguido num checkout limpo por `make handoff-walkthrough`.
+
 ## Produto
 
 - [PRODUCT.md](PRODUCT.md) — problema, proposta de valor, público e posicionamento.

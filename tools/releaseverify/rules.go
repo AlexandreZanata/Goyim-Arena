@@ -369,8 +369,10 @@ func ruleCheckout(root string, facts Facts) []Violation {
 // the verification cannot be inside the commit it verifies — it is the
 // instrument, and it is committed together with the document it produces — so a
 // run that has one is honest only if it says so, names every file, and stays
-// inside the tooling and the evidence. A production file copied in would make
-// the whole verification a statement about a tree nobody reviewed.
+// inside what cannot change the behaviour being verified: the instrumentation,
+// the evidence, the Makefile and the prose of the repository. A production file
+// copied in would make the whole verification a statement about a tree nobody
+// reviewed.
 func ruleOverlay(root string, facts Facts) []Violation {
 	var violations []Violation
 	if len(facts.Checkout.Overlay) > 0 && !strings.Contains(facts.Checkout.Kind, "sobreposição") {
@@ -390,7 +392,7 @@ func ruleOverlay(root string, facts Facts) []Violation {
 		if !overlayAllowed(entry.Path) {
 			violations = append(violations, Violation{
 				Rule: "overlay-scope", Subject: entry.Path,
-				Detail: "a file copied over the commit has to be the verification tooling, the evidence or the Makefile: the product code is what the commit is",
+				Detail: "a file copied over the commit has to be instrumentation, evidence, the Makefile or the repository's prose: the product code is what the commit is",
 			})
 		}
 		raw, err := os.ReadFile(filepath.Join(root, entry.Path))
@@ -418,10 +420,19 @@ func overlayAllowed(path string) bool {
 	if path == "Makefile" {
 		return true
 	}
-	for _, prefix := range []string{"tools/releaseverify/", "docs/"} {
+	for _, prefix := range []string{"tools/", "docs/"} {
 		if strings.HasPrefix(path, prefix) {
 			return true
 		}
+	}
+	// The pages of the repository are prose about the product, not the product:
+	// the handoff task (P20-T08) delivers the root README, and a run that
+	// refused to carry it would refuse to verify the very tree being published.
+	// What the scope guard keeps out is implementation, and none of these files
+	// can change what the process does.
+	switch path {
+	case "README.md", "CONTRIBUTING.md", "AGENTS.md", "SECURITY.md":
+		return true
 	}
 	return false
 }

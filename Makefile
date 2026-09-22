@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate security-audit privacy-audit release-verify test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -214,6 +214,29 @@ release-verify:
 	tools/releaseverify/verify.sh
 	@echo "release-verify: ok"
 
+# handoff-check é o portão do handoff local (P20-T08): lê o README e recusa
+# toda afirmação que a árvore contradiz — comando que não existe no Makefile,
+# variável que não está no `.env.example`, caminho que não está lá, subcomando
+# que o binário não tem — mais as declarações que a caminhada precisa (os
+# marcadores do bloco, os passos que ele executa e as superfícies que ele
+# sonda). Ele entra em `verify` porque é gate de merge: renomear um alvo sem
+# atualizar o README é exatamente o que ele existe para recusar.
+handoff-check:
+	$(GO) run ./tools/handoffaudit check -root .
+	@echo "handoff-check: ok"
+
+# handoff-walkthrough é a outra metade: segue os blocos que o próprio README
+# declara num checkout limpo do commit (a ferramenta e o documento entram por
+# sobreposição declarada, com digest), roda a jornada de comandos que a página
+# manda colar, sobe o servidor como a página manda e sonda as superfícies que
+# ela nomeia. Nada aqui inventa um comando: a sequência vem do documento, e é
+# por isso que uma página que não funciona fica vermelha em vez de virar um
+# parágrafo em que alguém acredita. Ele não entra em `verify`: exige daemon
+# Docker, um checkout limpo e a porta que o documento usa livre.
+handoff-walkthrough:
+	$(GO) run ./tools/handoffaudit walkthrough -root .
+	@echo "handoff-walkthrough: ok"
+
 # image-build constrói a imagem de produção a partir do Dockerfile. As bases
 # estão fixadas por digest, então o mesmo commit gera a mesma árvore.
 image-build:
@@ -398,7 +421,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n audit-ci audit-req
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n audit-ci audit-req handoff-check
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint; do \
 		echo "  - $$gate"; \

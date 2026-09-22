@@ -518,6 +518,16 @@ func TestOneMutationPerRule(t *testing.T) {
 			rule: "overlay-scope",
 		},
 		{
+			name: "a frontend source copied over the commit",
+			mutate: func(facts *Facts) bool {
+				facts.Checkout.Kind += " com sobreposição"
+				facts.Checkout.Overlay = []OverlayEntry{{Path: "web/src/main.ts", SHA256: digest}}
+				facts.Checkout.Dirty = []string{documentPath, "web/src/main.ts"}
+				return true
+			},
+			rule: "overlay-scope",
+		},
+		{
 			name: "an overlaid file whose digest is not the one in the tree",
 			mutate: func(facts *Facts) bool {
 				facts.Checkout.Kind += " com sobreposição"
@@ -565,6 +575,25 @@ func TestADeclaredOverlayWithItsDigestIsAccepted(t *testing.T) {
 	facts.Checkout.Dirty = []string{documentPath, "docs/PRIVACY_AUDIT.md"}
 	if violations := audit(t, facts); len(violations) > 0 {
 		t.Fatalf("a declared overlay with the digest of the tree is refused: %s", violations)
+	}
+}
+
+// TestAPageOverTheCommitIsAdmitted is the other half of the overlay control, and
+// it exists because the handoff task (P20-T08) delivers the root README: the
+// overlay carries the instrumentation, the evidence, the Makefile and the prose
+// of the repository, and refuses implementation. A run that could not carry its
+// own page would refuse to verify the tree being published.
+func TestAPageOverTheCommitIsAdmitted(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(repositoryRoot, "README.md"))
+	if err != nil {
+		t.Skipf("this control needs the root page: %v", err)
+	}
+	facts := fixture(t)
+	facts.Checkout.Kind += " com sobreposição"
+	facts.Checkout.Overlay = []OverlayEntry{{Path: "README.md", SHA256: sha256Of(raw)}}
+	facts.Checkout.Dirty = []string{documentPath, "README.md"}
+	if violations := audit(t, facts); len(violations) > 0 {
+		t.Fatalf("the page of the repository carried over the commit is refused: %s", violations)
 	}
 }
 
