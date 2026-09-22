@@ -86,6 +86,109 @@ func TestWorkerFailsFastWithoutDatabaseURL(t *testing.T) {
 // cost is microseconds.
 const failFastDeadline = 10 * time.Second
 
+// TestWorkerRegistersTheTransactionalEmailHandlerInProduction is the
+// process-level validation of P19-T02A: `arena worker` composes the email
+// delivery, so the process an operator runs in production is the one that
+// executes the `email_delivery` jobs the account journey queues. The claim is
+// asserted against the binary, not against the composition in isolation,
+// because the wiring — configuration in, handler registered — is exactly what
+// a unit test with a hand-built Options would let drift.
+//
+// The registration is read from two records: the explicit one, and the started
+// record's handler count, which is 2 — the email delivery and the scheduled
+// session cleanup — instead of the 1 of a process that delivers nothing.
+func TestWorkerRegistersTheTransactionalEmailHandlerInProduction(t *testing.T) {
+	if testing.Short() {
+		t.Skip("subprocess lifecycle test skipped in -short mode")
+	}
+
+	db := dbtest.New(t)
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+
+	binary := filepath.Join(t.TempDir(), "arena")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/arena")
+	build.Dir = repoRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, output)
+	}
+
+	logPath := filepath.Join(t.TempDir(), "worker.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		t.Fatalf("create log file: %v", err)
+	}
+	defer logFile.Close()
+
+	command := exec.Command(binary, "worker")
+	command.Env = []string{
+		"ARENA_ENV=production",
+		"ARENA_DATABASE_URL=" + db.DSN,
+		"ARENA_DB_MAX_CONNS=4",
+		"ARENA_DB_MIN_CONNS=1",
+		// The production requirements the configuration validates: the
+		// payment credential, the provider credential and the sender
+		// address. Only the last two belong to this task, and the first is
+		// here because production refuses to boot without it.
+		"ARENA_STRIPE_SECRET_KEY=sk_live_boot_test",
+		"ARENA_RESEND_API_KEY=re_boot_test_key",
+		"ARENA_EMAIL_FROM=Arena <no-reply@arena.invalid>",
+		"PATH=" + os.Getenv("PATH"),
+	}
+	command.Stdout = logFile
+	command.Stderr = logFile
+	if err := command.Start(); err != nil {
+		t.Fatalf("start worker: %v", err)
+	}
+
+	waitForLog := func(fragment string, deadline time.Duration) string {
+		limit := time.Now().Add(deadline)
+		for time.Now().Before(limit) {
+			content, _ := os.ReadFile(logPath)
+			if strings.Contains(string(content), fragment) {
+				return string(content)
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		content, _ := os.ReadFile(logPath)
+		_ = command.Process.Kill()
+		_ = command.Wait()
+		t.Fatalf("worker log never contained %q; log:\n%s", fragment, content)
+		return ""
+	}
+
+	startedLog := waitForLog("job worker: started", 20*time.Second)
+	if !strings.Contains(startedLog, "job worker: transactional email handler registered") {
+		t.Errorf("production did not register the email delivery handler:\n%s", startedLog)
+	}
+	if strings.Contains(startedLog, "no email handler to register") {
+		t.Errorf("production delivered through the local sink:\n%s", startedLog)
+	}
+	if !strings.Contains(startedLog, `"handlers":2`) {
+		t.Errorf("the started record should count the email delivery and the session cleanup:\n%s", startedLog)
+	}
+
+	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("signal worker: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	select {
+	case waitErr := <-done:
+		if waitErr != nil {
+			content, _ := os.ReadFile(logPath)
+			t.Fatalf("worker exited with %v after SIGTERM; log:\n%s", waitErr, content)
+		}
+	case <-time.After(15 * time.Second):
+		_ = command.Process.Kill()
+		content, _ := os.ReadFile(logPath)
+		t.Fatalf("worker did not stop within the deadline after SIGTERM; log:\n%s", content)
+	}
+}
+
 // TestWorkerBootsAndStopsOnSIGTERM is the process-level lifecycle validation
 // of P15-T02: the binary boots against a real database, logs the started
 // record, and terminates cleanly (exit 0) well within the deadline after

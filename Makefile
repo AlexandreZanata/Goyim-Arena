@@ -8,6 +8,7 @@ GO ?= go
 GOFMT ?= gofmt
 NPM ?= npm
 K6 ?= k6
+GOVULNCHECK ?= govulncheck
 SQLC ?= $(shell which sqlc 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/sqlc")
 ASSETGEN := $(GO) run ./cmd/assetgen
 
@@ -15,7 +16,12 @@ ASSETGEN := $(GO) run ./cmd/assetgen
 # OpenAPI e emite web/src/contracts/generated.ts (nunca editado à mão).
 CONTRACTGEN := $(GO) run ./tools/contractgen
 
-.PHONY: fmt fmt-check test-unit test-integration test-security test-web typecheck build-web audit-web audit-i18n test-contract test-e2e test-load-smoke generate generate-check verify
+# Imagem de produção (P19-T01): receita em Dockerfile, auditoria do artefato em
+# tools/imageaudit. IMAGE é a tag que o build usa e que o scan examina.
+IMAGE ?= goyim-arena:local
+TRIVY ?= trivy
+
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n audit-ci test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -52,6 +58,28 @@ test-unit:
 test-integration:
 	$(GO) test -v -race ./internal/platform/dbpool/... ./internal/platform/dbtest/... ./internal/platform/postgres/...
 	@echo "test-integration: ok"
+
+# test-race é o gate de concorrência **selecionado** (P19-T08; docs/THREAT_MODEL.md
+# §7): o detector de corridas nos caminhos onde mais de um processo disputa a
+# mesma linha — o ledger e a carteira (THR-WAL-01, THR-WAL-02), a publicação e a
+# retirada de argumento, e o agendador da fila, cuja semântica é lease/claim.
+# "Selecionado" é deliberado: `-race` na árvore inteira custa muito e não
+# pergunta nada novo a pacotes sem concorrência. Exige um PostgreSQL alcançável
+# em `ARENA_DATABASE_URL` (o harness cria bancos descartáveis ao lado dele),
+# como test-integration.
+test-race:
+	$(GO) test -race -count=1 ./internal/wallet/... ./internal/arguments/... ./internal/jobs/application/...
+	@echo "test-race: ok"
+
+# test-migration é o nome que o CI dá às migrations (P19-T08): o runner (fontes
+# ordenadas, tabela de versão, nenhum caminho de volta) e o harness que aplica
+# as migrations embutidas a um banco virgem descartável. Ele não substitui a
+# prova profunda — as 32 migrations aplicadas pela própria imagem, num cluster
+# vazio, são `image-verify` e `compose-verify` —, e existe para que o gate tenha
+# um nome no Makefile e no workflow em vez de ficar implícito dentro de outro.
+test-migration:
+	$(GO) test -count=1 ./internal/platform/dbmigrate/... ./internal/platform/dbtest/...
+	@echo "test-migration: ok"
 
 # test-web compila o frontend e seus testes com o tsc oficial (strict) e os
 # executa no runner nativo do Node. Nenhuma dependência nova: o runtime
@@ -97,6 +125,102 @@ audit-web: build-web
 audit-i18n:
 	$(GO) run ./tools/i18naudit -root .
 	@echo "audit-i18n: ok"
+
+# audit-ci valida os workflows entregues (P19-T08): cada gate que a fase exige
+# tem de estar ligado ao CI, toda ação de terceiro fixada por SHA, as permissões
+# mínimas, nenhum passo pode mascarar a própria falha, todo alvo invocado tem de
+# existir no Makefile, todo job que precisa de banco declara o serviço, e o CI
+# completo pula PR em rascunho **sem** reduzir o gate final. Ele lê os arquivos
+# como eles são, roda dentro de `make verify` e é o que impede o workflow de
+# divergir do Makefile que ele invoca.
+audit-ci:
+	$(GO) run ./tools/ciaudit -root .
+	@echo "audit-ci: ok"
+
+# image-build constrói a imagem de produção a partir do Dockerfile. As bases
+# estão fixadas por digest, então o mesmo commit gera a mesma árvore.
+image-build:
+	docker build --file Dockerfile --tag $(IMAGE) .
+	@echo "image-build: ok"
+
+# image-verify é o gate da imagem (P19-T01): constrói, sobe o container com
+# filesystem somente leitura contra um PostgreSQL descartável, prova que ele
+# aplica as próprias migrations, serve uma página e o asset com hash que ela
+# referencia, e entrega a receita e o artefato a tools/imageaudit. Ele não entra
+# em `verify` porque exige um daemon Docker — o mesmo motivo de test-e2e.
+image-verify:
+	ARENA_IMAGE=$(IMAGE) tools/imageaudit/verify.sh
+	@echo "image-verify: ok"
+
+# compose-verify é o gate da topologia de produção (P19-T02): constrói a
+# imagem, promove o artefato por digest num registry descartável, renderiza e
+# audita o documento que o Compose cria, sobe a stack, aplica as migrations com
+# a própria imagem, dirige um cadastro pelo ingress público e prova que os dados
+# sobrevivem a um restart e a uma recriação completa. Ele não entra em `verify`
+# porque exige um daemon Docker — o mesmo motivo de image-verify.
+compose-verify: image-build
+	ARENA_IMAGE=$(IMAGE) tools/composeaudit/verify.sh
+	@echo "compose-verify: ok"
+
+# caddy-verify é o gate da origem Caddy (P19-T03): valida o Caddyfile com a
+# imagem que o próprio compose fixa, exige que o arquivo seja o que `caddy fmt`
+# escreveria, e roda um Caddy de verdade atrás de um upstream stub para afirmar
+# os cabeçalhos que passam, a compressão, quem é acreditado sobre o endereço do
+# visitante, o que sai quando a aplicação não responde e o que uma sonda de
+# admin alcança. Exige daemon Docker, como image-verify.
+#
+# ARENA_CADDY_IMAGE sobrescreve a imagem; sem ela, o gate lê o digest fixado em
+# compose.production.yaml, que é o que o deploy roda.
+caddy-verify:
+	tools/caddyaudit/verify.sh
+	@echo "caddy-verify: ok"
+
+# backup-verify é o gate do backup e do PITR (P19-T04): julga o compose
+# commitado, sobe um PostgreSQL descartável com os argumentos que o próprio
+# arquivo declara, mede a arquivamento contínuo pelo pg_stat_archiver, criptografa
+# e envia um base backup para um armazenamento compatível com S3, destrói o
+# primário e restaura num cluster vazio até um instante escolhido — afirmando o
+# que voltou, o que não voltou, as migrations, o checksum das linhas e o que a
+# retenção remove. Exige daemon Docker, como image-verify.
+#
+# ARENA_IMAGE alimenta o passo de migrations e ARENA_BACKUP_S3_IMAGE troca o
+# armazenamento; sem elas, o gate usa a imagem local e o digest do MinIO que o
+# repositório verificou.
+backup-verify:
+	ARENA_IMAGE=$(IMAGE) deploy/backup/verify.sh
+	@echo "backup-verify: ok"
+
+# deploy-verify é o exercício do pipeline de deploy e rollback (P19-T07):
+# promove a imagem por digest através de um registry descartável, deixa o
+# pipeline aplicar as migrations, exige que a prontidão e as páginas respondam,
+# recusa uma tag, recusa um documento que roda outro artefato, recusa subir sem
+# banco, e depois promove releases que *não* ficam prontas — uma que nunca
+# responde à prontidão, outra que responde e perdeu a página — afirmando que
+# nenhuma delas é promovida, que a versão anterior volta a servir e que o
+# arquivo de estado não avança. Exige daemon Docker, como image-verify.
+deploy-verify: image-build
+	ARENA_IMAGE=$(IMAGE) tools/deployaudit/verify.sh
+	@echo "deploy-verify: ok"
+
+# vuln procura vulnerabilidades conhecidas nas dependências Go (P19-T08).
+# Exige govulncheck instalado fora do repositório, como image-scan exige o
+# scanner e test-load-smoke exige k6: sem ele o alvo falha explicitamente e nunca
+# retorna sucesso falso. O workflow de supply chain instala a versão fixada e
+# chama **este** alvo, para que o CI rode o mesmo comando que o operador roda.
+vuln:
+	@command -v "$(GOVULNCHECK)" >/dev/null 2>&1 || (echo "vuln: govulncheck is required; install it outside the repository (go install golang.org/x/vuln/cmd/govulncheck@v1.8.0)" >&2; exit 1)
+	$(GOVULNCHECK) ./...
+	@echo "vuln: ok"
+
+# image-scan procura vulnerabilidades conhecidas na imagem construída. Ele exige
+# um scanner instalado fora do repositório (o padrão é trivy), exatamente como
+# test-load-smoke exige k6; sem ele o alvo falha explicitamente e nunca retorna
+# sucesso falso. A base distroless não traz gerenciador de pacotes, então o que
+# o scanner examina é sobretudo o binário Go e seus módulos.
+image-scan: image-build
+	@command -v "$(TRIVY)" >/dev/null 2>&1 || (echo "image-scan: trivy is required; install it outside the repository" >&2; exit 1)
+	$(TRIVY) image --scanners vuln --severity CRITICAL,HIGH --ignore-unfixed --exit-code 1 $(IMAGE)
+	@echo "image-scan: ok"
 
 # test-contract valida o contrato OpenAPI versionado: o documento parseia,
 # satisfaz as convenções estruturais do plano (Problem Details, security
@@ -168,13 +292,13 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-contract test-security test-web typecheck build-web audit-web audit-i18n
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n audit-ci
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
-	@for gate in lint test-race vuln; do \
+	@for gate in lint; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
-	@for gate in test-e2e test-load-smoke; do \
+	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify backup-verify deploy-verify vuln; do \
 		echo "  - $$gate"; \
 	done
 	@echo "verify: OK — todas as capacidades existentes do estágio atual passaram."

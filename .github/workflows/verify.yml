@@ -1,23 +1,121 @@
-# Foundation verification workflow (P01-T06).
-# Scope: checkout, Go, TypeScript, safe caching and `make verify`.
-# No deploy and no secrets. Third-party actions are pinned by commit SHA;
-# the comment beside each `uses` records the tag that SHA points to, so
-# upgrades are explicit and auditable.
+# Complete release verification (P19-T08).
+#
+# Scope: every gate the phase requires, on the exact artifact the release uses —
+# formatting, generated-artifact drift, unit, integration, selected race,
+# contract, security, browser journeys, migrations, dependency vulnerabilities,
+# the production image and its scan, and the four production behaviours the
+# earlier tasks built (ingress, topology, backup/PITR, deploy/rollback).
+#
+# Three rules this file obeys, and `tools/ciaudit` (run by `make audit-ci`, which
+# is inside `make verify`) refuses the file when it stops obeying them:
+#
+#   1. Every third-party action is pinned to an immutable commit SHA, with the
+#      tag it points to in a comment beside it. A tag can be moved; a SHA is a
+#      decision someone reviewed.
+#   2. Permissions are minimal: `contents: read` here and the two extra read
+#      scopes the dependency review needs, nothing else. No job writes to the
+#      repository and no step reads a secret other than `GITHUB_TOKEN`.
+#   3. The complete verification **skips draft pull requests and never skips
+#      anything else**. A draft is work in progress (`.local/GIT_FLOW.md` §5):
+#      the per-task cadence is local, targeted tests, and this suite runs once
+#      the PR is marked ready. That is why the trigger lists
+#      `ready_for_review` and why every job carries the same draft condition —
+#      without either half, the skip would reduce the final gate instead of
+#      deferring it.
+#
+# Deliberately absent: `make test-load-smoke`. It measures capacity against a
+# prepared instance with k6, not correctness, and it is not part of the release
+# gate (docs/CI.md). It is absent from this file, never from the plan.
 name: verify
 
 on:
   push:
     branches: [main]
   pull_request:
+    # `ready_for_review` is what starts the complete suite; `synchronize` makes
+    # a corrective commit on a ready PR re-run it. Both halves are required:
+    # the job conditions below skip drafts, so a pull request that never
+    # becomes ready would never be verified at all.
+    types: [opened, synchronize, reopened, ready_for_review]
 
-# Least privilege: this workflow never writes to the repository.
 permissions:
   contents: read
 
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The image tag every job here builds, audits and scans. `Makefile` takes it
+  # from the environment (`IMAGE ?= …`), so one value feeds `make image-verify`,
+  # the scan and the compose gate.
+  IMAGE: goyim-arena:verify
+
 jobs:
-  verify:
+  foundation:
     name: Foundation verification
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    # The phase's CI budget is 30 minutes (`.local/git-flow.sh` waits 1800s for
+    # the whole PR). Every job declares a bound inside it.
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:18.4
+        env:
+          POSTGRES_USER: arena
+          POSTGRES_PASSWORD: arena-local-dev
+          POSTGRES_DB: arena
+          POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+          POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U arena -d arena"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      # The real PostgreSQL the integration, race, migration and security gates
+      # run against. The harnesses create disposable databases beside it; the
+      # database named here is only the door.
+      ARENA_DATABASE_URL: postgres://arena:arena-local-dev@127.0.0.1:54329/arena?sslmode=disable
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      # Keep the generator version aligned with the checked-in file headers.
+      # A fixed version prevents a new sqlc release from changing generated
+      # code or CI behavior without a reviewed repository change.
+      - name: Install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0
+
+      # One step, one command: the aggregate gate is the same one an operator
+      # runs, so the CI cannot drift from the Makefile. `tools/ciaudit` proves
+      # that this target still contains every gate the phase requires, and this
+      # workflow file itself is audited by it.
+      - name: Run every foundation gate
+        run: make verify
+
+  browser:
+    name: Browser journeys
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:18.4
@@ -54,11 +152,138 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      # Keep the generator version aligned with the checked-in file headers.
-      # A fixed version prevents a new sqlc release from changing generated
-      # code or CI behavior without a reviewed repository change.
-      - name: Install sqlc
-        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.29.0
+      - name: Install the pinned runner
+        run: npm ci --prefix tools/e2e --no-audit --no-fund
 
-      - name: Verify
-        run: make verify
+      # The harness installs the browser build of the pinned runner but never
+      # its system dependencies: that is a machine-level change, and the runner
+      # preparing the machine is this job.
+      - name: Install the browser's system dependencies
+        run: npx --prefix tools/e2e playwright install-deps chromium
+
+      - name: Run the browser journeys
+        run: make test-e2e
+
+  image:
+    name: Production image
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # The gates invoke Docker, and run their own audits from this repository
+      # with Go; curl, openssl and the daemon are on the runner image.
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Builds the artifact from the Dockerfile and audits it: non-root,
+      # read-only filesystem, no sources or toolchain inside, migrations that
+      # apply from inside the image, and the pages it serves.
+      - name: Build and audit the production image
+        run: make image-verify
+
+      # The same artifact, scanned. The parameters are the ones `make
+      # image-scan` declares — CRITICAL and HIGH, unfixed excluded, exit code 1
+      # — because a scan in CI that is weaker than the gate an operator runs
+      # would be a green tick over a different question.
+      - name: Scan the production image
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        with:
+          image-ref: ${{ env.IMAGE }}
+          scanners: vuln
+          vuln-type: os
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'
+          format: table
+
+  ingress:
+    name: Ingress configuration
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      - name: Verify the ingress
+        run: make caddy-verify
+
+  stack:
+    name: Production stack
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Brings up the committed topology in loopback, applies the migrations
+      # with the application's own image, drives a real registration through the
+      # ingress, inspects what is published, and proves the account and its
+      # queued work survive a restart and a recreate.
+      - name: Verify the production topology
+        run: make compose-verify
+
+  backup:
+    name: Backup and point-in-time recovery
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Archives WAL, ships a sealed base backup, destroys the primary, restores
+      # into an empty cluster up to a chosen instant and compares what came back.
+      - name: Verify backup and recovery
+        run: make backup-verify
+
+  deploy:
+    name: Deploy and rollback
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.sum
+
+      # Deploys by digest, proves readiness, smoke and the running artifact
+      # before recording a release, refuses a release that does not become
+      # healthy, restores the previous one and leaves the schema unmoved.
+      - name: Verify deploy and rollback
+        run: make deploy-verify

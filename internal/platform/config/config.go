@@ -45,6 +45,13 @@ type Config struct {
 	billingCancelURL  string
 	stripeSecretKey   Secret
 	stripeTimeout     time.Duration
+	resendAPIKey      Secret
+	emailFrom         string
+
+	sentryDSN           Secret
+	posthogAPIKey       Secret
+	posthogHost         string
+	analyticsSampleRate int
 }
 
 // Env is the deployment environment of the process.
@@ -176,6 +183,12 @@ func Load(environ []string) (Config, error) {
 		billingCancelURLVariable:      true,
 		stripeSecretKeyVariable:       true,
 		stripeTimeoutVariable:         true,
+		ResendAPIKeyVariable:          true,
+		EmailFromVariable:             true,
+		SentryDSNVariable:             true,
+		PostHogAPIKeyVariable:         true,
+		PostHogHostVariable:           true,
+		AnalyticsSampleRateVariable:   true,
 	}
 	var validationErrors ValidationErrors
 	for name := range values {
@@ -198,6 +211,8 @@ func Load(environ []string) (Config, error) {
 		dbMaxConnIdleTime: 30 * time.Minute,
 		dbAcquireTimeout:  5 * time.Second,
 		stripeTimeout:     10 * time.Second,
+
+		analyticsSampleRate: DefaultAnalyticsSampleRate,
 	}
 
 	if raw, present := values["ARENA_ENV"]; present {
@@ -403,6 +418,48 @@ func Load(environ []string) (Config, error) {
 		validationErrors = append(validationErrors, problems...)
 	}
 
+	if raw, present := values[ResendAPIKeyVariable]; present {
+		secret, problems := parseResendAPIKey(raw)
+		config.resendAPIKey = secret
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[EmailFromVariable]; present {
+		address, problems := parseEmailFrom(raw)
+		if len(problems) == 0 {
+			config.emailFrom = address
+		}
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[SentryDSNVariable]; present {
+		secret, problems := parseSentryDSN(raw)
+		config.sentryDSN = secret
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[PostHogAPIKeyVariable]; present {
+		secret, problems := parsePostHogAPIKey(raw)
+		config.posthogAPIKey = secret
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[PostHogHostVariable]; present {
+		host, problems := parsePostHogHost(raw)
+		if len(problems) == 0 {
+			config.posthogHost = host
+		}
+		validationErrors = append(validationErrors, problems...)
+	}
+
+	if raw, present := values[AnalyticsSampleRateVariable]; present {
+		rate, problems := parseAnalyticsSampleRate(raw)
+		if len(problems) == 0 {
+			config.analyticsSampleRate = rate
+		}
+		validationErrors = append(validationErrors, problems...)
+	}
+
 	// Production-specific safety rules: the plan forbids insecure production
 	// defaults, so required secrets must be present in that environment.
 	if config.env == EnvProduction && !config.databaseURL.IsSet() {
@@ -431,6 +488,25 @@ func Load(environ []string) (Config, error) {
 	if config.env == EnvProduction && !config.stripeSecretKey.IsSet() {
 		validationErrors = append(validationErrors, ValidationError{
 			Variable: stripeSecretKeyVariable,
+			Problem:  "required when ARENA_ENV=production",
+		})
+	}
+
+	// Production always delivers email: every registration sends a confirmation
+	// link, so the environment that serves real accounts always has a provider
+	// credential and a verified sender. Requiring them here — rather than
+	// letting the composition discover it — makes the refusal name the variable
+	// an operator has to set (P19-T02A).
+	if config.env == EnvProduction && !config.resendAPIKey.IsSet() {
+		validationErrors = append(validationErrors, ValidationError{
+			Variable: ResendAPIKeyVariable,
+			Problem:  "required when ARENA_ENV=production",
+		})
+	}
+
+	if config.env == EnvProduction && config.emailFrom == "" {
+		validationErrors = append(validationErrors, ValidationError{
+			Variable: EmailFromVariable,
 			Problem:  "required when ARENA_ENV=production",
 		})
 	}

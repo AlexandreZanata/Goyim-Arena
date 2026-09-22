@@ -178,6 +178,7 @@ func ComposeParticipation(options Options) (*ParticipationSurface, error) {
 		RateLimit:        throttle,
 		Templates:        templates,
 		MaxAttributions:  attributionPolicy.MaxAttributions,
+		Analytics:        options.Analytics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: participation journey: %w", err)

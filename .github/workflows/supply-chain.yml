@@ -1,12 +1,25 @@
-# Supply-chain verification for P16-T08.
-# Every third-party action is pinned to an immutable commit SHA. The workflow
-# has no write access to the repository and never receives production secrets.
+# Supply-chain verification (P16-T08; extended by P19-T08).
+#
+# Every third-party action is pinned to an immutable commit SHA, with the tag it
+# points to in a comment. The workflow has no write access to the repository and
+# never receives production secrets: the only secret it reads is the token
+# GitHub itself issues to the run.
+#
+# The Go vulnerability gate runs **the Makefile target** (`make vuln`), not a
+# copy of its command, so the CI and an operator ask the same question. The
+# scanner is still installed here, pinned, because the gate refuses to run
+# without it.
+#
+# Like `verify.yml`, this workflow skips drafts and never skips anything else
+# (`.local/GIT_FLOW.md` §5): the trigger lists `ready_for_review` and every job
+# carries the same draft condition.
 name: supply-chain
 
 on:
   push:
     branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   contents: read
@@ -18,8 +31,9 @@ concurrency:
 jobs:
   dependency-review:
     name: Dependency review
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: read
@@ -32,7 +46,9 @@ jobs:
 
   source-scans:
     name: Source and manifest scans
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -53,11 +69,13 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
+      # The version is pinned here and named in the gate's own refusal message,
+      # so a machine that cannot run `make vuln` fails the same way CI would.
       - name: Install Go vulnerability scanner
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
 
       - name: Scan Go dependencies
-        run: govulncheck ./...
+        run: make vuln
 
       - name: Audit frontend dependencies
         run: npm audit --prefix web --audit-level=high
@@ -71,8 +89,13 @@ jobs:
 
   image-scan:
     name: Container image scan
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
+      # The other image in production is the database. The application image is
+      # scanned in `verify.yml`, on the artifact that same run builds, because a
+      # scan of an image nobody built would be a scan of a tag.
       - name: Scan the declared PostgreSQL image
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:

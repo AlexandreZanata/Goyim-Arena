@@ -1,0 +1,338 @@
+# Production Compose for Goyim Arena (P19-T02).
+#
+# This file describes a *topology*, not a build. Every image is referenced by
+# the digest of its manifest list and nothing is compiled where the stack runs,
+# because a host that builds the artifact it deploys is a host where "rollback"
+# means "rebuild and hope".
+#
+# The four services are the four roles docs/DEPLOYMENT.md §1 names: the ingress,
+# the process that serves pages, the process that executes queued work, and the
+# database. `app` and `worker` run the same digest with different commands,
+# because they are the same artifact asked two different questions.
+#
+# What each block exists for:
+#
+#   networks  three, because "reachable by the ingress", "allowed to reach the
+#             internet" and "holds the data" are three different grants. The
+#             database is only on the internal network, so the public ingress
+#             has no route to it even if a rule is misread; the worker is not on
+#             the ingress network at all, so an inbound request has no path to a
+#             process that has no inbound surface.
+#   volumes   PostgreSQL data and Caddy's own state. The application containers
+#             keep nothing: they are read-only and stateless, which is what
+#             makes replacing one a restart instead of a migration.
+#   secrets   no credential value appears in this file. The application and the
+#             worker read `COMPOSE_ENV_FILE` (default `.env.production`), the
+#             database reads `COMPOSE_DB_ENV_FILE` (default
+#             `.env.production.db`), and the origin certificate and key are
+#             files the operator owns, named here by path only. Two runtime
+#             files instead of one is the least-privilege half of the same
+#             decision: the payment and email credentials are never handed to
+#             the database container, and the database password is never
+#             handed to a process that does not open the database. Both are
+#             git-ignored by the `.env.*` rule and are expected to be 0600.
+#   limits    the initial numbers of docs/DEPLOYMENT.md §2. They are limits to
+#             investigate, not capacity promises: P28 revisits them with
+#             measurements, and a limit copied from another machine is a guess
+#             wearing a number.
+#
+# The database archives its WAL (P19-T04): `archive_mode`, `archive_command` and
+# the mounts it needs are declared in its own block, the script it calls is
+# `deploy/backup/`, and the settings that script reads (`BACKUP_S3_*`,
+# `BACKUP_BIN`) come from the database's own environment file — they belong to
+# the process that ships the segments, not to the processes that serve requests.
+# `tools/backupctl check-compose` refuses this file when the archive is
+# incomplete, and `make backup-verify` proves the pipeline against a real server.
+#
+# Deliberately absent: migrations. A release applies them as its own step with
+# this same image (docs/DEPLOYMENT.md §5.5, P19-T07), because a container that
+# migrates while its neighbours serve is a schema change racing a request.
+#
+# Usage:
+#
+#   docker compose --env-file .env.production -f compose.production.yaml up -d
+#   docker compose --env-file .env.production -f compose.production.yaml run --rm app migrate up
+#
+# `make compose-verify` runs the whole thing against the built image.
+
+name: goyim-arena-production
+
+services:
+  db:
+    image: postgres:18.4@sha256:a02db8cac496f15b094798a38254f14d6e00741f709360e5e00bb6668ea31636
+    restart: unless-stopped
+    # The database password comes from its own environment file: the compose
+    # file names no credential value (the audit refuses one that does), and the
+    # file the application reads never reaches this container, so the provider
+    # credentials are not present in the process that holds the data.
+    #
+    # The password here and the password inside ARENA_DATABASE_URL must be the
+    # same string; a deployment that lets them drift does not lose integrity,
+    # it fails to authenticate, which is why the drift is a boot error and not
+    # a silent fallback.
+    env_file:
+      - "${COMPOSE_DB_ENV_FILE:-.env.production.db}"
+    environment:
+      POSTGRES_USER: arena
+      POSTGRES_DB: arena
+      # Deterministic collation, the same one the development Compose and the
+      # test databases use: an index built under a different collation is not
+      # the index the queries were written against.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      # The standard libpq variable the backup scripts inside this container use
+      # to reach the local server (they run as root, and `root` is not a role).
+      # It is the same role POSTGRES_USER creates, named once.
+      PGUSER: arena
+    # Continuous WAL archiving (P19-T04). Every segment this server completes is
+    # shipped, sealed, to the object store, and that archive is what turns a
+    # daily base backup into a point-in-time restore.
+    #
+    # The flags are here rather than in a mounted postgresql.conf because this
+    # file is the deployment: `tools/backupctl check-compose` refuses a db
+    # service without them, `make verify` runs that refusal, and the behaviour
+    # gate (deploy/backup/verify.sh) starts its server with this same command,
+    # read from this same file. A setting that lived in a second place would be
+    # a setting that drifts from the one the gate exercises.
+    #
+    #   archive_mode=on        without it the server recycles WAL unwritten and
+    #                          the store goes quiet without anything failing;
+    #   archive_timeout=300    the bound on lost history: a segment is archived
+    #                          when it fills *or* after five minutes, and the
+    #                          published RPO of §7 is fifteen minutes;
+    #   wal_level=replica      the floor for an archive a restore can replay;
+    #   max_wal_senders        room for pg_basebackup to stream while the
+    #                          application keeps writing;
+    #   wal_keep_size=512MB    what the server refuses to recycle while the
+    #                          archive is failing, so a stall is a stall and not
+    #                          a permanent gap in the history.
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=/opt/backup/archive-wal.sh %p %f
+      - -c
+      - archive_timeout=300
+      - -c
+      - max_wal_senders=3
+      - -c
+      - wal_keep_size=512MB
+    volumes:
+      # postgres:18+ layout: one mount at /var/lib/postgresql, with the cluster
+      # in a subdirectory so pg_upgrade --link stays usable.
+      - db-data:/var/lib/postgresql
+      # The backup scripts, the tool they call and the sealing key. The first
+      # two are read-only copies of committed files; the key is a file the
+      # operator owns and is never an environment variable, because a key in the
+      # environment is a key in `docker inspect`.
+      - "${COMPOSE_BACKUP_SCRIPTS_DIR:-./deploy/backup}:/opt/backup:ro"
+      - "${COMPOSE_BACKUP_TOOL:-./bin/backupctl}:/opt/backup-tool/backupctl:ro"
+      - "${COMPOSE_BACKUP_KEY_FILE:-./secrets/backup.key}:/run/secrets/backup_key:ro"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arena -d arena"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4g
+
+  app:
+    image: ${COMPOSE_ARENA_IMAGE:?define COMPOSE_ARENA_IMAGE with the application image pinned by digest}
+    restart: unless-stopped
+    command: ["server"]
+    env_file:
+      - "${COMPOSE_ENV_FILE:-.env.production}"
+    environment:
+      # The environment is stated here instead of left to the file: the file is
+      # the operator's and may be a copy of the template, and production is the
+      # one value that must not be inherited by accident. The listen address
+      # and the asset directory are declared in the image itself (P19-T01), so
+      # they have one owner.
+      ARENA_ENV: production
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      # edge: the ingress reaches this process. internal: the database does.
+      # egress: this process reaches the payment and email providers. Three
+      # grants, three networks, none implied by another.
+      - edge
+      - internal
+      - egress
+    depends_on:
+      db:
+        condition: service_healthy
+    stop_grace_period: 30s
+    # Log rotation is declared here rather than left to the host: a process that
+    # can write its own log without a bound is a process that can fill the disk
+    # the database lives on (docs/DEPLOYMENT.md §8).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.5"
+          memory: 1g
+
+  worker:
+    image: ${COMPOSE_ARENA_IMAGE:?define COMPOSE_ARENA_IMAGE with the application image pinned by digest}
+    restart: unless-stopped
+    command: ["worker"]
+    env_file:
+      - "${COMPOSE_ENV_FILE:-.env.production}"
+    environment:
+      ARENA_ENV: production
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      # No edge: nothing from outside may reach the process that executes
+      # queued work. It still needs egress, because the delivery it runs calls
+      # the email provider.
+      - internal
+      - egress
+    depends_on:
+      db:
+        condition: service_healthy
+    # A stop is not an abort: the worker finishes the job it is holding and
+    # records the outcome (P15-T02). The budget is wider than one handler
+    # deadline, so an in-flight job is not abandoned by a routine restart.
+    stop_grace_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+
+  caddy:
+    image: caddy:2.10.0-alpine@sha256:ae4458638da8e1a91aafffb231c5f8778e964bca650c8a8cb23a7e8ac557aa3c
+    restart: unless-stopped
+    ports:
+      # The only published ports in this file, and the audit fails if another
+      # service publishes one. The container ports are the ingress's own: an
+      # operator may publish them anywhere, but nothing else may be reachable
+      # from outside.
+      #
+      # The binding address is a variable because "who may reach the origin" is
+      # a firewall decision (docs/DEPLOYMENT.md §3) and the default here is the
+      # truthful one for a host whose only inbound rule is Cloudflare's. The
+      # published port is a variable for the same reason a port is ever a
+      # variable: it belongs to the host. `make compose-verify` sets both to
+      # loopback with an ephemeral port, so the gate binds nothing public.
+      - target: 80
+        published: "${COMPOSE_HTTP_PORT:-80}"
+        host_ip: "${COMPOSE_INGRESS_BIND:-0.0.0.0}"
+        protocol: tcp
+      - target: 443
+        published: "${COMPOSE_HTTPS_PORT:-443}"
+        host_ip: "${COMPOSE_INGRESS_BIND:-0.0.0.0}"
+        protocol: tcp
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      # The site address and the certificate are the ingress's own concerns;
+      # the certificate arrives as a secret mounted at /run/secrets.
+      COMPOSE_SITE_ADDRESS: ${COMPOSE_SITE_ADDRESS:?define COMPOSE_SITE_ADDRESS with the public host name the certificate is issued for}
+    secrets:
+      - origin_certificate
+      - origin_key
+    networks:
+      # Only edge: Caddy reaches the application and nothing else. It has no
+      # route to the database, which is why a misconfigured route cannot become
+      # a database client.
+      - edge
+    healthcheck:
+      # The admin endpoint is on loopback inside the container, and it answers
+      # only after the configuration loaded: Caddy exits on a configuration it
+      # cannot load, so an answer here means the process is up and serving what
+      # this file declares. P19-T03 owns the rest of the Caddyfile; if it turns
+      # the admin endpoint off, this probe changes with it.
+      test: ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp
+    # The capabilities are deliberately NOT dropped here, and the reason is the
+    # certificate. Compose mounts a file secret as a bind mount of the
+    # operator's file, so what the container sees is a 0600 key owned by the
+    # deploying user; reading it as a root that dropped its capabilities needs
+    # CAP_DAC_READ_SEARCH back, which is "read any file on the system" handed
+    # back for one file. The narrower alternative — running Caddy as a non-root
+    # user whose uid owns the key, or copying the pair into a path with the
+    # deployment's own mode — belongs to the ingress hardening task (P19-T03),
+    # together with the rest of the Caddyfile.
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256m
+
+networks:
+  # The ingress side: Caddy and the application, and nothing else.
+  edge:
+  # The data side. `internal: true` is the point of the name: no route out of
+  # the host, so a process holding the data cannot exfiltrate it and the
+  # database cannot reach the internet.
+  internal:
+    internal: true
+  # The provider side: the only way out, and only for the processes that make
+  # outbound calls (payment provider, email provider).
+  egress:
+
+volumes:
+  db-data:
+  caddy-data:
+  caddy-config:
+
+secrets:
+  # Paths, never contents. Both files are the operator's and are expected
+  # outside the repository (see docs/DEPLOYMENT.md §3).
+  origin_certificate:
+    file: ${COMPOSE_TLS_CERT_FILE:?define COMPOSE_TLS_CERT_FILE with the path of the origin certificate}
+  origin_key:
+    file: ${COMPOSE_TLS_KEY_FILE:?define COMPOSE_TLS_KEY_FILE with the path of the origin private key}

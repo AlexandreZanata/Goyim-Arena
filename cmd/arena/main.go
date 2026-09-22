@@ -26,7 +26,6 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/profiling"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/securityheaders"
 )
@@ -42,6 +41,7 @@ The commands are:
   server     run the HTTP server (ARENA_* configuration from the environment)
   worker     consume durable jobs until stopped (SIGTERM or SIGINT)
   migrate    apply or inspect database migrations (status, up)
+  admin      bootstrap or revoke an administrator from the host (never over HTTP)
   projections rebuild derived public statistics projections
   version    show the arena version; use --json for machine-readable output
   help       show this help
@@ -68,6 +68,8 @@ func run(args []string, stdout *os.File) error {
 		return runWorker(args[1:], stdout)
 	case "migrate":
 		return runMigrate(args[1:], stdout)
+	case "admin":
+		return runAdmin(args[1:], stdout)
 	case "projections":
 		return runProjections(args[1:], stdout)
 	case "version":
@@ -118,6 +120,16 @@ func runServer(args []string, stdout *os.File) error {
 	clock := clockseed.NewClock()
 	random := clockseed.NewRandom()
 
+	// Telemetry is composed before any surface: the account and participation
+	// journeys receive the analytics sink, and the metrics registry the
+	// transport writes to is the one the administrative listener renders
+	// (P19-T05).
+	telemetry, err := startTelemetry(cfg, logger, clock)
+	if err != nil {
+		return err
+	}
+	defer telemetry.Close()
+
 	var readyCheckers []httpserver.ReadyChecker
 	var surfaces []httpserver.Surface
 	if cfg.DatabaseURL().IsSet() {
@@ -129,6 +141,9 @@ func runServer(args []string, stdout *os.File) error {
 		}
 		defer pool.Close()
 		readyCheckers = append(readyCheckers, pool)
+		if err := registerDatabaseMetrics(telemetry, pool, clock); err != nil {
+			return err
+		}
 
 		// The account journey is composed whole or not at all: the database
 		// and the frontend build are both required, and the boot is the only
@@ -175,6 +190,15 @@ func runServer(args []string, stdout *os.File) error {
 			// delivery the person would (P18-T07). Production refuses the
 			// variable before the boot reaches here.
 			SinkDir: cfg.EmailSinkDir(),
+			// Production delivers through the provider: the flows queue the
+			// message as durable work and the worker runs the handler
+			// (P19-T02A). A missing credential is a refusal at boot, never a
+			// registration whose link goes nowhere.
+			EmailFrom:   cfg.EmailFrom(),
+			EmailAPIKey: cfg.ResendAPIKey(),
+			// The account events are allowlisted product facts; the sink
+			// records them without ever blocking the request (P19-T05).
+			Analytics: telemetry.Events,
 		})
 		if err != nil {
 			return err
@@ -197,6 +221,7 @@ func runServer(args []string, stdout *os.File) error {
 				Assets:       manifest,
 				CursorSecret: []byte(cfg.CursorSecret().Unredacted()),
 				Security:     manager,
+				Analytics:    telemetry.Events,
 			})
 			if err != nil {
 				return err
@@ -222,6 +247,11 @@ func runServer(args []string, stdout *os.File) error {
 	if err != nil {
 		return err
 	}
+	// The observation layer wraps the composed router without writing
+	// anything itself: the security policy stays the outermost writer of the
+	// response, and every request is counted, timed and checked for a panic
+	// on the way out.
+	handler = telemetry.HTTPMiddleware(handler)
 
 	server, err := httpserver.New(httpserver.Options{
 		Addr:    cfg.Addr(),
@@ -235,25 +265,10 @@ func runServer(args []string, stdout *os.File) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	var adminServer *httpserver.Server
 	if adminAddr := cfg.AdminAddr(); adminAddr != "" {
-		adminServer, err = httpserver.New(httpserver.Options{
-			Addr:    adminAddr,
-			Handler: profiling.Handler(),
-			Logger:  logger,
-		})
-		if err != nil {
-			return fmt.Errorf("initialize profiling server: %w", err)
+		if err := startAdminListener(ctx, adminAddr, adminHandler(telemetry.MetricsHandler()), logger); err != nil {
+			return err
 		}
-		if err := adminServer.Listen(); err != nil {
-			return fmt.Errorf("listen profiling server: %w", err)
-		}
-		go func() {
-			if err := adminServer.Run(ctx); err != nil && ctx.Err() == nil {
-				logger.Error("profiling server stopped", slog.String("error", err.Error()))
-			}
-		}()
-		logger.Info("profiling server: listening", slog.String("addr", adminServer.Addr()))
 	}
 
 	if err := server.Listen(); err != nil {

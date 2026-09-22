@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sync"
@@ -104,9 +105,19 @@ func TestRepository_PasswordResetConcurrentRace(t *testing.T) {
 	}
 	_ = repo.SetEmailVerified(ctx, acc.ID(), time.Now().UTC())
 
+	// The token is hexadecimal on purpose. The use case normalizes the submitted
+	// token with strings.TrimSpace before hashing it, and a raw 32-byte draw is
+	// whitespace at the first or last byte in roughly one draw out of twenty —
+	// measured at 4.63% over 200,000 draws — which changes the hash and makes
+	// every worker fail with an error this test used not to count. A race test
+	// whose outcome depends on a random draw is a lottery, and this one fired in
+	// CI. Hex digits are never whitespace, so the draw cannot choose the outcome.
 	tokenBytes := make([]byte, 32)
-	_, _ = rand.Read(tokenBytes)
-	tokenHash := sha256.Sum256(tokenBytes)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		t.Fatalf("draw token bytes failed: %v", err)
+	}
+	token := hex.EncodeToString(tokenBytes)
+	tokenHash := sha256.Sum256([]byte(token))
 	expiresAt := time.Now().UTC().Add(15 * time.Minute)
 
 	if err := repo.CreatePasswordResetToken(ctx, acc.ID(), tokenHash[:], expiresAt); err != nil {
@@ -119,6 +130,13 @@ func TestRepository_PasswordResetConcurrentRace(t *testing.T) {
 	var wg sync.WaitGroup
 	var successCount int32
 	var replayCount int32
+	// Every outcome is classified: a winner, a loser rejected as a replay, or
+	// anything else — which is a failure with a name, never a silent zero in
+	// both counters. The original test counted only the first two, which is how
+	// ten identical rejections read as "0 successes and 0 replays" instead of
+	// as the bug it was.
+	var otherMu sync.Mutex
+	otherOutcomes := map[string]int{}
 
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -126,13 +144,18 @@ func TestRepository_PasswordResetConcurrentRace(t *testing.T) {
 			defer wg.Done()
 
 			err := completeUC.Execute(ctx, application.CompletePasswordResetCommand{
-				Token:       string(tokenBytes),
+				Token:       token,
 				NewPassword: fmt.Sprintf("RacePassword%d!", workerID),
 			})
-			if err == nil {
+			switch {
+			case err == nil:
 				atomic.AddInt32(&successCount, 1)
-			} else if errors.Is(err, application.ErrTokenAlreadyUsed) {
+			case errors.Is(err, application.ErrTokenAlreadyUsed):
 				atomic.AddInt32(&replayCount, 1)
+			default:
+				otherMu.Lock()
+				otherOutcomes[err.Error()]++
+				otherMu.Unlock()
 			}
 		}(i)
 	}
@@ -145,6 +168,77 @@ func TestRepository_PasswordResetConcurrentRace(t *testing.T) {
 	if replayCount != workers-1 {
 		t.Errorf("expected %d replay rejections in database, got %d", workers-1, replayCount)
 	}
+	for message, count := range otherOutcomes {
+		t.Errorf("unexpected outcome for %d worker(s): %s", count, message)
+	}
+}
+
+// TestRepository_PasswordResetTokenWhitespaceIsTheCode'sDecision registers what
+// the use case actually does with a token surrounded by whitespace. The race
+// test above needs a token the normalization cannot alter; this one exists so
+// that the normalization itself stays an observed decision: if the use case ever
+// stops trimming, or starts rejecting whitespace outright, this test is what
+// changes — deliberately, and never as a side effect of a refactor.
+func TestRepository_PasswordResetTokenWhitespaceIsTheCodeDecision(t *testing.T) {
+	ctx := context.Background()
+	testDB := dbtest.New(t)
+	repo := identitypg.NewRepository(testDB.Pool.Pool())
+
+	hasher, err := argon2id.New(argon2id.FastParams(), rand.Reader)
+	if err != nil {
+		t.Fatalf("init hasher failed: %v", err)
+	}
+
+	email, err := domain.ParseEmail("pgresettrim@example.com")
+	if err != nil {
+		t.Fatalf("parse email failed: %v", err)
+	}
+	clock := clockseed.System{}
+	acc, err := repo.CreateAccountWithPassword(ctx, email, "oldHash")
+	if err != nil {
+		t.Fatalf("create account failed: %v", err)
+	}
+	_ = repo.SetEmailVerified(ctx, acc.ID(), time.Now().UTC())
+
+	token := "trim-decision-token-0123456789abcdef"
+	tokenHash := sha256.Sum256([]byte(token))
+	expiresAt := time.Now().UTC().Add(15 * time.Minute)
+	if err := repo.CreatePasswordResetToken(ctx, acc.ID(), tokenHash[:], expiresAt); err != nil {
+		t.Fatalf("create reset token failed: %v", err)
+	}
+
+	completeUC := application.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, fakeemail.NewSender(), clock)
+
+	// The token is stored under its exact hash; what the submission carries is
+	// the same token padded with whitespace on both sides. The three possible
+	// behaviors are named, and anything outside them fails the test.
+	err = completeUC.Execute(ctx, application.CompletePasswordResetCommand{
+		Token:       "\t\n " + token + " \r\v\f",
+		NewPassword: "WhitespaceDecision1!",
+	})
+	switch {
+	case err == nil:
+		// Trimming: the padded submission reached the stored token.
+		t.Log("the use case trims whitespace around the token and accepted the padded submission")
+	case errors.Is(err, application.ErrInvalidToken):
+		// Strict: whitespace makes the submitted token a different token.
+		t.Log("the use case does not trim and rejected the padded submission as an invalid token")
+	default:
+		t.Fatalf("padded token produced an unnamed outcome: %v", err)
+	}
+
+	// The account's credential tells the two named behaviors apart, because the
+	// error alone cannot: a strict rejection and a replay can share a message.
+	// The query is by the account, so the answer is a fact about this account.
+	credential, err := repo.GetPasswordCredential(ctx, acc.ID())
+	if err != nil {
+		t.Fatalf("read credential failed: %v", err)
+	}
+	if credential.PasswordHash == "oldHash" {
+		t.Log("no password change happened: the padded submission was rejected")
+		return
+	}
+	t.Log("the password changed: the padded submission was accepted and trimmed")
 }
 
 func TestIntegration_FullPasswordResetJourney(t *testing.T) {

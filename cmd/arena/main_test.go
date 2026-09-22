@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbtest"
 )
 
 func runForTest(t *testing.T, args ...string) (string, string, error) {
@@ -689,5 +690,151 @@ func TestMigrateCommandsFailWithoutDatabaseURL(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ARENA_") {
 		t.Errorf("error should name the missing ARENA_* configuration, got: %v", err)
+	}
+}
+
+// TestServerBootsInProductionAndServesTheJourney is the validation of P19-T02A
+// at the process edge: the boot that used to be refused — production, because no
+// email delivery adapter was composed — now serves the account journey, and the
+// log says which pipeline it installed: messages are queued as durable work,
+// the local sink is not installed, and the provider credential is nowhere in it.
+//
+// The database is a disposable migrated one, so the pages are answered against
+// the real schema rather than against an empty server. It is a subprocess test
+// because the claim is about the binary an operator runs, not about a
+// composition assembled by the test.
+func TestServerBootsInProductionAndServesTheJourney(t *testing.T) {
+	if testing.Short() {
+		t.Skip("subprocess lifecycle test skipped in -short mode")
+	}
+
+	const credential = "re_live_never_print_me"
+	db := dbtest.New(t)
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatalf("resolve repo root: %v", err)
+	}
+
+	binary := filepath.Join(t.TempDir(), "arena")
+	build := exec.Command("go", "build", "-o", binary, "./cmd/arena")
+	build.Dir = repoRoot
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, output)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+
+	logPath := filepath.Join(t.TempDir(), "server.log")
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		t.Fatalf("create log file: %v", err)
+	}
+	defer logFile.Close()
+
+	command := exec.Command(binary, "server")
+	command.Env = []string{
+		"ARENA_ADDR=" + address,
+		"ARENA_ENV=production",
+		"ARENA_DATABASE_URL=" + db.DSN,
+		"ARENA_ASSETS_DIR=" + filepath.Join(repoRoot, "internal", "bootstrap", "testdata", "assets"),
+		// The three production requirements the configuration validates: the
+		// payment credential, the provider credential and the sender address
+		// (P19-T02A).
+		"ARENA_STRIPE_SECRET_KEY=sk_live_boot_test",
+		"ARENA_RESEND_API_KEY=" + credential,
+		"ARENA_EMAIL_FROM=Arena <no-reply@arena.invalid>",
+		// The participation journey signs its pagination cursors, and a
+		// server that mounts no such journey refuses the boot: production
+		// composes both journeys from one process (P18-T07B).
+		"ARENA_CURSOR_SECRET=arena-boot-test-cursor-secret-32b",
+		"PATH=" + os.Getenv("PATH"),
+	}
+	command.Stdout = logFile
+	command.Stderr = logFile
+	if err := command.Start(); err != nil {
+		t.Fatalf("start server: %v", err)
+	}
+
+	baseURL := "http://" + address
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	deadline := time.Now().Add(15 * time.Second)
+	var liveResponse *http.Response
+	for liveResponse == nil {
+		if time.Now().After(deadline) {
+			_ = command.Process.Kill()
+			_ = command.Wait()
+			log, _ := os.ReadFile(logPath)
+			t.Fatalf("the production server never answered /health/live; log:\n%s", log)
+		}
+		response, err := client.Get(baseURL + "/health/live")
+		if err == nil {
+			liveResponse = response
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_, _ = io.Copy(io.Discard, liveResponse.Body)
+	_ = liveResponse.Body.Close()
+	if liveResponse.StatusCode != http.StatusOK {
+		t.Fatalf("/health/live status = %d, want 200", liveResponse.StatusCode)
+	}
+
+	// The page is what proves the journey is mounted rather than merely
+	// routed: an unmounted surface answers the placeholder, which is not a
+	// document.
+	register, err := client.Get(baseURL + "/register")
+	if err != nil {
+		t.Fatalf("GET /register: %v", err)
+	}
+	body, err := io.ReadAll(register.Body)
+	_ = register.Body.Close()
+	if err != nil {
+		t.Fatalf("read GET /register body: %v", err)
+	}
+	if register.StatusCode != http.StatusOK {
+		t.Fatalf("GET /register status = %d, want 200 (body: %.200s)", register.StatusCode, body)
+	}
+	if contentType := register.Header.Get("Content-Type"); !strings.HasPrefix(contentType, "text/html") {
+		t.Fatalf("GET /register Content-Type = %q, want text/html", contentType)
+	}
+
+	if err := command.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("send SIGTERM: %v", err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	select {
+	case waitErr := <-done:
+		if waitErr != nil {
+			log, _ := os.ReadFile(logPath)
+			t.Fatalf("the production server exited with %v after SIGTERM; log:\n%s", waitErr, log)
+		}
+	case <-time.After(15 * time.Second):
+		_ = command.Process.Kill()
+		log, _ := os.ReadFile(logPath)
+		t.Fatalf("the production server did not stop within the deadline; log:\n%s", log)
+	}
+
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read server log: %v", err)
+	}
+	for _, record := range parseJSONLogRecords(t, string(log)) {
+		if message, ok := record["msg"].(string); ok && strings.Contains(message, "local email sink") {
+			t.Errorf("production installed the local email sink: %q", message)
+		}
+	}
+	if !containsRecord(parseJSONLogRecords(t, string(log)), "msg", "transactional email: messages are queued as durable jobs and delivered by the worker through the provider") {
+		t.Errorf("the log does not name the delivery pipeline production installed:\n%s", log)
+	}
+	if strings.Contains(string(log), credential) {
+		t.Errorf("the server log carries the provider credential:\n%s", log)
 	}
 }

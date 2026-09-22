@@ -1,0 +1,55 @@
+# Build context hygiene (P19-T01).
+#
+# The context is what `docker build` sends to the daemon, and anything in it can
+# end up in a layer. The Dockerfile copies explicit paths rather than the tree,
+# so this file is the second line of defence, not the first: it keeps the
+# context small and keeps a file that must never leave the machine — a local
+# `.env`, the Git history, the local plan — from being available to a `COPY`
+# someone adds later.
+#
+# `tools/imageaudit` requires this file to exclude the paths below: an image
+# that lost one of them would still build, and that is exactly why the gate has
+# to name them.
+
+# Version control and the local execution plan (never published, never built).
+.git
+.gitignore
+.github
+.local
+
+# Environment files and secrets. `.env.example` is a template of variable names
+# and safe examples, but it carries no value any image needs, so the whole
+# family is out together.
+.env
+.env.*
+
+# Local tooling and documentation that no stage reads.
+.editorconfig
+.gitmessage
+docs
+tests
+tools/e2e
+scripts
+compose.yaml
+
+# Dependencies: reinstalled inside each stage from the lockfiles, which is what
+# makes the build reproducible instead of dependent on this machine.
+node_modules
+**/node_modules
+
+# Build artifacts: each stage produces its own, and a stale `web/dist` copied
+# into the image would be served in place of the build that was just made.
+web/dist
+web/generated
+web/test-build
+bin
+dist
+coverage.out
+
+# Editor, OS and temporary files.
+.idea
+.vscode
+.DS_Store
+Thumbs.db
+tmp
+*.log

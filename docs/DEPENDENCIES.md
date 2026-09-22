@@ -59,8 +59,6 @@ Cada dependência admitida no projeto possui uma classe clara, um owner respons�
 | `golang.org/x/crypto` | Runtime Backend (Adapter / Platform) | `internal/platform/crypto` | Hashing seguro de senhas com algoritmo Argon2id | BSD-3-Clause |
 | `github.com/stripe/stripe-go` | Runtime Backend (Adapter) | `internal/billing/adapters/out/stripe` | Integração de Checkout, Billing e validação de webhooks | MIT |
 | `github.com/resend/resend-go` | Runtime Backend (Adapter) | `internal/notifications/adapters/out/email` | Envio de emails transacionais e operacionais via API Resend | MIT |
-| `github.com/getsentry/sentry-go` | Runtime Backend (Adapter) | `internal/platform/adapters/out/observability` | Monitoramento e captura de exceções em produção | Apache-2.0 |
-| `github.com/posthog/posthog-go` | Runtime Backend (Adapter) | `internal/platform/adapters/out/observability` | Telemetria e métricas de produto sem dados sensíveis | MIT |
 | `github.com/rivo/uniseg` v0.4.7 | Runtime Backend (Platform) | `internal/platform/text` | Segmentação e contagem de grapheme clusters (UAX #29) para o limite de 3.000 clusters e a tarifação de 1 INK por cluster (ADR-013) | MIT |
 | `golangci-lint` | Dev / Quality Tooling | Pipeline de CI e `Makefile` | Análise estática e checagem de regras de código Go | GPL-3.0 (CLI externa) |
 | `govulncheck` | Dev / Security Tooling | Pipeline de CI e `Makefile` | Verificação oficial de vulnerabilidades conhecidas em Go | BSD-3-Clause |
@@ -75,6 +73,15 @@ Cada dependência admitida no projeto possui uma classe clara, um owner respons�
 | `Cloudflare R2` (futuro) | Infraestrutura / Storage | `internal/platform/adapters/out/storage` | Armazenamento de arquivos estáticos quando necessário | Proprietária (SaaS) |
 | `Docker Compose` | Infraestrutura / Deploy | `infra/compose` | Orquestração local e de deploy do monólito na VPS | Apache-2.0 |
 | `GitHub Actions` | Infraestrutura / CI | `.github/workflows` | Execução automatizada de testes e checagens no CI | Proprietária (SaaS) |
+
+> **Sentry e PostHog, sem SDK (P19-T05).** Os dois provedores de telemetria
+> são alcançados pelas **próprias APIs HTTP**, em `internal/platform/observability`,
+> do mesmo modo que o adapter de email chama a API do Resend sem adicionar o
+> SDK dele. Nenhum pacote `getsentry/sentry-go` ou `posthog-go` entra no
+> `go.mod`: sob `Standard Library First`, um SDK é uma dependência nova que
+> exige justificativa e ADR, e a API HTTP de envelope (Sentry) e de lote
+> (PostHog) é suficiente e estável. O que cruza a fronteira do adapter são
+> valores planos (`ErrorReport`, `Event`), nunca tipos do fornecedor.
 
 ---
 

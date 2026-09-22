@@ -17,7 +17,10 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/observability"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/requestid"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/websurface"
 )
@@ -102,6 +105,10 @@ type HandlerConfig struct {
 	RateLimit             ratelimit.Protector
 	Templates             *Templates
 	RiskSignal            RiskSignal
+	// Analytics receives the allowlisted product events of the journey. It
+	// is optional: a test drives the journey without one, and a process
+	// composed without a provider records nothing.
+	Analytics observability.EventSink
 }
 
 // Handler serves the browser journey of the account.
@@ -116,6 +123,7 @@ type Handler struct {
 	rateLimit     ratelimit.Protector
 	templates     *Templates
 	riskSignal    RiskSignal
+	analytics     observability.EventSink
 }
 
 // NewHandler validates the composition and builds the handler. It fails closed:
@@ -153,7 +161,26 @@ func NewHandler(config HandlerConfig) (*Handler, error) {
 		rateLimit:     config.RateLimit,
 		templates:     config.Templates,
 		riskSignal:    config.RiskSignal,
+		analytics:     config.Analytics,
 	}, nil
+}
+
+// capture records one allowlisted product event of the journey. The adapter
+// supplies only the facts it owns — the account the flow resolved, the
+// request correlation and the negotiated locale — and the observability
+// package decides what may travel.
+func (h *Handler) capture(request *http.Request, name, accountID string) {
+	if h.analytics == nil {
+		return
+	}
+	h.analytics.Capture(observability.Event{
+		Name:      name,
+		AccountID: accountID,
+		RequestID: requestid.FromRequest(request),
+		Properties: map[string]any{
+			"locale": locale.FromContext(request.Context()).String(),
+		},
+	})
 }
 
 // unusable reports whether a dependency cannot be called, which covers both the
@@ -230,8 +257,10 @@ func (h *Handler) SubmitRegister(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
+	var registered *application.RegisterAccountResult
 	if len(problems) == 0 {
-		if _, err := h.register.Execute(r.Context(), application.RegisterAccountCommand{Email: email, Password: password}); err != nil {
+		result, err := h.register.Execute(r.Context(), application.RegisterAccountCommand{Email: email, Password: password})
+		if err != nil {
 			classified, isInput, err := h.registrationErrors(r, err)
 			if err != nil {
 				h.fail(w, r, err)
@@ -242,6 +271,8 @@ func (h *Handler) SubmitRegister(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			problems = classified
+		} else {
+			registered = result
 		}
 	}
 
@@ -253,6 +284,12 @@ func (h *Handler) SubmitRegister(w http.ResponseWriter, r *http.Request) {
 		}
 		h.renderForm(w, r, http.StatusBadRequest, page)
 		return
+	}
+
+	// The answer is uniform, so the event records the accepted submission
+	// and never claims whether the account was created or re-issued.
+	if registered != nil && registered.AccountID != "" {
+		h.capture(r, observability.EventAccountRegistrationSubmitted, registered.AccountID)
 	}
 
 	notice, err := h.notice(w, r, "auth.register.page_title", "auth.register.notice_heading", "auth.register.notice_detail", action{key: "auth.register.notice_action", href: "/verify"})
@@ -348,6 +385,7 @@ func (h *Handler) SubmitLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var session string
+	var signedIn *application.LoginResult
 	if len(problems) == 0 {
 		result, err := h.login.Execute(r.Context(), application.LoginCommand{
 			Email:     email,
@@ -367,6 +405,7 @@ func (h *Handler) SubmitLogin(w http.ResponseWriter, r *http.Request) {
 			problems = map[string]string{"password": message}
 		} else {
 			session = result.RawToken
+			signedIn = result
 		}
 	}
 
@@ -378,6 +417,10 @@ func (h *Handler) SubmitLogin(w http.ResponseWriter, r *http.Request) {
 		}
 		h.renderForm(w, r, http.StatusUnauthorized, page)
 		return
+	}
+
+	if signedIn != nil && signedIn.Account != nil {
+		h.capture(r, observability.EventAccountSignedIn, signedIn.Account.ID().String())
 	}
 
 	// Post-login rotation: the new session cookie and a fresh CSRF token, so a

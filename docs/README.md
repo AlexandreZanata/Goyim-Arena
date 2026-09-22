@@ -40,6 +40,8 @@ Quando houver conflito, a ordem de precedência é:
 - [SCALABILITY.md](SCALABILITY.md) — caminho mensurável para alta escala.
 - [SECURITY.md](SECURITY.md) — requisitos técnicos de segurança.
 - [DEPLOYMENT.md](DEPLOYMENT.md) — topologia, ambientes, backup e evolução.
+- [RUNBOOKS.md](RUNBOOKS.md) — alertas iniciais, thresholds e runbooks de incidente.
+- [CI.md](CI.md) — verificação completa de release: gates exigidos, jobs, ações pinadas e orçamento do pipeline.
 - [COMMITS.md](COMMITS.md) — Conventional Commits, scopes e versionamento.
 - [ADRs](adr/README.md) — decisões arquiteturais e suas consequências.
 

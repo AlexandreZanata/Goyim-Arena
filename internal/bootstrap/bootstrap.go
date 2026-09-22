@@ -39,14 +39,22 @@ import (
 	identitypostgres "github.com/AlexandreZanata/Goyim-Arena/internal/identity/adapters/postgres"
 	identityapp "github.com/AlexandreZanata/Goyim-Arena/internal/identity/application"
 	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
+	jobspostgres "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/adapters/postgres"
+	jobsapp "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/application"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/adapters/outbox"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/adapters/renderer"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/adapters/resend"
+	notificationsapp "github.com/AlexandreZanata/Goyim-Arena/internal/notifications/application"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clientip"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/observability"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
+	profilespostgres "github.com/AlexandreZanata/Goyim-Arena/internal/profiles/adapters/postgres"
 )
 
 // ErrIncompleteComposition marks a refusal to build a surface from a
@@ -78,6 +86,14 @@ type Options struct {
 	// participation journey renders. It is required by the journeys that
 	// paginate and ignored by the ones that do not.
 	CursorSecret []byte
+	// EmailFrom is the verified sender address of the transactional email
+	// provider, as the configuration validated it. It is required by the
+	// environments that deliver through a provider (P19-T02A).
+	EmailFrom string
+	// EmailAPIKey is the credential of that provider. It is never logged: it
+	// travels from the configuration to the adapter through Unredacted and
+	// nowhere else.
+	EmailAPIKey config.Secret
 	// SinkDir is the directory the local email sink writes to. When it is
 	// set, development and test deliver the identity messages there instead
 	// of keeping them in memory, so a journey driven by another process can
@@ -89,6 +105,22 @@ type Options struct {
 	// composes its own: correct for a process that serves one journey, and the
 	// reason `arena server` hands the same one to all of them.
 	Security *security.Manager
+	// Analytics is the allowlisted event sink the surfaces record their
+	// product events through. It is composed by ComposeTelemetry; nil means
+	// the surface emits nothing, which is the case of a test that drives the
+	// journey without a process.
+	Analytics observability.EventSink
+	// SentryDSN is the error reporter credential. Empty disables reporting.
+	SentryDSN config.Secret
+	// PostHogAPIKey is the product analytics write key. Empty disables
+	// analytics.
+	PostHogAPIKey config.Secret
+	// PostHogHost overrides the analytics API origin; empty selects the
+	// provider default.
+	PostHogHost string
+	// AnalyticsSampleRate is the deterministic sampling percentage of
+	// analytics, 0..100.
+	AnalyticsSampleRate int
 }
 
 // AccountSurface is the composed browser journey of the account, ready to be
@@ -115,10 +147,11 @@ func ComposeAccount(options Options) (*AccountSurface, error) {
 		return nil, err
 	}
 
-	emails, sink, err := accountEmails(options)
+	delivery, err := ComposeEmailDelivery(options)
 	if err != nil {
 		return nil, err
 	}
+	emails, sink := delivery.Sender, delivery.Sink
 	repository := identitypostgres.NewRepository(options.Pool)
 
 	hasher, err := argon2id.NewDefault(options.Random)
@@ -175,6 +208,7 @@ func ComposeAccount(options Options) (*AccountSurface, error) {
 		RateLimit:  throttle,
 		Templates:  templates,
 		RiskSignal: risk,
+		Analytics:  options.Analytics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap: account journey: %w", err)
@@ -288,7 +322,28 @@ func (options Options) validate(journey string) error {
 	}
 }
 
-// accountEmails selects the email sender of the environment.
+// EmailDelivery is the transactional email pipeline of the process. It answers
+// two questions with one composition because the two halves have to agree on
+// the same decision: how an identity flow hands a message over, and how a
+// queued delivery is executed (P19-T02A).
+type EmailDelivery struct {
+	// Sender is what the identity flows receive. In production it is the
+	// outbox bridge, which persists the message as durable work; in development
+	// and test it is the local sink, which records the message and never
+	// delivers it.
+	Sender identityapp.EmailSender
+	// Sink is the in-memory sink of development and test, exposed so a test
+	// that owns the process reads the tokens it recorded. It is nil in
+	// production, where nothing keeps a message in memory.
+	Sink *fakeemail.Sender
+	// Handler executes the queued deliveries in the worker. It is nil when
+	// nothing is queued, which is exactly the development and test case: there,
+	// a handler would consume work no flow ever produced.
+	Handler *outbox.Handler
+}
+
+// ComposeEmailDelivery composes the transactional email pipeline of the
+// environment.
 //
 // Development and test install the local sink the identity module already
 // documents for non-production environments, and the composition says so out
@@ -297,10 +352,20 @@ func (options Options) validate(journey string) error {
 // exist because two kinds of reader exist (P18-T07): the in-memory sink is
 // enough for a test that owns the process, and the directory sink is how a
 // reader in another process — the browser harness — sees the same delivery.
-// Production has no delivery adapter yet (P15 composed the queue and left
-// delivery to the phase that owns the provider), so it refuses to build the
-// journey instead of serving forms whose links go nowhere.
-func accountEmails(options Options) (identityapp.EmailSender, *fakeemail.Sender, error) {
+//
+// Production composes the delivery the previous phases built and left unwired:
+// the flow hands the message to the outbox, which persists the frozen facts of
+// the notification as an `email_delivery` job, and the worker renders and
+// delivers it through the provider. The chain is composed whole or not at all —
+// a registration whose confirmation link cannot be delivered is not a journey
+// worth serving — so a missing credential is a refusal that names the variable,
+// never a message dropped in silence.
+//
+// It reads the environment, the logger, the pool, the clock, the sender address
+// and the credential; the journey-only fields of Options are ignored, which is
+// why `arena worker` — a process that mounts no page — calls this same function
+// with the fields it has.
+func ComposeEmailDelivery(options Options) (*EmailDelivery, error) {
 	switch options.Env {
 	case config.EnvDevelopment, config.EnvTest:
 		if options.SinkDir != "" {
@@ -310,14 +375,14 @@ func accountEmails(options Options) (identityapp.EmailSender, *fakeemail.Sender,
 				Logger:    options.Logger,
 			})
 			if err != nil {
-				return nil, nil, fmt.Errorf("%w: account journey: local email sink: %w", ErrIncompleteComposition, err)
+				return nil, fmt.Errorf("%w: account journey: local email sink: %w", ErrIncompleteComposition, err)
 			}
 			options.Logger.Warn(
 				"account journey: local email sink writes to a directory; verification and recovery messages are recorded there and never delivered",
 				slog.String("env", string(options.Env)),
 				slog.String("directory", sink.Directory()),
 			)
-			return sink, nil, nil
+			return &EmailDelivery{Sender: sink}, nil
 		}
 
 		sink := fakeemail.NewSender()
@@ -325,11 +390,112 @@ func accountEmails(options Options) (identityapp.EmailSender, *fakeemail.Sender,
 			"account journey: local email sink installed; verification and recovery messages are recorded in this process and never delivered",
 			slog.String("env", string(options.Env)),
 		)
-		return sink, sink, nil
+		return &EmailDelivery{Sender: sink, Sink: sink}, nil
+	case config.EnvProduction:
+		return composeQueuedEmailDelivery(options)
 	default:
-		return nil, nil, fmt.Errorf(
-			"%w: account journey: environment %s has no email provider adapter composed (P15 delivered the durable queue and its delivery handler is still recorded as JOB_UNKNOWN_TYPE), so a registration could not deliver its confirmation link",
+		return nil, fmt.Errorf(
+			"%w: transactional email: environment %q is not one of development, test, production",
 			ErrIncompleteComposition, options.Env,
 		)
 	}
+}
+
+// composeQueuedEmailDelivery is the production pipeline: the identity port is
+// answered by the outbox bridge, and the worker handler renders and delivers
+// what the queue holds.
+//
+// The pieces are the ones P15 left behind, wired in the order that makes each
+// of them honest: the directory answers "which account and which locale" from
+// identity and profiles, the enqueuer persists the frozen facts inside the
+// caller's transaction when there is one, the notifier freezes the locale, and
+// the bridge is what identity sees. Nothing here re-implements a decision those
+// packages already make.
+func composeQueuedEmailDelivery(options Options) (*EmailDelivery, error) {
+	missing := make([]string, 0, 3)
+	if options.Logger == nil {
+		missing = append(missing, "logger")
+	}
+	if options.Clock == nil {
+		missing = append(missing, "clock")
+	}
+	if options.Pool == nil {
+		missing = append(missing, "postgres pool")
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return nil, fmt.Errorf("%w: transactional email: missing %s", ErrIncompleteComposition, strings.Join(missing, ", "))
+	}
+	if !options.EmailAPIKey.IsSet() || options.EmailFrom == "" {
+		return nil, fmt.Errorf(
+			"%w: transactional email: %s and %s are required: every registration sends a confirmation link, and without a provider adapter that message could not be delivered",
+			ErrIncompleteComposition, config.ResendAPIKeyVariable, config.EmailFromVariable,
+		)
+	}
+
+	accounts := identitypostgres.NewRepository(options.Pool)
+	preferences := profilespostgres.NewRepository(options.Pool)
+	directory, err := outbox.NewDirectory(accounts, preferences)
+	if err != nil {
+		return nil, fmt.Errorf("%w: transactional email: account directory: %w", ErrIncompleteComposition, err)
+	}
+
+	enqueue, err := jobsapp.NewEnqueueUseCase(jobspostgres.NewRepository(options.Pool), options.Clock)
+	if err != nil {
+		return nil, fmt.Errorf("%w: transactional email: enqueue use case: %w", ErrIncompleteComposition, err)
+	}
+	enqueuer, err := outbox.NewEnqueuer(enqueue)
+	if err != nil {
+		return nil, fmt.Errorf("%w: transactional email: outbox enqueuer: %w", ErrIncompleteComposition, err)
+	}
+	notifier, err := notificationsapp.NewNotifier(directory, enqueuer)
+	if err != nil {
+		return nil, fmt.Errorf("%w: transactional email: notifier: %w", ErrIncompleteComposition, err)
+	}
+	bridge, err := outbox.NewSender(notifier)
+	if err != nil {
+		return nil, fmt.Errorf("%w: transactional email: outbox bridge: %w", ErrIncompleteComposition, err)
+	}
+
+	handler, err := composeEmailHandler(options)
+	if err != nil {
+		return nil, err
+	}
+	options.Logger.Info(
+		"transactional email: messages are queued as durable jobs and delivered by the worker through the provider",
+		slog.String("env", string(options.Env)),
+	)
+	return &EmailDelivery{Sender: bridge, Handler: handler}, nil
+}
+
+// composeEmailHandler builds the worker half: the renderer, the provider
+// adapter and the use case that joins them.
+//
+// The provider sender is constructed with the credential, which is unredacted
+// here and nowhere else, and the composition never logs it: the adapter's own
+// redaction is what keeps a provider answer out of a log.
+func composeEmailHandler(options Options) (*outbox.Handler, error) {
+	render, err := renderer.NewRenderer()
+	if err != nil {
+		return nil, fmt.Errorf("%w: transactional email: message renderer: %w", ErrIncompleteComposition, err)
+	}
+
+	provider, err := resend.NewSender(resend.Config{
+		APIToken: string(options.EmailAPIKey.Unredacted()),
+		From:     options.EmailFrom,
+		Logger:   options.Logger,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: transactional email: provider sender: %w", ErrIncompleteComposition, err)
+	}
+
+	deliverer, err := notificationsapp.NewDeliverer(render, provider)
+	if err != nil {
+		return nil, fmt.Errorf("%w: transactional email: deliverer: %w", ErrIncompleteComposition, err)
+	}
+	handler, err := outbox.NewHandler(deliverer)
+	if err != nil {
+		return nil, fmt.Errorf("%w: transactional email: delivery handler: %w", ErrIncompleteComposition, err)
+	}
+	return handler, nil
 }

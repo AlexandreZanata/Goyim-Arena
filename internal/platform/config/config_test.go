@@ -105,12 +105,7 @@ func TestLoadHandlesTheEmailSinkDirectory(t *testing.T) {
 		t.Errorf("the refusal must name the variable: %v", err)
 	}
 
-	_, err = Load(environ(
-		"ARENA_ENV=production",
-		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
-		"ARENA_STRIPE_SECRET_KEY=sk_live_production",
-		EmailSinkDirVariable+"=/tmp/arena-email-sink",
-	))
+	_, err = Load(productionEnv(EmailSinkDirVariable + "=/tmp/arena-email-sink"))
 	if err == nil {
 		t.Fatal("production accepted the local email sink")
 	}
@@ -125,6 +120,21 @@ func environ(entries ...string) []string {
 		"PATH=/usr/bin",
 		"OTHER_SERVICE_TOKEN=not-ours",
 	}, entries...)
+}
+
+// productionEnv is a production environment that satisfies every requirement,
+// plus the entries of one case. Later entries overwrite earlier ones, so a case
+// can replace a value; a case about a *missing* requirement calls environ
+// directly, so the omission stays visible at the call site.
+func productionEnv(entries ...string) []string {
+	required := []string{
+		"ARENA_ENV=production",
+		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
+		"ARENA_STRIPE_SECRET_KEY=sk_live_production",
+		ResendAPIKeyVariable + "=re_live_never_print_me",
+		EmailFromVariable + "=Arena <no-reply@arena.invalid>",
+	}
+	return environ(append(required, entries...)...)
 }
 
 // requiredTest covers "ausente" (missing variables) and "default seguro"
@@ -157,10 +167,8 @@ func TestLoadWithoutVariablesAppliesSafeDefaults(t *testing.T) {
 func TestLoadReadsProvidedVariables(t *testing.T) {
 	t.Parallel()
 
-	config, err := Load(environ(
-		"ARENA_ENV=production",
+	config, err := Load(productionEnv(
 		"ARENA_ADDR=0.0.0.0:443",
-		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
 		"ARENA_LOG_LEVEL=warn",
 		"ARENA_STRIPE_SECRET_KEY=sk_test_provided",
 	))
@@ -251,11 +259,7 @@ func TestLoadRejectsInsecureProduction(t *testing.T) {
 func TestLoadAcceptsProductionWithSecrets(t *testing.T) {
 	t.Parallel()
 
-	config, err := Load(environ(
-		"ARENA_ENV=production",
-		"ARENA_DATABASE_URL=postgres://arena:secret@db.internal:5432/arena",
-		"ARENA_STRIPE_SECRET_KEY=sk_live_production",
-	))
+	config, err := Load(productionEnv())
 	if err != nil {
 		t.Fatalf("load secure production: %v", err)
 	}
@@ -274,7 +278,7 @@ func TestConfigAndSecretsNeverPrintRawValues(t *testing.T) {
 
 	const secretDSN = "postgres://arena:super-secret-password@db.internal:5432/arena"
 
-	config, err := Load(environ("ARENA_ENV=production", "ARENA_DATABASE_URL="+secretDSN, "ARENA_STRIPE_SECRET_KEY=sk_live_redaction"))
+	config, err := Load(productionEnv("ARENA_DATABASE_URL=" + secretDSN))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -303,7 +307,7 @@ func TestConfigAndSecretsNeverPrintRawValues(t *testing.T) {
 	}
 
 	// Secret values never reach validation error messages either.
-	_, loadErr := Load(environ("ARENA_ENV=production", "ARENA_DATABASE_URL=postgres://user:topsecret@h/x", "ARENA_LOG_LEVEL=bogus", "ARENA_STRIPE_SECRET_KEY=sk_live_redaction"))
+	_, loadErr := Load(productionEnv("ARENA_DATABASE_URL=postgres://user:topsecret@h/x", "ARENA_LOG_LEVEL=bogus"))
 	if loadErr == nil {
 		t.Fatal("expected unrelated validation error")
 	}
@@ -321,10 +325,15 @@ func TestValidationErrorsFormat(t *testing.T) {
 		t.Fatalf("error must be ValidationErrors, got %T", err)
 	}
 	rendered := validationErrors.Error()
-	if !strings.HasPrefix(rendered, "invalid configuration (2 problem(s)):") {
+	if !strings.HasPrefix(rendered, "invalid configuration (4 problem(s)):") {
 		t.Errorf("summary header missing: %q", rendered)
 	}
-	for _, variable := range []string{"ARENA_DATABASE_URL", "ARENA_STRIPE_SECRET_KEY"} {
+	for _, variable := range []string{
+		"ARENA_DATABASE_URL",
+		"ARENA_STRIPE_SECRET_KEY",
+		ResendAPIKeyVariable,
+		EmailFromVariable,
+	} {
 		if !strings.Contains(rendered, "- "+variable) {
 			t.Errorf("named variable %s missing: %q", variable, rendered)
 		}

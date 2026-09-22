@@ -21,7 +21,10 @@ import (
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/locale"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/observability"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/ratelimit"
+	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/requestid"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/websurface"
 	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
@@ -143,6 +146,10 @@ type ParticipationConfig struct {
 	// number belongs to the persuasion policy and is configured there; this
 	// surface only refuses to render a form that would always be refused.
 	MaxAttributions int
+	// Analytics receives the allowlisted product events of the journey. It
+	// is optional: a test drives the journey without one, and a process
+	// composed without a provider records nothing.
+	Analytics observability.EventSink
 }
 
 // ParticipationHandler serves the browser participation journey of one Arena:
@@ -163,6 +170,7 @@ type ParticipationHandler struct {
 	rateLimit       ratelimit.Protector
 	templates       *ParticipationTemplates
 	maxAttributions int
+	analytics       observability.EventSink
 }
 
 // NewParticipationHandler validates the composition and builds the handler. It
@@ -214,7 +222,29 @@ func NewParticipationHandler(config ParticipationConfig) (*ParticipationHandler,
 		rateLimit:       config.RateLimit,
 		templates:       config.Templates,
 		maxAttributions: config.MaxAttributions,
+		analytics:       config.Analytics,
 	}, nil
+}
+
+// capture records one allowlisted product event of the journey. The adapter
+// supplies only the facts it owns — the account the transition belonged to,
+// the request correlation and the negotiated locale — and the observability
+// package decides what may travel. Extra properties must be admitted by the
+// event's allowlist or the whole event is refused as a programming error.
+func (h *ParticipationHandler) capture(request *http.Request, name, accountID string, properties map[string]any) {
+	if h.analytics == nil {
+		return
+	}
+	if properties == nil {
+		properties = make(map[string]any, 1)
+	}
+	properties["locale"] = locale.FromContext(request.Context()).String()
+	h.analytics.Capture(observability.Event{
+		Name:       name,
+		AccountID:  accountID,
+		RequestID:  requestid.FromRequest(request),
+		Properties: properties,
+	})
 }
 
 // RegisterRoutes wires the journey into the provided ServeMux.
@@ -338,7 +368,7 @@ func (h *ParticipationHandler) SubmitPosition(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	_, err = h.confirm.Execute(r.Context(), positionsapp.ConfirmInitialPositionCommand{
+	result, err := h.confirm.Execute(r.Context(), positionsapp.ConfirmInitialPositionCommand{
 		AccountID: input.accountID,
 		ArenaID:   input.arena.ID().String(),
 		Position:  position.String(),
@@ -355,6 +385,9 @@ func (h *ParticipationHandler) SubmitPosition(w http.ResponseWriter, r *http.Req
 		}
 		h.fail(w, r, err)
 		return
+	}
+	if result != nil && !result.Replayed {
+		h.capture(r, observability.EventArenaPositionConfirmed, input.accountID, nil)
 	}
 
 	h.redirect(w, r, input.slug, "position_confirmed")
@@ -396,6 +429,7 @@ func (h *ParticipationHandler) SubmitPositionChange(w http.ResponseWriter, r *ht
 		h.fail(w, r, err)
 		return
 	}
+	h.capture(r, observability.EventArenaPositionChanged, input.accountID, nil)
 
 	h.redirect(w, r, input.slug, "position_changed")
 }
@@ -432,7 +466,7 @@ func (h *ParticipationHandler) SubmitArgument(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	_, err = h.publish.Execute(r.Context(), argumentsapp.PublishArgumentCommand{
+	result, err := h.publish.Execute(r.Context(), argumentsapp.PublishArgumentCommand{
 		AccountID:      input.accountID,
 		ArenaID:        input.arena.ID().String(),
 		Relation:       relation.String(),
@@ -452,6 +486,9 @@ func (h *ParticipationHandler) SubmitArgument(w http.ResponseWriter, r *http.Req
 		failures.Field = classified
 		h.renderPage(w, r, input.arena, failures, http.StatusConflict)
 		return
+	}
+	if result != nil && !result.Replayed {
+		h.capture(r, observability.EventArenaArgumentPublished, input.accountID, nil)
 	}
 
 	h.redirect(w, r, input.slug, "argument_published")
@@ -501,7 +538,7 @@ func (h *ParticipationHandler) SubmitAttributions(w http.ResponseWriter, r *http
 		return
 	}
 
-	_, err := h.attributions.Execute(r.Context(), persuasionapp.RecordAttributionsCommand{
+	result, err := h.attributions.Execute(r.Context(), persuasionapp.RecordAttributionsCommand{
 		AccountID:   input.accountID,
 		ChangeID:    changeID,
 		ArgumentIDs: selection,
@@ -518,6 +555,11 @@ func (h *ParticipationHandler) SubmitAttributions(w http.ResponseWriter, r *http
 		}
 		h.renderPage(w, r, input.arena, classified, http.StatusConflict)
 		return
+	}
+	if result != nil && !result.Replayed {
+		h.capture(r, observability.EventArenaInfluenceAssigned, input.accountID, map[string]any{
+			"attributed_count": len(result.ArgumentIDs),
+		})
 	}
 
 	h.redirect(w, r, input.slug, "attribution_recorded")
