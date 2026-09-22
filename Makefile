@@ -137,6 +137,19 @@ audit-ci:
 	$(GO) run ./tools/ciaudit -root .
 	@echo "audit-ci: ok"
 
+# audit-req é o portão da rastreabilidade dos requisitos (P20-T02): lê
+# docs/REQUIREMENTS.md e resolve cada referência que ela faz — a rota contra o
+# contrato servido, o caso de uso e a migration contra os arquivos que existem,
+# o teste contra a função que está de fato no arquivo — além das duas direções
+# da tabela de cobertura, das dez invariantes de BR §11, dos itens de
+# docs/MVP.md e da ausência de vocabulário de adiamento nas células. Ele entra em
+# `verify` porque é gate de merge: matriz sem teste automatizado é requisito não
+# rastreado, e o desenho da cobertura não pode envelhecer em silêncio. Ele nunca
+# escreve: a correção pertence a quem mudou o código ou o documento.
+audit-req:
+	$(GO) run ./tools/reqaudit -root .
+	@echo "audit-req: ok"
+
 # release-gate é o portão das decisões humanas do lançamento (P20-T01): lê o
 # registro versionado (docs/GOVERNANCE.md) e **falha** enquanto qualquer uma das
 # sete decisões da fase estiver em aberto, nomeando o que falta decidir, quem
@@ -308,7 +321,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n audit-ci
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n audit-ci audit-req
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint; do \
 		echo "  - $$gate"; \
