@@ -233,7 +233,8 @@ texto Prometheus e servido apenas no **listener administrativo**
   uma leitura recusada é contada em `jobs_health_scrape_errors_total`.
 
 O listener administrativo vive só em loopback e não é montado no endereço
-público; sem `ARENA_ADMIN_ADDR` não há `/metrics` exposto.
+público; sem `ARENA_ADMIN_ADDR` não há `/metrics` exposto. Os alertas iniciais
+para estes sinais, com threshold e ação, estão em [RUNBOOKS.md](RUNBOOKS.md).
 
 Adicionar uma stack própria de métricas só quando a solução do provedor deixar lacuna mensurável.
 
