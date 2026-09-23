@@ -172,6 +172,31 @@ export function focusTargetId(href: string): string | null {
   return identifier;
 }
 
+/** One link of a summary the server rendered: its fragment and its message. */
+export interface SummaryLink {
+  readonly href: string;
+  readonly message: string;
+}
+
+/**
+ * summaryErrors reads the links of a server-rendered summary as field errors,
+ * so the element can complete what the document already lists instead of
+ * wiping it. A link whose fragment is not a usable target is dropped, exactly
+ * as `errorSummaryItems` drops a blank error; the order the document wrote is
+ * the order a person reads, and it is preserved.
+ */
+export function summaryErrors(links: readonly SummaryLink[]): readonly FieldError[] {
+  const errors: FieldError[] = [];
+  for (const link of links) {
+    const fieldId = focusTargetId(link.href);
+    if (fieldId === null) {
+      continue;
+    }
+    errors.push({ fieldId, message: link.message });
+  }
+  return errors;
+}
+
 /** Input of the busy presentation. */
 export interface BusyState {
   readonly busy: boolean;

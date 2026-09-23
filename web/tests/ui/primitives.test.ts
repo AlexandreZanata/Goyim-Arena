@@ -13,6 +13,7 @@ import {
   fieldWiring,
   focusTargetId,
   shouldRestoreFocus,
+  summaryErrors,
   toastLiveRegion,
   toastTiming,
 } from "../../src/components/primitives/model.js";
@@ -107,6 +108,46 @@ test("focusTargetId accepts only usable fragments", () => {
   assert.equal(focusTargetId("#email#other"), null);
   assert.equal(focusTargetId("#email other"), null);
   assert.equal(focusTargetId(""), null);
+});
+
+test("summaryErrors reads the links a server-rendered summary lists", () => {
+  const errors = summaryErrors([
+    { href: "#email-control", message: "Informe um e-mail válido." },
+    { href: "#password-control", message: "Curta demais." },
+  ]);
+
+  assert.deepEqual(errors, [
+    { fieldId: "email-control", message: "Informe um e-mail válido." },
+    { fieldId: "password-control", message: "Curta demais." },
+  ]);
+});
+
+test("summaryErrors drops links whose fragment is not a usable target", () => {
+  const errors = summaryErrors([
+    { href: "", message: "órfã" },
+    { href: "email-control", message: "sem fragmento" },
+    { href: "#", message: "fragmento vazio" },
+    { href: "#email other", message: "com espaço" },
+    { href: "#email", message: "válida" },
+  ]);
+
+  assert.deepEqual(errors, [{ fieldId: "email", message: "válida" }]);
+});
+
+test("the adopted summary keeps the document order and its normalization", () => {
+  const items = errorSummaryItems(
+    summaryErrors([
+      { href: "#email", message: "  Informe um e-mail válido.  " },
+      { href: "#", message: "órfã" },
+      { href: "#password", message: "Curta demais." },
+      { href: "#email", message: "Segunda mensagem do mesmo campo." },
+    ]),
+  );
+
+  assert.deepEqual(items, [
+    { fieldId: "email", message: "Informe um e-mail válido.", href: "#email" },
+    { fieldId: "password", message: "Curta demais.", href: "#password" },
+  ]);
 });
 
 test("busyPresentation marks the region and hides the decorative indicator", () => {
