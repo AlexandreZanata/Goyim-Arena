@@ -30,7 +30,7 @@ import (
 	"testing"
 )
 
-const modulePath = "github.com/AlexandreZanata/Goyim-Arena"
+const modulePath = "github.com/AlexandreZanata/Regnovum"
 
 const modulePrefix = modulePath + "/"
 

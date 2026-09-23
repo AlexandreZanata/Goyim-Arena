@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbtest"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbtest"
 )
 
 // TestWorkerUsageAndArgumentValidation covers the argument surface of the

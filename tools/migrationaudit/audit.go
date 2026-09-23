@@ -41,7 +41,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbmigrate"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbmigrate"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/database"
 )

@@ -1,4 +1,4 @@
-# Quality Charter — Goyim Arena
+# Quality Charter — Regnovum
 
 **Status:** obrigatório para o programa de qualidade autônoma (P21–P30)
 **Escopo:** qualidade e evidências; este charter não altera regras de produto.

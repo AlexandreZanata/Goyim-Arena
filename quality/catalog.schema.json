@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/AlexandreZanata/Goyim-Arena/quality/catalog.schema.json",
+  "$id": "https://github.com/AlexandreZanata/Regnovum/quality/catalog.schema.json",
   "title": "Executable quality rule catalog",
   "description": "The catalog that gives every approved rule of the product an identity, a risk class and the evidence it demands. The loader that judges it is tools/qualitycatalog, and a test holds this document and that loader together: a rule this schema calls invalid must be refused by the loader, and the two must not drift into two different contracts.",
   "type": "object",

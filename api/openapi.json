@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "Goyim Arena API",
+    "title": "Regnovum API",
     "version": "0.1.0",
-    "description": "Public HTTP contract of Goyim Arena. Versioned per the master plan: routes registered by the binary must match this document; the contract test fails on drift.",
+    "description": "Public HTTP contract of Regnovum. Versioned per the master plan: routes registered by the binary must match this document; the contract test fails on drift.",
     "summary": "Arena API contract"
   },
   "servers": [
@@ -3945,7 +3945,7 @@
             "type": "string",
             "format": "uri-reference",
             "description": "Stable URI identifying the problem kind.",
-            "examples": ["https://goyim.dev/problems/validation"]
+            "examples": ["https://regnovum.example/problems/validation"]
           },
           "title": {
             "type": "string",

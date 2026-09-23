@@ -1,6 +1,6 @@
 # Architecture Decision Records
 
-Esta pasta registra as decisões técnicas do Goyim Arena. ADRs aceitos não são reescritos para esconder a evolução: mudanças posteriores criam um novo ADR que substitui o anterior.
+Esta pasta registra as decisões técnicas do Regnovum. ADRs aceitos não são reescritos para esconder a evolução: mudanças posteriores criam um novo ADR que substitui o anterior.
 
 Cada decisão arquitetural relevante recebe um arquivo numerado contendo:
 

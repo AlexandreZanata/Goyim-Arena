@@ -1,5 +1,5 @@
 // Package dbtest provides an isolated, disposable PostgreSQL integration
-// test harness for Goyim Arena (P03-T05).
+// test harness for Regnovum (P03-T05).
 //
 // Per docs/ARCHITECTURE.md and the master plan:
 //   - Tests must run against real PostgreSQL;
@@ -22,10 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbmigrate"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbpool"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/logging"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/clockseed"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbmigrate"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbpool"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/logging"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
