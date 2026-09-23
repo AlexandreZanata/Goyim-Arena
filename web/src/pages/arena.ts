@@ -9,8 +9,8 @@
  * document cannot do on its own:
  *
  *   - the local position choice of a visitor, kept in this browser and never
- *     sent anywhere, used to start the confirmation form from what the person
- *     already picked;
+ *     sent anywhere, scoped by the Arena slug so it survives the sign-in
+ *     navigation and starts the confirmation form from what the person picked;
  *   - the refusal of a submission already in flight, so an impatient double
  *     click does not publish twice (the attempt key of the publication form is
  *     the server-side guarantee; this is the courtesy);
@@ -45,6 +45,7 @@ import {
   ATTRIBUTION_GROUP_SELECTOR,
   CHOICE_ATTRIBUTE,
   CHOICE_GROUP_SELECTOR,
+  arenaSlugFromPath,
   attributionLimitMessage,
   attributionSelection,
   choiceStorageKey,
@@ -126,10 +127,14 @@ function preselectPosition(document: Document, position: Position | null): void 
  * Installs the local choice of a visitor and the preselection of the form.
  * `onChosen` runs after an accepted choice, and only then: a stored choice
  * applied on load is not a person choosing, so it never reveals anything.
+ *
+ * The scope is the Arena slug the URL carries, not the identifier the anonymous
+ * block renders: the signed-in page no longer renders the identifier, and the
+ * choice has to survive the sign-in navigation to start the confirmation form.
  */
-function installLocalChoice(document: Document, arenaID: string, onChosen: () => void): void {
+function installLocalChoice(document: Document, arenaSlug: string, onChosen: () => void): void {
   const storage = storageOf();
-  const stored = storage === null || arenaID === "" ? null : readLocalChoice(storage.getItem(choiceStorageKey(arenaID)));
+  const stored = storage === null || arenaSlug === "" ? null : readLocalChoice(storage.getItem(choiceStorageKey(arenaSlug)));
 
   const group = document.querySelector(CHOICE_GROUP_SELECTOR);
   if (group !== null) {
@@ -147,8 +152,8 @@ function installLocalChoice(document: Document, arenaID: string, onChosen: () =>
       if (!decision.accepted || decision.position === null) {
         return;
       }
-      if (storage !== null && arenaID !== "") {
-        storage.setItem(choiceStorageKey(arenaID), decision.position);
+      if (storage !== null && arenaSlug !== "") {
+        storage.setItem(choiceStorageKey(arenaSlug), decision.position);
       }
       applyChoice(group, decision.position);
       onChosen();
@@ -159,10 +164,12 @@ function installLocalChoice(document: Document, arenaID: string, onChosen: () =>
 
   // The confirmation is the moment the local choice stops being local: the
   // server recorded it, and a stale copy in this browser must not survive it.
-  for (const form of document.querySelectorAll('form[action$="/position"]')) {
+  // Both position transitions count: the confirmation records the first
+  // position and a change records a later one.
+  for (const form of document.querySelectorAll('form[action*="/position"]')) {
     form.addEventListener("submit", (): void => {
-      if (storage !== null && arenaID !== "") {
-        storage.removeItem(choiceStorageKey(arenaID));
+      if (storage !== null && arenaSlug !== "") {
+        storage.removeItem(choiceStorageKey(arenaSlug));
       }
     });
   }
@@ -379,9 +386,13 @@ export function installArenaPage(document: Document = globalThis.document): void
   const locale = resolveLocale([document.documentElement.lang]);
   const translator = createTranslator(locale, { namespaces: PAGE_NAMESPACES });
   installLocalizedInstants(document, locale);
+  // The local choice is scoped by the slug the URL carries, present on every
+  // visit; the aggregate read needs the opaque identifier, which only the
+  // visitor block renders.
+  const arenaSlug = arenaSlugFromPath(new URL(document.baseURI).pathname) ?? "";
   const arenaID = arenaOf(document);
   const reveal = installAggregateReveal(document, arenaID, locale, translator);
-  installLocalChoice(document, arenaID, reveal ?? ((): void => undefined));
+  installLocalChoice(document, arenaSlug, reveal ?? ((): void => undefined));
   installAttributionLimit(document, attributionLimit(document), translator);
 }
 
