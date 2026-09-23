@@ -157,6 +157,18 @@ test("no delivered source formats with the browser's own locale", () => {
   assert.deepEqual(offenders, [], "formatting passes the resolved locale explicitly or goes through the i18n runtime");
 });
 
+test("the delivered modules do not ship the comments that document the sources", () => {
+  const config = JSON.parse(readPackageFile("tsconfig.json")) as {
+    readonly compilerOptions?: { readonly removeComments?: boolean };
+  };
+
+  assert.equal(
+    config.compilerOptions?.removeComments,
+    true,
+    "the compiler strips comments: they document the sources, and the browser downloads the modules",
+  );
+});
+
 test("the browser bundle carries no runtime dependency", () => {
   const manifest = JSON.parse(readPackageFile("package.json")) as {
     readonly dependencies?: Readonly<Record<string, string>>;
