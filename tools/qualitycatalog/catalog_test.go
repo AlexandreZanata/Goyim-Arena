@@ -119,6 +119,13 @@ func fixtureTree(t *testing.T) string {
 	write("docs/SPEC.md", "# Especificacao (fixture)\n\n## Placement\n\nA colocacao fora da fronteira e recusada.\n")
 	write("docs/EVIDENCE.md", "# Evidencia (fixture)\n\nO teste cita esta pagina.\n")
 	write("docs/POLICY.md", "# Politica (fixture)\n\nO link de confirmacao e de uso unico.\n")
+	// The pair the coverage half of the gate compares against. The fixture
+	// catalog cites the spec rather than these documents, so this table declares
+	// no row: what the command test holds is that the command reads the pair and
+	// judges the catalog against it, while rows — present, missing and
+	// unreadable — are exercised by the coverage tests.
+	write("docs/REQUIREMENTS.md", "# Matriz de requisitos (fixture)\n\n## 1. Visao geral\n\nNenhum requisito nesta tabela.\n")
+	write("docs/THREAT_MODEL.md", "# Modelo de ameacas (fixture)\n\n## 5. Analise STRIDE\n\nNenhuma ameaca nesta tabela.\n")
 	write("internal/fixture/service/rules_test.go", `package service
 
 import "testing"
@@ -242,6 +249,10 @@ func TestEveryDeclaredCodeHasAMutation(t *testing.T) {
 	for _, testCase := range schemaMutations() {
 		proven[testCase.code] = "TestEverySchemaRuleIsFalsified"
 	}
+	for _, testCase := range coverageMutations() {
+		proven[testCase.code] = "TestEveryCoverageDefectIsRefused"
+	}
+	proven[codeSeverityUnreadable] = "TestAThreatRowWithoutASeverityIsRefused"
 	for code, test := range codesWithNoDocumentToMutate {
 		proven[code] = test
 	}
@@ -265,7 +276,7 @@ func declaredCodes(t *testing.T) map[string]string {
 	t.Helper()
 	pattern := regexp.MustCompile(`(?m)^\s*code[A-Za-z]+\s*=\s*"([^"]+)"`)
 	declared := map[string]string{}
-	for _, source := range []string{"catalog.go", "schema.go"} {
+	for _, source := range []string{"catalog.go", "schema.go", "coverage.go"} {
 		raw, err := os.ReadFile(source)
 		if err != nil {
 			t.Fatalf("the loader source %s is unreadable: %v", source, err)

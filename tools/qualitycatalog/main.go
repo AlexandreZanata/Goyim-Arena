@@ -4,8 +4,12 @@
 // It reads the catalog of approved rules and judges every claim it makes
 // against the checkout: the document each rule cites, the packages it names,
 // the tests it says exist, and the evidence slots its risk class demands. It
-// never writes and it never repairs: a reference that does not resolve is the
-// caller's to fix, and the exit status is the whole output a pipeline needs.
+// then asks the other question a catalog of rules has to answer — is this the
+// whole rule set? — comparing the entries against the requirements matrix and
+// the threat model as those documents are, so neither a rule without evidence
+// nor an entry without a rule can pass. It never writes and it never repairs: a
+// reference that does not resolve is the caller's to fix, and the exit status
+// is the whole output a pipeline needs.
 //
 // The companion document, quality/catalog.schema.json, is held to the same
 // loader by the tests: a schema that promised less than the loader enforces
@@ -44,14 +48,26 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	catalog, violations := ReadCatalog(*root, *catalogPath)
-	if len(violations) > 0 {
-		for _, violation := range violations {
-			fmt.Fprintf(stderr, "qualitycatalog: %s\n", violation)
+	if len(violations) == 0 {
+		// The second question, asked only once the first one is answered: a
+		// catalog whose every entry resolves can still be an incomplete one,
+		// and completeness is the half a missing test hides behind.
+		rules, unreadable := declaredRules(*root)
+		if len(unreadable) > 0 {
+			violations = unreadable
+		} else {
+			violations = CheckCoverage(catalog, rules)
 		}
-		fmt.Fprintf(stderr, "qualitycatalog: %d violation(s) — a rule whose evidence does not exist is a rule nobody enforces\n", len(violations))
-		return exitViolation
+		if len(violations) == 0 {
+			fmt.Fprintf(stdout, "qualitycatalog: %d rule(s) of %s judged against the checkout and covering %d requirement(s) with %d critical or high threat(s)\n",
+				len(catalog.Rules), *catalogPath, len(rules.requirements), len(rules.threats))
+			return exitOK
+		}
 	}
 
-	fmt.Fprintf(stdout, "qualitycatalog: %d rule(s) of %s judged against the checkout\n", len(catalog.Rules), *catalogPath)
-	return exitOK
+	for _, violation := range violations {
+		fmt.Fprintf(stderr, "qualitycatalog: %s\n", violation)
+	}
+	fmt.Fprintf(stderr, "qualitycatalog: %d violation(s) — a rule whose evidence does not exist is a rule nobody enforces\n", len(violations))
+	return exitViolation
 }
