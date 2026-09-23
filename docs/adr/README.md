@@ -27,3 +27,5 @@ Cada decisão arquitetural relevante recebe um arquivo numerado contendo:
 - [ADR-011 — Política de admissão de dependências](ADR-011-dependency-admission-policy.md)
 - [ADR-012 — Ports de clock, aleatoriedade e identificadores](ADR-012-clock-random-ids-ports.md)
 - [ADR-013 — Segmentação de grapheme clusters com `rivo/uniseg`](ADR-013-unicode-grapheme-segmentation.md)
+- [ADR-014 — MFA por TOTP com implementação nativa do RFC 6238](ADR-014-totp-native-rfc6238.md)
+- [ADR-015 — Fontes determinísticas de teste e o portão de efeitos](ADR-015-deterministic-test-sources.md)
