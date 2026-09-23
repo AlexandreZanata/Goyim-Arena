@@ -17,7 +17,9 @@
  *   - the refusal to tick past the attribution limit the page declares;
  *   - the reveal of the public aggregate as soon as the visitor picks a
  *     position, through the public positions contract (the reveal link keeps
- *     its server-side path as the resilience of the enhancement).
+ *     its server-side path as the resilience of the enhancement);
+ *   - the locale rendering of the instants the server wrote as machine values,
+ *     so a person reads a date while `<time datetime>` keeps the RFC 3339.
  *
  * Registration of the primitives and the submission guard come from the account
  * journey's module: the two surfaces share the same document conventions
@@ -34,6 +36,7 @@ import { createHttpCore } from "../core/http.js";
 import { resolveLocale } from "../i18n/locale.js";
 import { aggregatePresentation, createAggregateTranslator } from "./aggregate.js";
 import { installSubmissionGuard } from "./auth.js";
+import { timeText } from "./instants.js";
 import {
   ARENA_ATTRIBUTE,
   ATTRIBUTION_GROUP_SELECTOR,
@@ -44,6 +47,7 @@ import {
   chooseLocalChoice,
   readLocalChoice,
 } from "./participation.js";
+import type { Locale } from "../i18n/locale.js";
 import type { Position } from "./participation.js";
 
 /** The storage the page may use, or null when the browser refuses it. */
@@ -199,6 +203,22 @@ function attributionLimit(document: Document): number {
   return Number.isFinite(declared) ? declared : 0;
 }
 
+/**
+ * installLocalizedInstants renders the machine instants the server wrote into
+ * the document in the locale the page was rendered in. The `datetime`
+ * attribute keeps the machine value; only the text a person reads changes, and
+ * an element the page cannot safely rewrite is left exactly as it was.
+ */
+function installLocalizedInstants(document: Document, locale: Locale): void {
+  for (const element of document.querySelectorAll("time[datetime]")) {
+    const datetime = element.getAttribute("datetime") ?? "";
+    const text = timeText(locale, datetime, element.textContent ?? "");
+    if (text !== null) {
+      element.textContent = text;
+    }
+  }
+}
+
 /** The query the server-rendered reveal link carries. */
 const REVEAL_PARAM = "reveal";
 const REVEAL_VALUE = "1";
@@ -245,7 +265,7 @@ function revealLinkOf(document: Document): HTMLAnchorElement | null {
  * no visitor block to take the Arena identifier from (a signed-in page), in
  * which case the reveal stays a navigation. Without scripts none of this runs.
  */
-function installAggregateReveal(document: Document, arenaID: string): (() => void) | null {
+function installAggregateReveal(document: Document, arenaID: string, locale: Locale): (() => void) | null {
   const link = revealLinkOf(document);
   const section = link?.closest("section") ?? null;
   if (link === null || section === null || arenaID === "") {
@@ -273,7 +293,6 @@ function installAggregateReveal(document: Document, arenaID: string): (() => voi
     section.setAttribute(REVEAL_BUSY_ATTRIBUTE, "true");
     try {
       const aggregate = await positions.aggregate(arenaID);
-      const locale = resolveLocale([document.documentElement.lang]);
       const translator = createAggregateTranslator(locale);
       const element = document.createElement(POSITION_AGGREGATE_TAG);
       if (!(element instanceof GaPositionAggregateElement)) {
@@ -313,8 +332,12 @@ function installAggregateReveal(document: Document, arenaID: string): (() => voi
 export function installArenaPage(document: Document = globalThis.document): void {
   definePositionAggregate();
   installSubmissionGuard(document);
+  // The document arrives rendered in a locale the server resolved, and the
+  // browser only reads it: anything the module renders afterwards uses it.
+  const locale = resolveLocale([document.documentElement.lang]);
+  installLocalizedInstants(document, locale);
   const arenaID = arenaOf(document);
-  const reveal = installAggregateReveal(document, arenaID);
+  const reveal = installAggregateReveal(document, arenaID, locale);
   installLocalChoice(document, arenaID, reveal ?? ((): void => undefined));
   installAttributionLimit(document, attributionLimit(document));
 }
