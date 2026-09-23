@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -196,6 +196,26 @@ quality-catalog:
 quality-waivers:
 	$(GO) run ./tools/qualitywaivers -root .
 	@echo "quality-waivers: ok"
+
+# quality-taxonomy é o portão da taxonomia e identidade das evidências de teste
+# (P21-T05): lê quality/evidence.json e classifica cada identidade — que tipo de
+# teste é, em que suíte roda, em que ambiente, quais regras do catálogo prova e
+# em que classe de risco — **por dado declarado**, nunca pelo nome da função Go.
+# A classe é lida do catálogo e a declaração não pode amaciá-la; o tipo e o
+# ambiente têm de combinar, porque chamar de unitário um teste que só existe
+# contra um PostgreSQL é exatamente o rótulo trocado que a taxonomia existe para
+# recusar; e o dono só é exigido da suíte que prova regra crítica. Recusa ainda
+# identidade duplicada, tipo, ambiente ou regra que ninguém declarou, referência
+# de teste que não resolve na árvore, e confere quality/evidence.schema.json
+# contra o vocabulário do próprio carregador. Ele entra em `verify` porque é
+# gate de merge: evidência que ninguém encontra é evidência que não guarda nada.
+# Ele nunca escreve e nunca executa teste — o que ele produz é o julgamento que
+# o inventário da P21-T06 vai ler. A documentação em prosa dos onze tipos, dos
+# cinco ambientes e das convenções de identificador é
+# docs/quality/EVIDENCE_TAXONOMY.md.
+quality-taxonomy:
+	$(GO) run ./tools/qualitytaxonomy -root .
+	@echo "quality-taxonomy: ok"
 
 # release-gate é o portão das decisões humanas do lançamento (P20-T01): lê o
 # registro versionado (docs/GOVERNANCE.md) e **falha** enquanto qualquer uma das
@@ -470,7 +490,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers handoff-check
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy handoff-check
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint; do \
 		echo "  - $$gate"; \
