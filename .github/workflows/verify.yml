@@ -81,8 +81,14 @@ jobs:
       # database named here is only the door.
       ARENA_DATABASE_URL: postgres://arena:arena-local-dev@127.0.0.1:54329/arena?sslmode=disable
     steps:
+      # Full history: the release checklist audit resolves the commit the
+      # delivered document names, and that commit is always an ancestor of the
+      # checked-out one. A shallow clone makes it refuse a document that is
+      # true; the check itself — the tree is checkable — stays intact.
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0

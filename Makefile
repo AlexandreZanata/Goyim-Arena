@@ -309,12 +309,14 @@ caddy-verify:
 # e envia um base backup para um armazenamento compatível com S3, destrói o
 # primário e restaura num cluster vazio até um instante escolhido — afirmando o
 # que voltou, o que não voltou, as migrations, o checksum das linhas e o que a
-# retenção remove. Exige daemon Docker, como image-verify.
+# retenção remove. Exige daemon Docker, como image-verify, e constrói a imagem
+# da aplicação porque as migrations rodam dentro dela — o mesmo pré-requisito
+# de compose-verify e deploy-verify.
 #
 # ARENA_IMAGE alimenta o passo de migrations e ARENA_BACKUP_S3_IMAGE troca o
 # armazenamento; sem elas, o gate usa a imagem local e o digest do MinIO que o
 # repositório verificou.
-backup-verify:
+backup-verify: image-build
 	ARENA_IMAGE=$(IMAGE) deploy/backup/verify.sh
 	@echo "backup-verify: ok"
 
