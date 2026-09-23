@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/application"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/contract"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/notifications/application"
+	"github.com/AlexandreZanata/Regnovum/internal/notifications/contract"
+	"github.com/AlexandreZanata/Regnovum/internal/notifications/domain"
 )
 
 // fakeSender is the in-memory contract fake of the email port: it produces

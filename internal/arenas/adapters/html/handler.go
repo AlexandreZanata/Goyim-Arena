@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/application"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/i18n"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
+	"github.com/AlexandreZanata/Regnovum/internal/arenas/application"
+	"github.com/AlexandreZanata/Regnovum/internal/arenas/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/i18n"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/httpcache"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/httperror"
 )
 
 // documentCacheSeconds is the public cache lifetime of the Arena document;

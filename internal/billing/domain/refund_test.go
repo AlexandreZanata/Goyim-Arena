@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/billing/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/billing/domain"
 )
 
 func TestStripeRefundIdentifiers(t *testing.T) {

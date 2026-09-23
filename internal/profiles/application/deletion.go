@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/profiles/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/profiles/domain"
 )
 
 // DeletionRequest is the owner-scoped state of one account deletion.

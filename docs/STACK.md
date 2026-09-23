@@ -6,7 +6,7 @@
 
 ## 1. Resumo
 
-Goyim Arena será uma aplicação API-first com backend Go e frontend baseado somente na plataforma nativa do browser. A implantação inicial continua sendo um monólito modular em uma VPS de 16 GB, mas suas interfaces são desenhadas para permitir clientes e processos independentes.
+Regnovum será uma aplicação API-first com backend Go e frontend baseado somente na plataforma nativa do browser. A implantação inicial continua sendo um monólito modular em uma VPS de 16 GB, mas suas interfaces são desenhadas para permitir clientes e processos independentes.
 
 ### Frontend
 

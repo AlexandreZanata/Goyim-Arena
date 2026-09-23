@@ -34,8 +34,8 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/requestid"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/requestid"
+	"github.com/AlexandreZanata/Regnovum/internal/ports"
 )
 
 // Event is one allowlisted product analytics event. Name is a constant from

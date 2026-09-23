@@ -6,7 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
+	"github.com/AlexandreZanata/Regnovum/internal/ports"
 )
 
 // Sealer protects the shared secret at rest.

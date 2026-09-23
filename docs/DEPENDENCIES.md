@@ -10,7 +10,7 @@
 
 ## 1. Princípio fundamental: Standard Library First
 
-O Goyim Arena adota o princípio de prioridade máxima às capacidades nativas das plataformas oficiais:
+O Regnovum adota o princípio de prioridade máxima às capacidades nativas das plataformas oficiais:
 1. **No backend:** a biblioteca padrão da linguagem Go (`net/http`, `crypto`, `database/sql`, `html/template`, `log/slog`, etc.) é a primeira e principal escolha para resolução de problemas técnicos e arquiteturais.
 2. **No frontend:** as APIs e padrões nativos da plataforma web (HTML semântico, Custom Elements/Web Components, CSS moderno com custom properties e `@layer`, `fetch`, `AbortController`) constituem o alicerce exclusivo de execução.
 

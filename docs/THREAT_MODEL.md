@@ -10,7 +10,7 @@
 
 ## 1. Visão geral e metodologia
 
-Este documento estabelece o modelo formal de ameaças do Goyim Arena para orientar a implementação do backend, dos contratos de API e do harness web mínimo. A análise baseia-se na metodologia **STRIDE** (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege) aplicada aos fluxos de dados e ativos mais críticos do sistema.
+Este documento estabelece o modelo formal de ameaças do Regnovum para orientar a implementação do backend, dos contratos de API e do harness web mínimo. A análise baseia-se na metodologia **STRIDE** (Spoofing, Tampering, Repudiation, Information Disclosure, Denial of Service, Elevation of Privilege) aplicada aos fluxos de dados e ativos mais críticos do sistema.
 
 ### Princípios mandatórios
 - Toda ameaça identificada possui um identificador único `THR-*`.

@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbpool"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpserver"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/clockseed"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbpool"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/httpserver"
 )
 
 func devDatabaseURL() string {

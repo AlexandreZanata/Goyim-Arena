@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/moderation/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/moderation/domain"
 )
 
 func TestTargetTypeVocabulary(t *testing.T) {

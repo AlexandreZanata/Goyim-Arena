@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httplimits"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/httplimits"
 )
 
 // recorderHandler is a handler that records how it was reached and answers

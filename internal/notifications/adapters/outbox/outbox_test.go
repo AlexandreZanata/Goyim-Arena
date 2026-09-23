@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/i18n"
-	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
-	jobsapp "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/application"
-	jobsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/domain"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/adapters/outbox"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/adapters/renderer"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/application"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/notifications/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/i18n"
+	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
+	jobsapp "github.com/AlexandreZanata/Regnovum/internal/jobs/application"
+	jobsdomain "github.com/AlexandreZanata/Regnovum/internal/jobs/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/notifications/adapters/outbox"
+	"github.com/AlexandreZanata/Regnovum/internal/notifications/adapters/renderer"
+	"github.com/AlexandreZanata/Regnovum/internal/notifications/application"
+	"github.com/AlexandreZanata/Regnovum/internal/notifications/domain"
 )
 
 const knownCode = "K7QP-2M4Z-9RTX"

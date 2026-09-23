@@ -17,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbmigrate"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbmigrate"
 )
 
 // runtimeRole is the role the application connects as. The grant rules are

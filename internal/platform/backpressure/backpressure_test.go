@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/backpressure"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/backpressure"
 )
 
 type zeroRandom struct{}

@@ -10,7 +10,7 @@
 
 ## 1. Visão geral e metodologia
 
-Este documento estabelece a rastreabilidade completa e bidirecional de todos os requisitos funcionais e invariantes definidos no escopo do MVP do Goyim Arena ([docs/MVP.md](MVP.md)) e em suas regras de negócio ([docs/BUSINESS_RULES.md](BUSINESS_RULES.md)).
+Este documento estabelece a rastreabilidade completa e bidirecional de todos os requisitos funcionais e invariantes definidos no escopo do MVP do Regnovum ([docs/MVP.md](MVP.md)) e em suas regras de negócio ([docs/BUSINESS_RULES.md](BUSINESS_RULES.md)).
 
 ### Regras de governança
 

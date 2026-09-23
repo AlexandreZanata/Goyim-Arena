@@ -59,7 +59,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/config"
 )
 
 // Action is one challenged operation of the product. Actions are stable names:

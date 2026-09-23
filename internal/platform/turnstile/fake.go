@@ -4,7 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/apperr"
 )
 
 // LocalFakeTokenPrefix is the beginning of every token Cloudflare's

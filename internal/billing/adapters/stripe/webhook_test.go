@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	stripeadapter "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/stripe"
+	stripeadapter "github.com/AlexandreZanata/Regnovum/internal/billing/adapters/stripe"
 )
 
 // testClock is a deterministic clock for tests.

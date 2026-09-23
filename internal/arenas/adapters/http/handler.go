@@ -14,13 +14,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/application"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httpcache"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/httperror"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/security"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
+	"github.com/AlexandreZanata/Regnovum/internal/arenas/application"
+	"github.com/AlexandreZanata/Regnovum/internal/arenas/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/apperr"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/httpcache"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/httperror"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/security"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/turnstile"
 )
 
 const (
