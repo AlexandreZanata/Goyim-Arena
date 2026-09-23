@@ -67,3 +67,51 @@
     list-style: none;
   }
 }
+
+/* Presentation of the public aggregate the visitor reveals in place
+ * (P18-T06 journey). The element renders the same information the server
+ * renders for `?reveal=1`, so the two paths read alike. */
+@layer components {
+  .ga-position-aggregate {
+    display: grid;
+    gap: var(--ga-space-2);
+  }
+
+  .ga-position-aggregate__heading {
+    margin: 0;
+    font-size: var(--ga-font-size-lg);
+    line-height: var(--ga-line-height-tight);
+  }
+
+  .ga-position-aggregate__distribution-heading {
+    margin: 0;
+    font-size: var(--ga-font-size-md);
+    font-weight: var(--ga-font-weight-semibold);
+  }
+
+  .ga-position-aggregate__note,
+  .ga-position-aggregate__total,
+  .ga-position-aggregate__checked {
+    margin: 0;
+    color: var(--ga-color-text-muted);
+    font-size: var(--ga-font-size-sm);
+  }
+
+  .ga-position-aggregate__rows {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: var(--ga-space-1) var(--ga-space-4);
+    margin: 0;
+    padding: 0;
+  }
+
+  .ga-position-aggregate__label,
+  .ga-position-aggregate__count {
+    margin: 0;
+  }
+
+  .ga-position-aggregate__count {
+    font-variant-numeric: tabular-nums;
+    text-align: end;
+  }
+}

@@ -14,13 +14,25 @@
  *   - the refusal of a submission already in flight, so an impatient double
  *     click does not publish twice (the attempt key of the publication form is
  *     the server-side guarantee; this is the courtesy);
- *   - the refusal to tick past the attribution limit the page declares.
+ *   - the refusal to tick past the attribution limit the page declares;
+ *   - the reveal of the public aggregate as soon as the visitor picks a
+ *     position, through the public positions contract (the reveal link keeps
+ *     its server-side path as the resilience of the enhancement).
  *
  * Registration of the primitives and the submission guard come from the account
  * journey's module: the two surfaces share the same document conventions
  * (`ga-busy`, `ga-error-summary`, `ga-toast`), and the browser policy of this
  * binary refuses inline code, so the module is the only script the page loads.
  */
+import {
+  GaPositionAggregateElement,
+  POSITION_AGGREGATE_TAG,
+  definePositionAggregate,
+} from "../components/position-aggregate/position-aggregate.js";
+import { createPositionsClient } from "../core/clients/positions.js";
+import { createHttpCore } from "../core/http.js";
+import { resolveLocale } from "../i18n/locale.js";
+import { aggregatePresentation, createAggregateTranslator } from "./aggregate.js";
 import { installSubmissionGuard } from "./auth.js";
 import {
   ARENA_ATTRIBUTE,
@@ -98,8 +110,12 @@ function preselectPosition(document: Document, position: Position | null): void 
   }
 }
 
-/** Installs the local choice of a visitor and the preselection of the form. */
-function installLocalChoice(document: Document, arenaID: string): void {
+/**
+ * Installs the local choice of a visitor and the preselection of the form.
+ * `onChosen` runs after an accepted choice, and only then: a stored choice
+ * applied on load is not a person choosing, so it never reveals anything.
+ */
+function installLocalChoice(document: Document, arenaID: string, onChosen: () => void): void {
   const storage = storageOf();
   const stored = storage === null || arenaID === "" ? null : readLocalChoice(storage.getItem(choiceStorageKey(arenaID)));
 
@@ -123,6 +139,7 @@ function installLocalChoice(document: Document, arenaID: string): void {
         storage.setItem(choiceStorageKey(arenaID), decision.position);
       }
       applyChoice(group, decision.position);
+      onChosen();
     });
   }
 
@@ -182,10 +199,123 @@ function attributionLimit(document: Document): number {
   return Number.isFinite(declared) ? declared : 0;
 }
 
+/** The query the server-rendered reveal link carries. */
+const REVEAL_PARAM = "reveal";
+const REVEAL_VALUE = "1";
+
+/** Attribute that marks the aggregate section while the read is in flight. */
+const REVEAL_BUSY_ATTRIBUTE = "aria-busy";
+
+/**
+ * revealLinkOf finds the server-rendered reveal link: the same-origin anchor
+ * whose query asks the server for the aggregate. It is also the marker that the
+ * aggregate is not on the page yet — when it is absent, the page has already
+ * revealed the result (or has none) and the module stays out.
+ */
+function revealLinkOf(document: Document): HTMLAnchorElement | null {
+  const origin = new URL(document.baseURI).origin;
+  for (const anchor of document.querySelectorAll("a[href]")) {
+    if (!(anchor instanceof HTMLAnchorElement)) {
+      continue;
+    }
+    let url: URL;
+    try {
+      url = new URL(anchor.getAttribute("href") ?? "", document.baseURI);
+    } catch {
+      continue;
+    }
+    if (url.origin === origin && url.searchParams.get(REVEAL_PARAM) === REVEAL_VALUE) {
+      return anchor;
+    }
+  }
+  return null;
+}
+
+/**
+ * installAggregateReveal makes the reveal immediate for the visitor.
+ *
+ * The public aggregate is not a secret — the contract of the endpoint says the
+ * local choice gates the UI, never the API — so the module reads it through the
+ * positions client as soon as a position is chosen, and it also takes over the
+ * server-rendered reveal link. A failed read never loses the journey: a choice
+ * leaves the server-rendered section untouched, and the link navigates to the
+ * server-rendered aggregate.
+ *
+ * It returns the callback the local choice calls, or null when the page offers
+ * no visitor block to take the Arena identifier from (a signed-in page), in
+ * which case the reveal stays a navigation. Without scripts none of this runs.
+ */
+function installAggregateReveal(document: Document, arenaID: string): (() => void) | null {
+  const link = revealLinkOf(document);
+  const section = link?.closest("section") ?? null;
+  if (link === null || section === null || arenaID === "") {
+    return null;
+  }
+
+  const positions = createPositionsClient(createHttpCore());
+  let revealing = false;
+  let revealed = false;
+
+  /**
+   * reveal reads the public aggregate and renders it in place.
+   *
+   * `fallbackToServer` is the difference between the two callers: a person who
+   * pressed the reveal link must end up seeing the aggregate even when the read
+   * fails, so the browser follows the link the server rendered; a person who
+   * only picked a position loses nothing, because the section keeps the link
+   * exactly where it was.
+   */
+  const reveal = async (fallbackToServer: boolean): Promise<void> => {
+    if (revealing || revealed) {
+      return;
+    }
+    revealing = true;
+    section.setAttribute(REVEAL_BUSY_ATTRIBUTE, "true");
+    try {
+      const aggregate = await positions.aggregate(arenaID);
+      const locale = resolveLocale([document.documentElement.lang]);
+      const translator = createAggregateTranslator(locale);
+      const element = document.createElement(POSITION_AGGREGATE_TAG);
+      if (!(element instanceof GaPositionAggregateElement)) {
+        // A registry that refused the definition leaves a plain element; the
+        // page keeps the server-rendered section instead of writing into a node
+        // that has no view.
+        return;
+      }
+      element.view = aggregatePresentation(translator, locale, aggregate);
+      section.replaceChildren(element);
+      revealed = true;
+      element.focusHeading();
+    } catch {
+      if (fallbackToServer) {
+        globalThis.location.assign(link.href);
+        return;
+      }
+      // A choice that cannot reveal changes nothing: the section stays as the
+      // server rendered it and the reveal link remains the way forward.
+    } finally {
+      section.removeAttribute(REVEAL_BUSY_ATTRIBUTE);
+      revealing = false;
+    }
+  };
+
+  link.addEventListener("click", (event: Event): void => {
+    event.preventDefault();
+    void reveal(true);
+  });
+
+  return (): void => {
+    void reveal(false);
+  };
+}
+
 /** Installs the whole enhancement on one document. */
 export function installArenaPage(document: Document = globalThis.document): void {
+  definePositionAggregate();
   installSubmissionGuard(document);
-  installLocalChoice(document, arenaOf(document));
+  const arenaID = arenaOf(document);
+  const reveal = installAggregateReveal(document, arenaID);
+  installLocalChoice(document, arenaID, reveal ?? ((): void => undefined));
   installAttributionLimit(document, attributionLimit(document));
 }
 
