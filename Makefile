@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -70,6 +70,31 @@ test-integration:
 test-race:
 	$(GO) test -race -count=1 ./internal/wallet/... ./internal/arguments/... ./internal/jobs/application/...
 	@echo "test-race: ok"
+
+# test-isolation é o gate de ciclo de vida dos testes (P22-T06): o guarda de
+# cada teste recusa o que sobrevive a ele, uma fixture que vaza de propósito
+# prova que o detector morde, a auditoria de resíduos mede o que uma execução
+# deixa na máquina (banco descartável, conexão e diretório temporário) e a suíte
+# roda com ordem embaralhada e paralelismo alto, imprimindo a seed para que uma
+# execução vermelha possa ser repetida. Exige um PostgreSQL alcançável, como
+# `test-unit` e `test-integration`, e roda a suíte inteira: por isso é alvo
+# próprio, fora de `make verify` (docs/CI.md).
+test-isolation:
+	bash tools/isolationaudit/verify.sh
+	@echo "test-isolation: ok"
+
+# test-offline é o gate de execução offline e reprodutível (P22-T08): o
+# manifesto de ferramentas, imagens e lockfiles é função da árvore (duas
+# execuções respondem os mesmos bytes), o preload instala dos lockfiles
+# aprovados e prova com egress negado que os caches respondem a eles, um
+# processo que tenta alcançar a internet é recusado por regra nomeando o host e
+# nada arquiva, e `make test-unit` e `make test-integration` rodam offline,
+# verdes, arquivando manifesto e evidência parseável. Exige um PostgreSQL
+# alcançável, como `test-unit`, e Node com os dois lockfiles: por isso é alvo
+# próprio, fora de `make verify` (docs/CI.md).
+test-offline:
+	bash tools/offlineaudit/verify.sh
+	@echo "test-offline: ok"
 
 # test-migration é o nome que o CI dá às migrations (P19-T08): o runner (fontes
 # ordenadas, tabela de versão, nenhum caminho de volta) e o harness que aplica
@@ -501,6 +526,28 @@ test-e2e: build-web
 	@tools/e2e/isolation-check.sh
 	tools/e2e/harness.sh
 	@echo "test-e2e: ok"
+
+# testenv-verify é a verificação ao vivo do ambiente descartável (P22-T01):
+# sobe o orquestrador contra um daemon Docker de verdade e mede as quatro
+# validações da tarefa — dois namespaces ao mesmo tempo não colidem, uma
+# interrupção leva os recursos temporários embora, uma porta ocupada falha com
+# diagnóstico, e nenhum serviço usa internet nem credencial real. A última é
+# medida, não afirmada: os serviços do produto ficam só na rede interna (o
+# `docker inspect` de cada contêiner é conferido), um contêiner de dentro dela
+# não alcança um endereço público, e o mesmo probe *alcança* a aplicação ali
+# dentro — sem esse controle positivo, "inalcançável" poderia ser um probe que
+# nunca rodou. Também recusa um contêiner que tenha recebido a credencial que o
+# shell exportou, e confirma que a aplicação recusa um `ARENA_*` desconhecido,
+# que é o que mantém o ambiente publicando os próprios nomes fora daquele
+# namespace.
+#
+# Exige daemon Docker e uma build do frontend (`make build-web`), como test-e2e
+# e disaster-drill. Ele não está em `verify` porque não é uma verificação de
+# código: é a propriedade da máquina em que o ambiente roda, e a suíte de
+# `tools/testenv` já cobre as decisões do orquestrador sem daemon.
+testenv-verify:
+	tools/testenv/verify.sh
+	@echo "testenv-verify: ok"
 
 # test-load-smoke executa os cenários k6 versionados contra uma instância
 # local preparada exclusivamente com dados sintéticos. O gate falha se k6 não
