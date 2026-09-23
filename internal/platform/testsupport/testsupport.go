@@ -68,7 +68,18 @@ type Builder struct {
 // into a failure message names the scenario that built it.
 func New(t *testing.T) *Builder {
 	t.Helper()
-	seed := testsource.SeedFor(t)
+	return NewWithSeed(t, testsource.SeedFor(t))
+}
+
+// NewWithSeed starts a builder for an explicit seed. It is what a test that
+// compares two scenarios uses — "another seed is another dataset" is a claim
+// about two builders, and it cannot be stated with one registered seed. The
+// seed is literal in the test source, so the run is replayable by reading it.
+//
+// The prefix still comes from the test's name, so a value that leaks into a
+// failure message names the scenario that built it, seed or no seed.
+func NewWithSeed(t *testing.T, seed int64) *Builder {
+	t.Helper()
 	prefix := "ts-" + slugPrefix(t.Name())
 
 	// The seed decides the start of the scenario, not just its stream: two
