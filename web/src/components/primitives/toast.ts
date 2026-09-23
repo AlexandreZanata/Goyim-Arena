@@ -13,6 +13,10 @@
  * auto-dismiss; a toast that is focused or hovered keeps its time; `Escape`
  * dismisses it; and when the toast had focus, focus returns to wherever the
  * user was before it appeared — never to a node that no longer exists.
+ *
+ * The attributes are observed: changing `severity`, `duration` or
+ * `dismiss-label` after the element is connected re-renders it and re-arms the
+ * dismissal, so an attribute is never a value the element silently ignores.
  */
 import { ensureChild, toggleHidden } from "./dom.js";
 import { TOAST_DEFAULT_DURATION_MS, shouldRestoreFocus, toastLiveRegion, toastTiming } from "./model.js";
@@ -57,6 +61,15 @@ export class GaToastElement extends HTMLElement {
     this.removeEventListener("focusout", this.onFocusChange);
     this.removeEventListener("keydown", this.onKeyDown);
     this.removeEventListener("click", this.onClick);
+  }
+
+  /** Re-reads the observed attributes; the upgrade renders them once more. */
+  attributeChangedCallback(): void {
+    if (!this.isConnected) {
+      return;
+    }
+    this.render();
+    this.schedule();
   }
 
   /** Severity of this toast, defaulting to `info`. */
