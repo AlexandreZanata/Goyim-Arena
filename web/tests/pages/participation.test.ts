@@ -13,11 +13,13 @@ import { test } from "node:test";
 
 import {
   POSITIONS,
+  attributionLimitMessage,
   attributionSelection,
   choiceStorageKey,
   chooseLocalChoice,
   readLocalChoice,
 } from "../../src/pages/participation.js";
+import { createTranslator } from "../../src/i18n/translator.js";
 
 test("the position vocabulary is the one the generated contract declares", () => {
   assert.deepEqual([...POSITIONS], ["agree", "disagree", "undecided"]);
@@ -102,4 +104,20 @@ test("an empty value is never a selection", () => {
   const decision = attributionSelection([], "", true, 3);
   assert.equal(decision.allowed, false);
   assert.deepEqual(decision.selected, []);
+});
+
+test("the refusal message names the limit in the locale of the page", () => {
+  const pt = createTranslator("pt-BR", { namespaces: ["arenas"] });
+  const en = createTranslator("en-US", { namespaces: ["arenas"] });
+
+  assert.equal(attributionLimitMessage(pt, 3), "Escolha no máximo 3 argumentos.");
+  assert.equal(attributionLimitMessage(en, 3), "Choose at most 3 arguments.");
+});
+
+test("the refusal message formats a large limit for the locale", () => {
+  const pt = createTranslator("pt-BR", { namespaces: ["arenas"] });
+  const en = createTranslator("en-US", { namespaces: ["arenas"] });
+
+  assert.ok(attributionLimitMessage(pt, 1234).includes("1.234"));
+  assert.ok(attributionLimitMessage(en, 1234).includes("1,234"));
 });

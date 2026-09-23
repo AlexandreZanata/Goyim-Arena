@@ -22,6 +22,7 @@
  * this file.
  */
 import type { ArenaPositionForm } from "../contracts/generated.js";
+import type { Translator } from "../i18n/translator.js";
 
 /** The position vocabulary, taken from the generated contract. */
 export type Position = ArenaPositionForm["position"];
@@ -124,4 +125,14 @@ export function attributionSelection(
     return { allowed: false, selected: [...selected] };
   }
   return { allowed: true, selected: [...selected, toggled] };
+}
+
+/**
+ * attributionLimitMessage is the text of the refusal the browser shows when a
+ * tick would pass the limit. It is the message the server renders for the same
+ * refusal, read from the same catalog key, so a person who acts with scripts
+ * and one who submits without them read the same sentence.
+ */
+export function attributionLimitMessage(translator: Translator, limit: number): string {
+  return translator.translate("arenas.participation.errors.too_many_attributions", { max: limit });
 }

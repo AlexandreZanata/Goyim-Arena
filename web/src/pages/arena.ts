@@ -19,7 +19,9 @@
  *     position, through the public positions contract (the reveal link keeps
  *     its server-side path as the resilience of the enhancement);
  *   - the locale rendering of the instants the server wrote as machine values,
- *     so a person reads a date while `<time datetime>` keeps the RFC 3339.
+ *     so a person reads a date while `<time datetime>` keeps the RFC 3339;
+ *   - the sentence of a refused attribution tick, so the courtesy refusal
+ *     explains itself instead of only marking the group invalid.
  *
  * Registration of the primitives and the submission guard come from the account
  * journey's module: the two surfaces share the same document conventions
@@ -34,7 +36,8 @@ import {
 import { createPositionsClient } from "../core/clients/positions.js";
 import { createHttpCore } from "../core/http.js";
 import { resolveLocale } from "../i18n/locale.js";
-import { aggregatePresentation, createAggregateTranslator } from "./aggregate.js";
+import { createTranslator } from "../i18n/translator.js";
+import { aggregatePresentation } from "./aggregate.js";
 import { installSubmissionGuard } from "./auth.js";
 import { timeText } from "./instants.js";
 import {
@@ -42,13 +45,18 @@ import {
   ATTRIBUTION_GROUP_SELECTOR,
   CHOICE_ATTRIBUTE,
   CHOICE_GROUP_SELECTOR,
+  attributionLimitMessage,
   attributionSelection,
   choiceStorageKey,
   chooseLocalChoice,
   readLocalChoice,
 } from "./participation.js";
 import type { Locale } from "../i18n/locale.js";
+import type { Translator } from "../i18n/translator.js";
 import type { Position } from "./participation.js";
+
+/** The catalog namespaces every text this page renders lives in. */
+const PAGE_NAMESPACES: readonly ["arenas"] = ["arenas"];
 
 /** The storage the page may use, or null when the browser refuses it. */
 function storageOf(): Storage | null {
@@ -160,16 +168,44 @@ function installLocalChoice(document: Document, arenaID: string, onChosen: () =>
   }
 }
 
+/** Marks the refusal message the browser renders, so it is never duplicated. */
+const ATTRIBUTION_MESSAGE_ATTRIBUTE = "data-ga-attribution-message";
+
 /**
  * installAttributionLimit refuses the tick that would pass the limit the page
  * declares. It never unchecks a selection the person made within the limit, and
  * it marks the group as invalid so the refusal is visible instead of silent.
+ *
+ * The refusal also shows the same sentence the server renders for it, from the
+ * same catalog key: a person who ticks past the limit with scripts and one who
+ * submits without them read the same message. When the server already rendered
+ * it for the last submission, the browser does not repeat it.
  */
-function installAttributionLimit(document: Document, limit: number): void {
+function installAttributionLimit(document: Document, limit: number, translator: Translator): void {
   const group = document.querySelector(ATTRIBUTION_GROUP_SELECTOR);
   if (group === null || limit < 1) {
     return;
   }
+
+  const clearMessage = (): void => {
+    group.querySelector(`[${ATTRIBUTION_MESSAGE_ATTRIBUTE}]`)?.remove();
+  };
+
+  const showMessage = (): void => {
+    const serverMessage = group.querySelector(`[role="alert"]:not([${ATTRIBUTION_MESSAGE_ATTRIBUTE}])`);
+    if (serverMessage !== null) {
+      return;
+    }
+    let message = group.querySelector(`[${ATTRIBUTION_MESSAGE_ATTRIBUTE}]`);
+    if (!(message instanceof HTMLParagraphElement)) {
+      message = document.createElement("p");
+      message.setAttribute(ATTRIBUTION_MESSAGE_ATTRIBUTE, "");
+      message.setAttribute("role", "alert");
+      group.append(message);
+    }
+    message.textContent = attributionLimitMessage(translator, limit);
+  };
+
   group.addEventListener("change", (event: Event): void => {
     const target = event.target;
     if (!(target instanceof HTMLInputElement) || target.type !== "checkbox") {
@@ -187,9 +223,11 @@ function installAttributionLimit(document: Document, limit: number): void {
     if (!decision.allowed) {
       target.checked = false;
       group.setAttribute("aria-invalid", "true");
+      showMessage();
       return;
     }
     group.removeAttribute("aria-invalid");
+    clearMessage();
   });
 }
 
@@ -265,7 +303,12 @@ function revealLinkOf(document: Document): HTMLAnchorElement | null {
  * no visitor block to take the Arena identifier from (a signed-in page), in
  * which case the reveal stays a navigation. Without scripts none of this runs.
  */
-function installAggregateReveal(document: Document, arenaID: string, locale: Locale): (() => void) | null {
+function installAggregateReveal(
+  document: Document,
+  arenaID: string,
+  locale: Locale,
+  translator: Translator,
+): (() => void) | null {
   const link = revealLinkOf(document);
   const section = link?.closest("section") ?? null;
   if (link === null || section === null || arenaID === "") {
@@ -293,7 +336,6 @@ function installAggregateReveal(document: Document, arenaID: string, locale: Loc
     section.setAttribute(REVEAL_BUSY_ATTRIBUTE, "true");
     try {
       const aggregate = await positions.aggregate(arenaID);
-      const translator = createAggregateTranslator(locale);
       const element = document.createElement(POSITION_AGGREGATE_TAG);
       if (!(element instanceof GaPositionAggregateElement)) {
         // A registry that refused the definition leaves a plain element; the
@@ -335,11 +377,12 @@ export function installArenaPage(document: Document = globalThis.document): void
   // The document arrives rendered in a locale the server resolved, and the
   // browser only reads it: anything the module renders afterwards uses it.
   const locale = resolveLocale([document.documentElement.lang]);
+  const translator = createTranslator(locale, { namespaces: PAGE_NAMESPACES });
   installLocalizedInstants(document, locale);
   const arenaID = arenaOf(document);
-  const reveal = installAggregateReveal(document, arenaID, locale);
+  const reveal = installAggregateReveal(document, arenaID, locale, translator);
   installLocalChoice(document, arenaID, reveal ?? ((): void => undefined));
-  installAttributionLimit(document, attributionLimit(document));
+  installAttributionLimit(document, attributionLimit(document), translator);
 }
 
 installArenaPage();

@@ -18,20 +18,8 @@ import { aggregateView } from "../components/position-aggregate/model.js";
 import { formatInstant, formatNumber } from "../i18n/formats.js";
 import type { AggregateText, AggregateView } from "../components/position-aggregate/model.js";
 import type { PositionAggregate } from "../contracts/generated.js";
-import { createTranslator } from "../i18n/translator.js";
 import type { Locale } from "../i18n/locale.js";
-import type { Namespace, Translator } from "../i18n/translator.js";
-
-/** The catalog namespaces the aggregate text lives in. */
-const AGGREGATE_NAMESPACES: readonly Namespace[] = ["arenas"];
-
-/**
- * createAggregateTranslator builds the translator this journey renders from,
- * holding only the namespaces its keys live in.
- */
-export function createAggregateTranslator(locale: Locale): Translator {
-  return createTranslator(locale, { namespaces: AGGREGATE_NAMESPACES });
-}
+import type { Translator } from "../i18n/translator.js";
 
 /** aggregateText reads the catalog and formats the values of one rendering. */
 export function aggregateText(translator: Translator, locale: Locale, aggregate: PositionAggregate): AggregateText {
