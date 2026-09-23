@@ -83,6 +83,19 @@ test-isolation:
 	bash tools/isolationaudit/verify.sh
 	@echo "test-isolation: ok"
 
+# test-offline é o gate de execução offline e reprodutível (P22-T08): o
+# manifesto de ferramentas, imagens e lockfiles é função da árvore (duas
+# execuções respondem os mesmos bytes), o preload instala dos lockfiles
+# aprovados e prova com egress negado que os caches respondem a eles, um
+# processo que tenta alcançar a internet é recusado por regra nomeando o host e
+# nada arquiva, e `make test-unit` e `make test-integration` rodam offline,
+# verdes, arquivando manifesto e evidência parseável. Exige um PostgreSQL
+# alcançável, como `test-unit`, e Node com os dois lockfiles: por isso é alvo
+# próprio, fora de `make verify` (docs/CI.md).
+test-offline:
+	bash tools/offlineaudit/verify.sh
+	@echo "test-offline: ok"
+
 # test-migration é o nome que o CI dá às migrations (P19-T08): o runner (fontes
 # ordenadas, tabela de versão, nenhum caminho de volta) e o harness que aplica
 # as migrations embutidas a um banco virgem descartável. Ele não substitui a
