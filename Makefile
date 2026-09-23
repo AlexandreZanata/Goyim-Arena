@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -216,6 +216,34 @@ quality-waivers:
 quality-taxonomy:
 	$(GO) run ./tools/qualitytaxonomy -root .
 	@echo "quality-taxonomy: ok"
+
+# quality-inventory é o inventário de cobertura semântica (P21-T06): cruza o
+# catálogo, o registro de evidências e a matriz de requisitos com as seis
+# famílias de artefatos que a fase nomeia — as rotas que o contrato serve, as
+# migrations do schema, os casos de uso dos módulos, os tipos de job, os
+# subcomandos do binário e as referências de teste citadas — e gera
+# quality/coverage.json (máquina) e docs/quality/COVERAGE.md (pessoas).
+# A cobertura é contada **por regra, nunca por linha**: uma regra está coberta
+# quando um teste que a prova, uma rota, um caso de uso ou uma migration que a
+# carrega, ou uma identidade de evidência que a declara existe de verdade. Ele
+# entra em `verify` porque é gate de merge, e falha quando uma regra não tem
+# âncora alguma (Q0 inclusive: uma regra crítica que nada prova é uma regra que
+# ninguém aplica), quando uma citação dos três documentos aponta para algo que
+# não existe mais, e quando o relatório versionado diverge da árvore — a
+# remoção de uma evidência Q0 não passa em silêncio: ela aparece no diff que
+# alguém tem de commitar. Órfão é listado e **não** reprova: a lista é o
+# achado, e transformá-la em portão exigiria uma política que a fase não deu.
+# Ele nunca escreve nesta forma.
+quality-inventory:
+	$(GO) run ./tools/qualityinventory -root .
+	@echo "quality-inventory: ok"
+
+# quality-inventory-write regenera os dois arquivos do inventário. É o alvo que
+# se roda depois de mudar o catálogo, o registro ou a matriz, e o diff do par é
+# a evidência da mudança de cobertura — não um efeito colateral dela.
+quality-inventory-write:
+	$(GO) run ./tools/qualityinventory -root . -write
+	@echo "quality-inventory-write: ok"
 
 # release-gate é o portão das decisões humanas do lançamento (P20-T01): lê o
 # registro versionado (docs/GOVERNANCE.md) e **falha** enquanto qualquer uma das
@@ -490,7 +518,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy handoff-check
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint; do \
 		echo "  - $$gate"; \
