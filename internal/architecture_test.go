@@ -620,8 +620,11 @@ func effectViolationsInSource(t *testing.T, source, pkgDir string) []string {
 
 // testOnlyPackages are the packages of the test platform that no delivered
 // process may import: the deterministic sources of P22-T02, which answer with a
-// seeded stream where production reads the system clock and crypto/rand, and
-// the scenario builders of P22-T03, which exist to compose tests.
+// seeded stream where production reads the system clock and crypto/rand, the
+// scenario builders of P22-T03, which exist to compose tests, and the provider
+// simulators of P22-T05, which stand in for Stripe, Resend, Turnstile, Sentry
+// and PostHog and would answer a call the product believes it made to a
+// provider.
 //
 // They are listed here rather than trusted by convention because the failure
 // they guard against is silent: a builder imported by an adapter would compile,
@@ -629,6 +632,7 @@ func effectViolationsInSource(t *testing.T, source, pkgDir string) []string {
 var testOnlyPackages = []string{
 	"internal/platform/testsource",
 	"internal/platform/testsupport",
+	"internal/platform/providersim",
 }
 
 // TestTheTestOnlyPackagesStayInTests is what keeps the test platform from
