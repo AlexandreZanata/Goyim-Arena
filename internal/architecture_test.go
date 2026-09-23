@@ -618,16 +618,32 @@ func effectViolationsInSource(t *testing.T, source, pkgDir string) []string {
 	return violations
 }
 
-// TestTheTestSourcesStayInTests is what keeps the deterministic sources of
-// P22-T02 from becoming a way to ship a fake one: no non-test file under
-// internal/ (outside the package itself) and nothing under cmd/ may import
-// internal/platform/testsource. A test may, which is the whole point — the
-// sources are how a scenario stops depending on the machine it runs on.
-func TestTheTestSourcesStayInTests(t *testing.T) {
+// testOnlyPackages are the packages of the test platform that no delivered
+// process may import: the deterministic sources of P22-T02, which answer with a
+// seeded stream where production reads the system clock and crypto/rand, and
+// the scenario builders of P22-T03, which exist to compose tests.
+//
+// They are listed here rather than trusted by convention because the failure
+// they guard against is silent: a builder imported by an adapter would compile,
+// pass every test, and answer deterministic values in production.
+var testOnlyPackages = []string{
+	"internal/platform/testsource",
+	"internal/platform/testsupport",
+}
+
+// TestTheTestOnlyPackagesStayInTests is what keeps the test platform from
+// becoming a way to ship a fake: no non-test file under internal/ (outside the
+// package itself) and nothing under cmd/ may import a package listed above. A
+// test may, which is the whole point — that is how a scenario stops depending
+// on the machine it runs on.
+func TestTheTestOnlyPackagesStayInTests(t *testing.T) {
 	root := repositoryRoot(t)
 	fset := token.NewFileSet()
 
-	const testSources = modulePrefix + "internal/platform/testsource"
+	forbidden := map[string]string{}
+	for _, packagePath := range testOnlyPackages {
+		forbidden[modulePrefix+packagePath] = packagePath
+	}
 	violations := []string{}
 
 	for _, directory := range []string{filepath.Join(root, "internal"), filepath.Join(root, "cmd")} {
@@ -636,7 +652,7 @@ func TestTheTestSourcesStayInTests(t *testing.T) {
 				return err
 			}
 			if dirEntry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
-				// Test files are the only place the sources are allowed, so they
+				// Test files are the only place the packages are allowed, so they
 				// are skipped instead of inspected.
 				return nil
 			}
@@ -645,7 +661,13 @@ func TestTheTestSourcesStayInTests(t *testing.T) {
 				return relErr
 			}
 			relPath = filepath.ToSlash(relPath)
-			if strings.HasPrefix(relPath, "internal/platform/testsource/") {
+			owner := false
+			for _, packagePath := range testOnlyPackages {
+				if strings.HasPrefix(relPath, packagePath+"/") {
+					owner = true
+				}
+			}
+			if owner {
 				return nil
 			}
 			source, parseErr := parser.ParseFile(fset, path, nil, parser.ImportsOnly)
@@ -659,8 +681,8 @@ func TestTheTestSourcesStayInTests(t *testing.T) {
 					t.Errorf("%s: unparsable import %s", relPath, importSpec.Path.Value)
 					continue
 				}
-				if importPath == testSources {
-					violations = append(violations, fmt.Sprintf("%s imports the deterministic test sources — they answer with a seeded stream and belong to tests only (P22-T02)", relPath))
+				if packagePath, isTestOnly := forbidden[importPath]; isTestOnly {
+					violations = append(violations, fmt.Sprintf("%s imports %s — it answers test scenarios and belongs to tests only (P22-T02, P22-T03)", relPath, packagePath))
 				}
 			}
 			return nil
@@ -671,23 +693,26 @@ func TestTheTestSourcesStayInTests(t *testing.T) {
 	}
 
 	if len(violations) > 0 {
-		t.Fatalf("the test sources escaped into delivered code:\n%s", strings.Join(violations, "\n"))
+		t.Fatalf("the test platform escaped into delivered code:\n%s", strings.Join(violations, "\n"))
 	}
 
-	// And the other direction: the package has to exist and to be reachable, or
-	// this gate would pass over a tree that no longer has the sources at all.
-	entries, err := os.ReadDir(filepath.Join(root, "internal", "platform", "testsource"))
-	if err != nil {
-		t.Fatalf("the deterministic test sources are missing: %v", err)
-	}
-	found := false
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") && !strings.HasSuffix(entry.Name(), "_test.go") {
-			found = true
+	// And the other direction: every package has to exist and to declare a
+	// source, or this gate would pass over a tree that no longer has them.
+	for _, packagePath := range testOnlyPackages {
+		directory := filepath.Join(append([]string{root}, strings.Split(packagePath, "/")...)...)
+		entries, err := os.ReadDir(directory)
+		if err != nil {
+			t.Fatalf("the test-only package %s is missing: %v", packagePath, err)
 		}
-	}
-	if !found {
-		t.Fatal("internal/platform/testsource declares no source: the gate above would accept anything")
+		found := false
+		for _, entry := range entries {
+			if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".go") && !strings.HasSuffix(entry.Name(), "_test.go") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s declares no source: the gate above would accept anything", packagePath)
+		}
 	}
 }
 
