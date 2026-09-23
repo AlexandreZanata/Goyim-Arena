@@ -24,7 +24,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/testguard"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/testguard"
 )
 
 // recorder is the reporter a fixture observes the guard through. It keeps what

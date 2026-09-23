@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/testsource"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/testsource"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/turnstile"
 )
 
 // The expiry scenario of P22-T02: a window is crossed deliberately, with every

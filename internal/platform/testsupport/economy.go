@@ -3,10 +3,10 @@ package testsupport
 import (
 	"time"
 
-	billingdomain "github.com/AlexandreZanata/Goyim-Arena/internal/billing/domain"
-	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
-	walletapp "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/application"
-	walletdomain "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/domain"
+	billingdomain "github.com/AlexandreZanata/Regnovum/internal/billing/domain"
+	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
+	walletapp "github.com/AlexandreZanata/Regnovum/internal/wallet/application"
+	walletdomain "github.com/AlexandreZanata/Regnovum/internal/wallet/domain"
 )
 
 // The synthetic commercial values of a scenario. The amounts are the minor

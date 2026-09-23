@@ -50,8 +50,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/testsource"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/testsource"
+	"github.com/AlexandreZanata/Regnovum/internal/ports"
 )
 
 // epoch is the instant every recorded call is stamped with. A simulator that

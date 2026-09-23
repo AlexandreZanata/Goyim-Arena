@@ -1,12 +1,12 @@
 package testsupport
 
 import (
-	arenasdomain "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
-	argumentsapp "github.com/AlexandreZanata/Goyim-Arena/internal/arguments/application"
-	argumentsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/arguments/domain"
-	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/text"
-	positionsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/positions/domain"
+	arenasdomain "github.com/AlexandreZanata/Regnovum/internal/arenas/domain"
+	argumentsapp "github.com/AlexandreZanata/Regnovum/internal/arguments/application"
+	argumentsdomain "github.com/AlexandreZanata/Regnovum/internal/arguments/domain"
+	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/text"
+	positionsdomain "github.com/AlexandreZanata/Regnovum/internal/positions/domain"
 )
 
 // The synthetic argument text and its source. The address is reserved for

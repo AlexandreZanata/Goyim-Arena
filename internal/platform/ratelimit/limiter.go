@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/clockseed"
 )
 
 // SubjectKind names one dimension a policy can be keyed on.

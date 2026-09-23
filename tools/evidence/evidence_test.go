@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/testsupport"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/testsupport"
 )
 
 // The fixtures of the format. Every rule of FormatRules has one here, the

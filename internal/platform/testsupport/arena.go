@@ -3,8 +3,8 @@ package testsupport
 import (
 	"time"
 
-	arenasdomain "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
-	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
+	arenasdomain "github.com/AlexandreZanata/Regnovum/internal/arenas/domain"
+	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
 )
 
 // The synthetic Arena text. It satisfies the versioned statement policy and

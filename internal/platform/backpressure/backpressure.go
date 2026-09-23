@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/clockseed"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/clockseed"
 )
 
 var (

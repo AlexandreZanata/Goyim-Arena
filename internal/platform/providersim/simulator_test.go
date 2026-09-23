@@ -18,18 +18,18 @@ import (
 	"testing"
 	"time"
 
-	stripeadapter "github.com/AlexandreZanata/Goyim-Arena/internal/billing/adapters/stripe"
-	billingapp "github.com/AlexandreZanata/Goyim-Arena/internal/billing/application"
-	billingdomain "github.com/AlexandreZanata/Goyim-Arena/internal/billing/domain"
-	notificationsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/notifications/domain"
+	stripeadapter "github.com/AlexandreZanata/Regnovum/internal/billing/adapters/stripe"
+	billingapp "github.com/AlexandreZanata/Regnovum/internal/billing/application"
+	billingdomain "github.com/AlexandreZanata/Regnovum/internal/billing/domain"
+	notificationsdomain "github.com/AlexandreZanata/Regnovum/internal/notifications/domain"
 
-	resendadapter "github.com/AlexandreZanata/Goyim-Arena/internal/notifications/adapters/resend"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/config"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/observability"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/providersim"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/testsource"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/testsupport"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/turnstile"
+	resendadapter "github.com/AlexandreZanata/Regnovum/internal/notifications/adapters/resend"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/config"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/observability"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/providersim"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/testsource"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/testsupport"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/turnstile"
 )
 
 // The synthetic values of the fixtures. Every address is inside a reserved

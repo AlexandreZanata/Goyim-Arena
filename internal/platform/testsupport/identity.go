@@ -1,7 +1,7 @@
 package testsupport
 
 import (
-	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
+	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
 )
 
 // Synthetic addresses are the only ones a scenario carries: the reserved

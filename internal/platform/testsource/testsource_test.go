@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/testsource"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/testsource"
+	"github.com/AlexandreZanata/Regnovum/internal/ports"
 )
 
 // draw takes a stream of bytes and a handful of identifiers from one seed, so

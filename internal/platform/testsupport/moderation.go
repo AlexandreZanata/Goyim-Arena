@@ -4,9 +4,9 @@ import (
 	"strings"
 	"time"
 
-	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
-	moderationapp "github.com/AlexandreZanata/Goyim-Arena/internal/moderation/application"
-	moderationdomain "github.com/AlexandreZanata/Goyim-Arena/internal/moderation/domain"
+	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
+	moderationapp "github.com/AlexandreZanata/Regnovum/internal/moderation/application"
+	moderationdomain "github.com/AlexandreZanata/Regnovum/internal/moderation/domain"
 )
 
 // The synthetic moderation values of a scenario: a spam report on an argument

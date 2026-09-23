@@ -40,8 +40,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/testsource"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/ports"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/testsource"
+	"github.com/AlexandreZanata/Regnovum/internal/ports"
 )
 
 // scenarioEpoch is the date every scenario starts from, before the seed moves

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/testsupport"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/testsupport"
 )
 
 // The rules of the format: one per reason a document is refused. They are the

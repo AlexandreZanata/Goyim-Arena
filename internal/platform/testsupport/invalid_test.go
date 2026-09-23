@@ -4,14 +4,14 @@ import (
 	"errors"
 	"testing"
 
-	arenasdomain "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
-	argumentsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/arguments/domain"
-	billingdomain "github.com/AlexandreZanata/Goyim-Arena/internal/billing/domain"
-	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
-	jobsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/domain"
-	moderationdomain "github.com/AlexandreZanata/Goyim-Arena/internal/moderation/domain"
-	positionsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/positions/domain"
-	walletdomain "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/domain"
+	arenasdomain "github.com/AlexandreZanata/Regnovum/internal/arenas/domain"
+	argumentsdomain "github.com/AlexandreZanata/Regnovum/internal/arguments/domain"
+	billingdomain "github.com/AlexandreZanata/Regnovum/internal/billing/domain"
+	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
+	jobsdomain "github.com/AlexandreZanata/Regnovum/internal/jobs/domain"
+	moderationdomain "github.com/AlexandreZanata/Regnovum/internal/moderation/domain"
+	positionsdomain "github.com/AlexandreZanata/Regnovum/internal/positions/domain"
+	walletdomain "github.com/AlexandreZanata/Regnovum/internal/wallet/domain"
 )
 
 // TestEveryInvalidInputIsRefused is what keeps the invalid surface honest. Each

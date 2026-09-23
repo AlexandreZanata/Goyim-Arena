@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
-	jobsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/domain"
-	moderationdomain "github.com/AlexandreZanata/Goyim-Arena/internal/moderation/domain"
-	positionsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/positions/domain"
-	walletdomain "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/domain"
+	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
+	jobsdomain "github.com/AlexandreZanata/Regnovum/internal/jobs/domain"
+	moderationdomain "github.com/AlexandreZanata/Regnovum/internal/moderation/domain"
+	positionsdomain "github.com/AlexandreZanata/Regnovum/internal/positions/domain"
+	walletdomain "github.com/AlexandreZanata/Regnovum/internal/wallet/domain"
 )
 
 // TestTheMinimalJourneyComposes is the smoke test the task asks for: the ten

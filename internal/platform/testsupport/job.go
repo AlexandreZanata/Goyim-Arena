@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"time"
 
-	jobsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/jobs/domain"
+	jobsdomain "github.com/AlexandreZanata/Regnovum/internal/jobs/domain"
 )
 
 // JobOption varies the job a builder makes.

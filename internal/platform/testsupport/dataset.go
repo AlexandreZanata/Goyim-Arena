@@ -8,11 +8,11 @@ import (
 	"strings"
 	"time"
 
-	arenasdomain "github.com/AlexandreZanata/Goyim-Arena/internal/arenas/domain"
-	argumentsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/arguments/domain"
-	identitydomain "github.com/AlexandreZanata/Goyim-Arena/internal/identity/domain"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/text"
-	positionsdomain "github.com/AlexandreZanata/Goyim-Arena/internal/positions/domain"
+	arenasdomain "github.com/AlexandreZanata/Regnovum/internal/arenas/domain"
+	argumentsdomain "github.com/AlexandreZanata/Regnovum/internal/arguments/domain"
+	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/text"
+	positionsdomain "github.com/AlexandreZanata/Regnovum/internal/positions/domain"
 )
 
 // A dataset is the seeded graph a suite loads before it runs (P22-T04): the
