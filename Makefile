@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -162,6 +162,88 @@ audit-ci:
 audit-req:
 	$(GO) run ./tools/reqaudit -root .
 	@echo "audit-req: ok"
+
+# quality-catalog é o portão do catálogo de regras de negócio (P21-T02 e
+# P21-T03): lê quality/catalog.json e julga cada afirmação que ele faz contra o
+# checkout — o documento que a regra cita, os pacotes que ela nomeia, os testes
+# que ela diz existirem, as declarações que a classe de risco exige — e então faz
+# a pergunta que um catálogo completo também tem de responder: **este é o
+# conjunto inteiro?** As entradas são comparadas com docs/REQUIREMENTS.md e
+# docs/THREAT_MODEL.md como eles são, nos dois sentidos: requisito sem entrada e
+# entrada sem regra são recusados. A severidade é lida pelo valor declarado e não
+# pela posição da coluna, porque o modelo de ameaças tem uma linha sem a célula
+# de ator. Ele entra em `verify` porque é gate de merge: uma regra sem evidência
+# exigida é uma regra que ninguém aplica. Ele nunca escreve.
+quality-catalog:
+	$(GO) run ./tools/qualitycatalog -root .
+	@echo "quality-catalog: ok"
+
+# quality-waivers é o portão da política de waivers (P21-T04): lê
+# quality/waivers.json e julga cada exceção contra os registros do checkout — o
+# catálogo, que diz quão séria é a regra suspensa (a classe é lida de lá, não da
+# declaração, para que o waiver não possa amaciá-la); as auditorias, que dizem
+# que o finding aceito existe; e a árvore, onde o teste compensatório tem de
+# estar. Proíbe waiver crítico nas oito áreas da fase, recusa janela vencida ou
+# invertida, dono que seja uma pessoa e compensação que não resolva, e **não**
+# recusa o registro vazio: nada suspendido é o estado saudável — o registro
+# exato oposto ao do catálogo, e de propósito. Confere ainda
+# quality/waivers.schema.json contra o vocabulário do próprio carregador, porque
+# um schema que promete menos que a ferramenta é um segundo contrato. Ele entra
+# em `verify` porque é gate de merge: exceção que ninguém consegue conferir é
+# regra suspensa em silêncio. Imprime identificadores e códigos, nunca a
+# justificativa, o dono ou a compensação — o log do CI não é lugar do texto que
+# o waiver existe para conter.
+quality-waivers:
+	$(GO) run ./tools/qualitywaivers -root .
+	@echo "quality-waivers: ok"
+
+# quality-taxonomy é o portão da taxonomia e identidade das evidências de teste
+# (P21-T05): lê quality/evidence.json e classifica cada identidade — que tipo de
+# teste é, em que suíte roda, em que ambiente, quais regras do catálogo prova e
+# em que classe de risco — **por dado declarado**, nunca pelo nome da função Go.
+# A classe é lida do catálogo e a declaração não pode amaciá-la; o tipo e o
+# ambiente têm de combinar, porque chamar de unitário um teste que só existe
+# contra um PostgreSQL é exatamente o rótulo trocado que a taxonomia existe para
+# recusar; e o dono só é exigido da suíte que prova regra crítica. Recusa ainda
+# identidade duplicada, tipo, ambiente ou regra que ninguém declarou, referência
+# de teste que não resolve na árvore, e confere quality/evidence.schema.json
+# contra o vocabulário do próprio carregador. Ele entra em `verify` porque é
+# gate de merge: evidência que ninguém encontra é evidência que não guarda nada.
+# Ele nunca escreve e nunca executa teste — o que ele produz é o julgamento que
+# o inventário da P21-T06 vai ler. A documentação em prosa dos onze tipos, dos
+# cinco ambientes e das convenções de identificador é
+# docs/quality/EVIDENCE_TAXONOMY.md.
+quality-taxonomy:
+	$(GO) run ./tools/qualitytaxonomy -root .
+	@echo "quality-taxonomy: ok"
+
+# quality-inventory é o inventário de cobertura semântica (P21-T06): cruza o
+# catálogo, o registro de evidências e a matriz de requisitos com as seis
+# famílias de artefatos que a fase nomeia — as rotas que o contrato serve, as
+# migrations do schema, os casos de uso dos módulos, os tipos de job, os
+# subcomandos do binário e as referências de teste citadas — e gera
+# quality/coverage.json (máquina) e docs/quality/COVERAGE.md (pessoas).
+# A cobertura é contada **por regra, nunca por linha**: uma regra está coberta
+# quando um teste que a prova, uma rota, um caso de uso ou uma migration que a
+# carrega, ou uma identidade de evidência que a declara existe de verdade. Ele
+# entra em `verify` porque é gate de merge, e falha quando uma regra não tem
+# âncora alguma (Q0 inclusive: uma regra crítica que nada prova é uma regra que
+# ninguém aplica), quando uma citação dos três documentos aponta para algo que
+# não existe mais, e quando o relatório versionado diverge da árvore — a
+# remoção de uma evidência Q0 não passa em silêncio: ela aparece no diff que
+# alguém tem de commitar. Órfão é listado e **não** reprova: a lista é o
+# achado, e transformá-la em portão exigiria uma política que a fase não deu.
+# Ele nunca escreve nesta forma.
+quality-inventory:
+	$(GO) run ./tools/qualityinventory -root .
+	@echo "quality-inventory: ok"
+
+# quality-inventory-write regenera os dois arquivos do inventário. É o alvo que
+# se roda depois de mudar o catálogo, o registro ou a matriz, e o diff do par é
+# a evidência da mudança de cobertura — não um efeito colateral dela.
+quality-inventory-write:
+	$(GO) run ./tools/qualityinventory -root . -write
+	@echo "quality-inventory-write: ok"
 
 # release-gate é o portão das decisões humanas do lançamento (P20-T01): lê o
 # registro versionado (docs/GOVERNANCE.md) e **falha** enquanto qualquer uma das
@@ -436,7 +518,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req handoff-check
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint; do \
 		echo "  - $$gate"; \
