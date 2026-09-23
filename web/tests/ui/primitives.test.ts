@@ -100,6 +100,17 @@ test("errorSummaryItems keeps form order, drops blanks and lists a field once", 
   ]);
 });
 
+test("errorSummaryItems drops a field id that cannot be a focus target", () => {
+  const items = errorSummaryItems([
+    { fieldId: "email", message: "Informe um e-mail válido." },
+    { fieldId: "e mail", message: "com espaço" },
+    { fieldId: "a#b", message: "com cerquilha" },
+    { fieldId: "#", message: "fragmento vazio" },
+  ]);
+
+  assert.deepEqual(items, [{ fieldId: "email", message: "Informe um e-mail válido.", href: "#email" }]);
+});
+
 test("focusTargetId accepts only usable fragments", () => {
   assert.equal(focusTargetId("#email-control"), "email-control");
   assert.equal(focusTargetId("  #email  "), "email");
