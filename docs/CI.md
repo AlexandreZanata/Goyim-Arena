@@ -10,7 +10,7 @@ Dois workflows, dez jobs:
 
 | Workflow | Job | Gates | Ferramentas que o job instala |
 | --- | --- | --- | --- |
-| `verify` | `foundation` | `make verify` — formatação, drift dos artefatos gerados, unit, integração PostgreSQL, race selecionado, migrations, contrato OpenAPI, segurança, build do frontend, `tsc` estrito, medição do frontend, auditoria de i18n, auditoria de rastreabilidade dos requisitos, auditoria do próprio CI, auditoria do catálogo de regras, auditoria do handoff | Go, Node, sqlc, PostgreSQL 18.4 (serviço) |
+| `verify` | `foundation` | `make verify` — formatação, drift dos artefatos gerados, unit, integração PostgreSQL, race selecionado, migrations, contrato OpenAPI, segurança, build do frontend, `tsc` estrito, medição do frontend, auditoria de i18n, auditoria de rastreabilidade dos requisitos, auditoria do próprio CI, auditoria do catálogo de regras, auditoria dos waivers, auditoria do handoff | Go, Node, sqlc, PostgreSQL 18.4 (serviço) |
 | `verify` | `browser` | `make test-e2e` — jornadas críticas em Chromium | Go, Node, Playwright (pinado em `tools/e2e`), PostgreSQL 18.4 (serviço) |
 | `verify` | `image` | `make image-verify` e o scan da imagem construída | Go, Docker, trivy (ação) |
 | `verify` | `ingress` | `make caddy-verify` | Go, Docker, openssl |
@@ -112,6 +112,6 @@ Cada job é uma linha de shell, então o pipeline é reproduzível na máquina:
 
 ## 8. Regra de manutenção
 
-- Um gate novo entra no `Makefile`, num job e na tabela do `tools/ciaudit`. Sem os três, `make audit-ci` recusa — e é isso que impede um gate de existir no documento e não no pipeline. A tabela carrega a superfície que a fase 19 exigiu; um gate de fase posterior que roda dentro de `make verify` — como `make audit-req` ([REQUIREMENTS.md](REQUIREMENTS.md) §8, P20) ou `make quality-catalog` ([catalog.json](../quality/catalog.json), P21) — aparece no alvo e nos mesmos jobs, e o `make audit-ci` é quem prova que a tabela não regrediu.
+- Um gate novo entra no `Makefile`, num job e na tabela do `tools/ciaudit`. Sem os três, `make audit-ci` recusa — e é isso que impede um gate de existir no documento e não no pipeline. A tabela carrega a superfície que a fase 19 exigiu; um gate de fase posterior que roda dentro de `make verify` — como `make audit-req` ([REQUIREMENTS.md](REQUIREMENTS.md) §8, P20) ou `make quality-catalog` e `make quality-waivers` ([catalog.json](../quality/catalog.json) e [waivers.json](../quality/waivers.json), P21) — aparece no alvo e nos mesmos jobs, e o `make audit-ci` é quem prova que a tabela não regrediu.
 - O CI não pode ser mais fraco que o alvo que ele chama: parâmetros de scan, versão de scanner e conjunto de gates são lidos do `Makefile`, nunca redigitados.
 - Achado de gate que precise de correção entra por um commit novo na branch da fase: nada de `--force`, de `--admin`, de `--no-verify` ou de limiar reduzido para obter verde.

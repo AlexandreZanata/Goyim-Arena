@@ -21,7 +21,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -177,6 +177,25 @@ audit-req:
 quality-catalog:
 	$(GO) run ./tools/qualitycatalog -root .
 	@echo "quality-catalog: ok"
+
+# quality-waivers é o portão da política de waivers (P21-T04): lê
+# quality/waivers.json e julga cada exceção contra os registros do checkout — o
+# catálogo, que diz quão séria é a regra suspensa (a classe é lida de lá, não da
+# declaração, para que o waiver não possa amaciá-la); as auditorias, que dizem
+# que o finding aceito existe; e a árvore, onde o teste compensatório tem de
+# estar. Proíbe waiver crítico nas oito áreas da fase, recusa janela vencida ou
+# invertida, dono que seja uma pessoa e compensação que não resolva, e **não**
+# recusa o registro vazio: nada suspendido é o estado saudável — o registro
+# exato oposto ao do catálogo, e de propósito. Confere ainda
+# quality/waivers.schema.json contra o vocabulário do próprio carregador, porque
+# um schema que promete menos que a ferramenta é um segundo contrato. Ele entra
+# em `verify` porque é gate de merge: exceção que ninguém consegue conferir é
+# regra suspensa em silêncio. Imprime identificadores e códigos, nunca a
+# justificativa, o dono ou a compensação — o log do CI não é lugar do texto que
+# o waiver existe para conter.
+quality-waivers:
+	$(GO) run ./tools/qualitywaivers -root .
+	@echo "quality-waivers: ok"
 
 # release-gate é o portão das decisões humanas do lançamento (P20-T01): lê o
 # registro versionado (docs/GOVERNANCE.md) e **falha** enquanto qualquer uma das
@@ -451,7 +470,7 @@ test-load-smoke:
 # verify agrega os gates existentes do estágio atual e lista os pendentes.
 # Gates pendentes nunca são executados aqui: eles falham explicitamente
 # quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog handoff-check
+verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers handoff-check
 	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
 	@for gate in lint; do \
 		echo "  - $$gate"; \
