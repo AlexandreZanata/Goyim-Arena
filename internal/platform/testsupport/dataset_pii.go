@@ -122,11 +122,22 @@ var reservedEmailDomains = []string{".test", ".invalid", ".example", ".localhost
 // name instead of by suffix.
 var reservedEmailNames = []string{"example.com", "example.net", "example.org"}
 
-// SensitiveFindings reports everything in the bytes that a synthetic dataset
-// may not carry, in the order it was found. An empty answer is the pass.
-func SensitiveFindings(data []byte) []SensitiveFinding {
+// sensitiveMatch is one place a declared rule actually fires: the rule, and the
+// byte range of what it found. The range is what makes redaction possible — a
+// finding says *that* a value is there, and a match says *where*.
+type sensitiveMatch struct {
+	rule       string
+	start, end int
+}
+
+// sensitiveMatches walks the declared vocabulary over the bytes and answers the
+// matches that fire, in the order they appear. It is the single reading of the
+// rules: the findings a gate reports and the replacements a redaction performs
+// are the same walk, so a value the report names is a value the redaction
+// removes.
+func sensitiveMatches(data []byte) []sensitiveMatch {
 	text := string(data)
-	findings := []SensitiveFinding{}
+	matches := []sensitiveMatch{}
 
 	for _, rule := range sensitiveRules {
 		for _, match := range rule.pattern.FindAllStringIndex(text, -1) {
@@ -144,25 +155,86 @@ func SensitiveFindings(data []byte) []SensitiveFinding {
 					continue
 				}
 			case "real-email-domain":
+				// An address inside a reserved example domain is the only
+				// kind a dataset may carry, which is what the rule exempts.
 				if isReservedAddress(candidate) {
 					continue
 				}
 			}
-			findings = append(findings, SensitiveFinding{
-				Rule:     rule.rule,
-				Evidence: redact(candidate),
-				At:       match[0],
-			})
+			matches = append(matches, sensitiveMatch{rule: rule.rule, start: match[0], end: match[1]})
 		}
 	}
 
-	sort.SliceStable(findings, func(left, right int) bool {
-		if findings[left].At != findings[right].At {
-			return findings[left].At < findings[right].At
+	sort.SliceStable(matches, func(left, right int) bool {
+		if matches[left].start != matches[right].start {
+			return matches[left].start < matches[right].start
 		}
-		return findings[left].Rule < findings[right].Rule
+		return matches[left].rule < matches[right].rule
 	})
+	return matches
+}
+
+// SensitiveFindings reports everything in the bytes that a synthetic dataset
+// may not carry, in the order it was found. An empty answer is the pass.
+func SensitiveFindings(data []byte) []SensitiveFinding {
+	text := string(data)
+	findings := []SensitiveFinding{}
+	for _, match := range sensitiveMatches(data) {
+		findings = append(findings, SensitiveFinding{
+			Rule:     match.rule,
+			Evidence: redact(text[match.start:match.end]),
+			At:       match.start,
+		})
+	}
 	return findings
+}
+
+// SensitiveRedaction is one detector rule that a redaction replaced, and how
+// many values it replaced. The value is not here: the rule is, because "a
+// credential was removed here" is what a reader of the artifact has to know.
+type SensitiveRedaction struct {
+	Rule  string `json:"rule"`
+	Count int    `json:"count"`
+}
+
+// SensitiveMarker names the marker a redaction leaves: the rule, and nothing of
+// the value, so the artifact says what was there without carrying it.
+func SensitiveMarker(rule string) string {
+	return "[REDACTED:" + rule + "]"
+}
+
+// RedactSensitive replaces every value the detector knows with the marker of the
+// rule that found it, and answers what it replaced, by rule, in a fixed order.
+//
+// It is the same vocabulary as the refusal, applied instead of raised, because
+// the artifact of a run is not a fixture: a suite that printed somebody's token
+// is a suite whose evidence has to be filed and made safe, and throwing the run
+// away would lose the measurement to protect the value. Overlapping matches are
+// replaced once, by the match that starts first — the second rule found what the
+// first one took.
+func RedactSensitive(data []byte) ([]byte, []SensitiveRedaction) {
+	text := string(data)
+	matches := sensitiveMatches(data)
+	counted := map[string]int{}
+
+	replaced := text
+	next := len(text) + 1
+	for index := len(matches) - 1; index >= 0; index-- {
+		match := matches[index]
+		if match.end > next {
+			continue
+		}
+		replaced = replaced[:match.start] + SensitiveMarker(match.rule) + replaced[match.end:]
+		counted[match.rule]++
+		next = match.start
+	}
+
+	redactions := make([]SensitiveRedaction, 0, len(counted))
+	for rule, count := range counted {
+		redactions = append(redactions, SensitiveRedaction{Rule: rule, Count: count})
+	}
+	sort.Slice(redactions, func(left, right int) bool { return redactions[left].Rule < redactions[right].Rule })
+	return []byte(replaced), redactions
 }
 
 // SensitiveFindings reports what the canonical bytes of this dataset carry.
