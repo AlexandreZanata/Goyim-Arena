@@ -95,6 +95,32 @@ funções puras da seed, e os cenários de expiração (`turnstile`, janela de u
 único) e de ordenação (`clockseed`, instante que o identificador declara) são
 gerados do seed e replicados a partir dele.
 
+**5. O ciclo de vida de um teste tem dono, e o ambiente é efeito dele
+(P22-T06).** Uma fonte determinística resolve *o que* o cenário lê; ela não
+resolve *o que sobrevive* ao cenário. `internal/platform/testguard` é o dono
+desse outro lado: ele entrega o recurso (diretório, listener, conexão,
+goroutine, timer, processo, variável) e, quando o teste termina, pergunta se ele
+acabou — e se quem o acabou foi o teste ou o próprio guarda, porque "o guarda
+fechou" é justamente o vazamento que uma suíte verde esconde. O relato nomeia a
+regra e a linha que criou o recurso, e uma fixture que vaza de propósito
+(`testguard/testdata/leak`, fora de `./...` porque ela *deve* falhar) é a
+falsificação: `make test-isolation` exige que a execução dela seja vermelha
+e que cada regra declarada apareça por nome.
+
+O **ambiente** entra no vocabulário do portão por causa disso. Ele já era lido
+diretamente por `os.Getenv`/`LookupEnv`/`Setenv`/`Unsetenv` e o portão não
+conhecia `os.Environ` — a leitura que compara as duas fotografias do ambiente foi
+quem mostrou o furo. Agora `Environ` é vocabulário fechado e `testguard` é o
+terceiro dono declarado, com a mesma prova de sempre: nenhum arquivo não-teste
+sob `internal/` ou `cmd/` o importa.
+
+O que sobrevive ao *processo* inteiro não é pergunta de teste nenhum, e por isso
+o outro lado do gate é um instrumento separado: `tools/isolationaudit` fotografa
+a máquina antes e depois de uma execução (bancos descartáveis do harness,
+conexões presas a eles, diretórios do guarda), compara as duas e recusa o que
+cresceu. Nenhuma suíte consegue responder por si mesma a essa pergunta — o
+processo que responde precisa sobreviver ao processo que ele julga.
+
 ## Alternativas
 
 - **Manter a busca textual e ampliar a allowlist por pacote**: rejeitada. O
@@ -131,12 +157,21 @@ gerados do seed e replicados a partir dele.
   com teste dos dois lados da borda, e um relógio ausente é recusa em vez de
   panique no primeiro webhook da release;
 - custo: uma entrada a mais em cada allowlist do portão de arquitetura (efeitos e
-  variáveis de ambiente), um pacote de suporte a teste, e a responsabilidade de
-  mantê-lo fora de produção, provada por teste.
+  variáveis de ambiente), dois pacotes de suporte a teste, e a responsabilidade de
+  mantê-los fora de produção, provada por teste;
+- o ciclo de vida de cada teste passa a ser medível (regra, recurso e linha),
+  uma fixture prova que o detector morde, e o que sobra de uma execução inteira
+  deixa de ser invisível: `make test-isolation` roda a suíte com ordem
+  embaralhada e `-parallel=16` e compara a máquina antes e depois (`test-isolation`
+  fora de `make verify` por rodar a suíte inteira, como `testenv-verify`).
 
 ## Revisão
 
 Reavaliar quando o relógio passar a ser exigido na composição (a alternativa
 adiada acima), quando um adapter precisar de relógio próprio e documentar a
 necessidade, ou quando a P22-T04 introduzir datasets determinísticos que passem a
-ser a fonte dos cenários.
+ser a fonte dos cenários. A T04 e a T05 consumiram a última: os datasets e os
+simuladores usam as fontes desta decisão, e a T06 acrescentou o dono do ciclo de
+de vida sem abrir uma segunda forma de ler o relógio — o orçamento de espera do
+guarda é um timer, não uma leitura (`waitFor` deixou de comparar instantes), e o
+portão continua recusando `time.Now`/`Since`/`Until` fora dos dois donos.

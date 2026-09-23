@@ -71,6 +71,18 @@ test-race:
 	$(GO) test -race -count=1 ./internal/wallet/... ./internal/arguments/... ./internal/jobs/application/...
 	@echo "test-race: ok"
 
+# test-isolation é o gate de ciclo de vida dos testes (P22-T06): o guarda de
+# cada teste recusa o que sobrevive a ele, uma fixture que vaza de propósito
+# prova que o detector morde, a auditoria de resíduos mede o que uma execução
+# deixa na máquina (banco descartável, conexão e diretório temporário) e a suíte
+# roda com ordem embaralhada e paralelismo alto, imprimindo a seed para que uma
+# execução vermelha possa ser repetida. Exige um PostgreSQL alcançável, como
+# `test-unit` e `test-integration`, e roda a suíte inteira: por isso é alvo
+# próprio, fora de `make verify` (docs/CI.md).
+test-isolation:
+	bash tools/isolationaudit/verify.sh
+	@echo "test-isolation: ok"
+
 # test-migration é o nome que o CI dá às migrations (P19-T08): o runner (fontes
 # ordenadas, tabela de versão, nenhum caminho de volta) e o harness que aplica
 # as migrations embutidas a um banco virgem descartável. Ele não substitui a

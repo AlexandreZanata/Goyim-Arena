@@ -98,9 +98,17 @@ var businessModules = []string{
 // import it — the test below proves that — so the read cannot reach a process.
 // It is listed here rather than reading the environment in a test file because
 // a helper nobody can share is a helper every test package reimplements.
+//
+// internal/platform/testguard (P22-T06) is the third owner, and it owns the
+// other half of the same effect: it sets a variable for one test and restores
+// it, and it compares the whole environment at the end of the test so that a
+// mutation somebody left behind is a failure instead of a suite that depends on
+// the order its tests ran in. No delivered file may import it either, proven by
+// the same test, so the read cannot reach a process.
 var envReadAllowlist = map[string]bool{
 	"internal/platform/config":     true,
 	"internal/platform/testsource": true,
+	"internal/platform/testguard":  true,
 }
 
 // clockAndRandomAllowlist lists the internal packages allowed to read the wall
@@ -308,7 +316,12 @@ func envReadViolation(expression ast.Expr, pkgDir string) (string, bool) {
 		return "", false
 	}
 	switch selector.Sel.Name {
-	case "Getenv", "LookupEnv", "Setenv", "Unsetenv", "Clearenv", "Expandenv":
+	// Environ is in the vocabulary for the same reason the others are, and it
+	// was missing until P22-T06: reading the whole environment is reading it,
+	// and the guard that compares two snapshots of it is what made the hole
+	// visible (the fixture that closes it lives in
+	// internal/platform/testguard).
+	case "Getenv", "LookupEnv", "Setenv", "Unsetenv", "Clearenv", "Expandenv", "Environ":
 	default:
 		return "", false
 	}
@@ -621,10 +634,12 @@ func effectViolationsInSource(t *testing.T, source, pkgDir string) []string {
 // testOnlyPackages are the packages of the test platform that no delivered
 // process may import: the deterministic sources of P22-T02, which answer with a
 // seeded stream where production reads the system clock and crypto/rand, the
-// scenario builders of P22-T03, which exist to compose tests, and the provider
+// scenario builders of P22-T03, which exist to compose tests, the provider
 // simulators of P22-T05, which stand in for Stripe, Resend, Turnstile, Sentry
 // and PostHog and would answer a call the product believes it made to a
-// provider.
+// provider, and the lifecycle guard of P22-T06, which closes resources and
+// reports leaks — a guard in the delivered process would be a process that
+// reports about itself.
 //
 // They are listed here rather than trusted by convention because the failure
 // they guard against is silent: a builder imported by an adapter would compile,
@@ -633,6 +648,7 @@ var testOnlyPackages = []string{
 	"internal/platform/testsource",
 	"internal/platform/testsupport",
 	"internal/platform/providersim",
+	"internal/platform/testguard",
 }
 
 // TestTheTestOnlyPackagesStayInTests is what keeps the test platform from
