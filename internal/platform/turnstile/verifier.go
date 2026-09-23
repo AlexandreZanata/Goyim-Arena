@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/apperr"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/apperr"
 )
 
 // Verifier is the port the guard depends on: it decides whether one challenge

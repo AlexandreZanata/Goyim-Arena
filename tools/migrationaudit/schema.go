@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbmigrate"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbmigrate"
 )
 
 type column struct {

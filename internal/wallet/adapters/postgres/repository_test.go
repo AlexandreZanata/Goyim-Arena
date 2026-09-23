@@ -17,11 +17,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbtest"
-	platformpg "github.com/AlexandreZanata/Goyim-Arena/internal/platform/postgres"
-	walletpg "github.com/AlexandreZanata/Goyim-Arena/internal/wallet/adapters/postgres"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/wallet/application"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/wallet/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbtest"
+	platformpg "github.com/AlexandreZanata/Regnovum/internal/platform/postgres"
+	walletpg "github.com/AlexandreZanata/Regnovum/internal/wallet/adapters/postgres"
+	"github.com/AlexandreZanata/Regnovum/internal/wallet/application"
+	"github.com/AlexandreZanata/Regnovum/internal/wallet/domain"
 )
 
 func uuidString(u pgtype.UUID) string {

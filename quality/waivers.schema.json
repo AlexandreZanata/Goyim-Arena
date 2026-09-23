@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/AlexandreZanata/Goyim-Arena/quality/waivers.schema.json",
+  "$id": "https://github.com/AlexandreZanata/Regnovum/quality/waivers.schema.json",
   "title": "Quality waiver register",
   "description": "The register of accepted exceptions. Every waiver names the finding it accepts, the catalog rules it suspends, the area it touches, the owner who answers for it, the reason it exists, the tests that compensate it and the day it stops being valid. The loader that judges it is tools/qualitywaivers, and a test holds this document and that loader together: the required fields, the risk classes and the categories are the same lists on both sides, because a waiver the schema admits and the loader refuses is a waiver nobody can write.",
   "type": "object",

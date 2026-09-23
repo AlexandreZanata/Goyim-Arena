@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/transparency/application"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/transparency/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/transparency/application"
+	"github.com/AlexandreZanata/Regnovum/internal/transparency/domain"
 )
 
 const exportCursorSecret = "0123456789abcdef0123456789abcdef"

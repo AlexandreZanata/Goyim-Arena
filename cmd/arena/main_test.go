@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/assets"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbtest"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/assets"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbtest"
 )
 
 func runForTest(t *testing.T, args ...string) (string, string, error) {
@@ -147,7 +147,7 @@ func TestModulePathMatchesMasterPlan(t *testing.T) {
 		t.Fatalf("read go.mod: %v", err)
 	}
 
-	const wantModule = "module github.com/AlexandreZanata/Goyim-Arena"
+	const wantModule = "module github.com/AlexandreZanata/Regnovum"
 	if !strings.Contains(string(data), wantModule) {
 		t.Fatalf("go.mod does not declare %q:\n%s", wantModule, data)
 	}

@@ -8,7 +8,7 @@ package hardcoded
 const hardcodedDocument = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-<title>Redefinir senha — Goyim Arena</title>
+<title>Redefinir senha — Regnovum</title>
 <style>
 body { margin-left: 2rem; }
 </style>

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/persuasion/application"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/persuasion/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/persuasion/application"
+	"github.com/AlexandreZanata/Regnovum/internal/persuasion/domain"
 )
 
 var testInstant = time.Date(2026, 9, 17, 12, 0, 0, 0, time.UTC)

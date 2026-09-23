@@ -41,7 +41,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbmigrate"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbmigrate"
 )
 
 // DatabasePrefix is the prefix every database this tooling may create or drop

@@ -12,11 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/AlexandreZanata/Goyim-Arena/internal/platform/dbtest"
-	platformpg "github.com/AlexandreZanata/Goyim-Arena/internal/platform/postgres"
-	transparencypg "github.com/AlexandreZanata/Goyim-Arena/internal/transparency/adapters/postgres"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/transparency/application"
-	"github.com/AlexandreZanata/Goyim-Arena/internal/transparency/domain"
+	"github.com/AlexandreZanata/Regnovum/internal/platform/dbtest"
+	platformpg "github.com/AlexandreZanata/Regnovum/internal/platform/postgres"
+	transparencypg "github.com/AlexandreZanata/Regnovum/internal/transparency/adapters/postgres"
+	"github.com/AlexandreZanata/Regnovum/internal/transparency/application"
+	"github.com/AlexandreZanata/Regnovum/internal/transparency/domain"
 )
 
 func TestMetricsReconstructFromSources(t *testing.T) {
@@ -327,7 +327,7 @@ func transparencyRepoRoot(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	if !strings.Contains(string(data), "module github.com/AlexandreZanata/Goyim-Arena") {
+	if !strings.Contains(string(data), "module github.com/AlexandreZanata/Regnovum") {
 		t.Fatalf("go.mod does not declare the arena module")
 	}
 	return root
