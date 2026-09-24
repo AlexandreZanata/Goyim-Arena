@@ -1,21 +1,41 @@
 /**
  * `ga-error-summary` — form error summary (P18-T04).
  *
- * The server renders the errors of a failed submission as a list of links
- * inside this element, and the element adopts that list on connect: it reads
- * the links, keeps the document order and completes the markup with its own
- * classes and behavior instead of wiping what the person has to read. Focusing
- * the summary on adoption is the submit flow's focus move — the page only
- * arrives with errors after a submission the server refused.
+ * Tag: `ga-error-summary`.
  *
- * A page may also assign `errors` (already translated messages keyed by field
- * id); the element renders a linked list inside itself, becomes a landmark for
- * assistive technology and moves focus to the offending field when a link is
- * activated, so keyboard users never have to hunt for it. An assignment owns
- * the summary from then on.
+ * Responsibility: list the errors of a failed submission as links to the
+ * fields, and move focus to the offending field when a link is activated, so
+ * keyboard users never have to hunt for it.
+ *
+ * Properties: `errors`, already translated messages keyed by field id. The
+ * server renders the same list as links inside this element, and the element
+ * adopts that list on connect: it reads the links, keeps the document order
+ * and completes the markup with its own classes and behavior instead of wiping
+ * what the person has to read. An assignment owns the summary from then on.
+ *
+ * Events: none. The element presents the errors the server or the page listed.
+ *
+ * States: hidden (no errors), and visible with errors — focused on adoption,
+ * which is the submit flow's focus move, since the page only arrives with
+ * errors after a submission the server refused.
+ *
+ * Keyboard and focus: the summary itself is focusable programmatically
+ * (`tabindex="-1"`); its links follow the native tab order and each one moves
+ * focus to the field it points at.
+ *
+ * CSS: `ga-error-summary` and its `__list`, `__item` and `__link` elements,
+ * styled by primitives.css with the tokens of tokens.css.
+ *
+ * External effects: one click listener, removed in `disconnectedCallback`.
  *
  * Without JavaScript the server list stays as static markup: the summary is
  * informative, and the fields keep their own error paragraphs.
+ *
+ * Usage:
+ *   <ga-error-summary hidden>
+ *     <h2>Revise os campos</h2>
+ *     <ul><li><a href="#email-control">Informe um e-mail válido.</a></li></ul>
+ *   </ga-error-summary>
  */
 import { ensureChild, focusById, setText, toggleHidden } from "./dom.js";
 import { errorSummaryItems, focusTargetId, summaryErrors } from "./model.js";
