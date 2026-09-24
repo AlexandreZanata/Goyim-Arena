@@ -22,6 +22,7 @@ IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
 .PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: quick-verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -40,6 +41,13 @@ fmt-check:
 		exit 1; \
 	fi; \
 	echo "fmt-check: ok"
+
+# Gate curto de integração. Testes de comportamento direcionados permanecem
+# obrigatórios na microtarefa local; a suíte integral é gate de versão.
+quick-verify: fmt-check
+	$(GO) test -run '^$$' ./...
+	$(NPM) --prefix web run typecheck
+	@echo "quick-verify: ok"
 
 # test-unit executa os testes unitários das capacidades existentes (Go).
 # O frontend ainda não possui runner de testes; será agregado quando existir.

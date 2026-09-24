@@ -1,0 +1,12 @@
+---
+description: Regnovum task, PR, and release validation cadence
+alwaysApply: true
+---
+
+# Delivery cadence
+
+- Work on one microtask and one atomic commit at a time, in the phase branch and PR.
+- Run `make fmt-check`, real tests for the changed rule, all explicit task gates, and `git diff --check` before committing. For financial/security Q0, cover authorization, idempotency, concurrency, failure and real PostgreSQL when applicable.
+- Keep PRs in draft during a phase. At phase exit run `make quick-verify` once, the phase-specific gate, then `.local/git-flow.sh finish`; it waits for the mandatory `Quick verification` check. Do not run `make verify` on each task or phase by habit.
+- Full `make verify`, browser, image, vulnerability, restore and certification matrices run on version/release candidates and at the explicit P30/P44 certification milestones. A relevant failing targeted test is never deferred.
+- Never bypass a red gate, edit generated files by hand, push main directly, force push, or commit `.local/`. Read `.local/FAST_EXECUTION.md` and the current task block for specifics.
