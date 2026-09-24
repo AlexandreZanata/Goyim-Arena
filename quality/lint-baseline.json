@@ -1,0 +1,278 @@
+{
+  "schema": 1,
+  "note": "Achados do staticcheck aceitos na árvore quando o gate entrou em vigor (P23-T02, ADR-016). O baseline é um trinco: qualquer achado novo ou que cresça reprova, e a entrada cujo achado desapareceu tem de sair. Cada entrada nomeia a tarefa que paga a dívida e o motivo do aceite; a identidade é (arquivo, check, mensagem) com a contagem, para que mover o código não vire violação nova e o segundo achado igual continue sendo uma mudança visível.",
+  "entries": [
+    {
+      "path": "cmd/arena/main.go",
+      "check": "ST1005",
+      "message": "error strings should not end with punctuation or newlines",
+      "count": 1,
+      "owner": "P23-T05",
+      "reason": "mensagem de erro terminando em pontuação: a P23-T05 cuida de erros e mensagens; aceito até lá"
+    },
+    {
+      "path": "internal/arenas/adapters/html/handler.go",
+      "check": "U1000",
+      "message": "func etagMatches is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "internal/arenas/adapters/http/handler.go",
+      "check": "U1000",
+      "message": "func etagMatches is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "internal/billing/adapters/stripe/gateway_test.go",
+      "check": "S1025",
+      "message": "should use String() instead of fmt.Sprintf",
+      "count": 1,
+      "owner": "P23-T07",
+      "reason": "fmt.Sprintf redundante em teste: a P23-T07 julga a qualidade dos próprios testes; aceito até lá"
+    },
+    {
+      "path": "internal/billing/application/process_webhook_test.go",
+      "check": "U1000",
+      "message": "func signBody is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "internal/jobs/application/scheduler_test.go",
+      "check": "U1000",
+      "message": "field held is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "internal/jobs/domain/jobs_test.go",
+      "check": "ST1017",
+      "message": "don't use Yoda conditions",
+      "count": 1,
+      "owner": "P23-T07",
+      "reason": "condição Yoda em teste: a P23-T07 julga a qualidade dos próprios testes; aceito até lá"
+    },
+    {
+      "path": "internal/notifications/adapters/outbox/outbox_test.go",
+      "check": "U1000",
+      "message": "field frozen is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "internal/platform/assets/server.go",
+      "check": "SA1012",
+      "message": "do not pass a nil Context, even if a function permits it; pass context.TODO if you are unsure about which Context to use",
+      "count": 1,
+      "owner": "P23-T05",
+      "reason": "contexto nulo: a P23-T05 cuida de erros, contextos e recursos; aceito até lá"
+    },
+    {
+      "path": "internal/platform/config/config_test.go",
+      "check": "S1025",
+      "message": "should use String() instead of fmt.Sprintf",
+      "count": 2,
+      "owner": "P23-T07",
+      "reason": "fmt.Sprintf redundante em teste: a P23-T07 julga a qualidade dos próprios testes; aceito até lá"
+    },
+    {
+      "path": "internal/platform/httplimits/httplimits.go",
+      "check": "U1000",
+      "message": "var maxDeclaredBodyBytes is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "internal/platform/postgres/txcontext_test.go",
+      "check": "SA1012",
+      "message": "do not pass a nil Context, even if a function permits it; pass context.TODO if you are unsure about which Context to use",
+      "count": 1,
+      "owner": "P23-T05",
+      "reason": "contexto nulo: a P23-T05 cuida de erros, contextos e recursos; aceito até lá"
+    },
+    {
+      "path": "internal/platform/requestid/requestid_test.go",
+      "check": "SA1012",
+      "message": "do not pass a nil Context, even if a function permits it; pass context.TODO if you are unsure about which Context to use",
+      "count": 1,
+      "owner": "P23-T05",
+      "reason": "contexto nulo: a P23-T05 cuida de erros, contextos e recursos; aceito até lá"
+    },
+    {
+      "path": "internal/positions/application/confirm_initial_position_test.go",
+      "check": "U1000",
+      "message": "field inserts is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "internal/transparency/adapters/postgres/metrics_test.go",
+      "check": "SA4010",
+      "message": "this result of append is never used, except maybe in other appends",
+      "count": 1,
+      "owner": "P23-T05",
+      "reason": "resultado de append nunca lido: a P23-T05 cuida de erros, contextos e recursos; aceito até lá"
+    },
+    {
+      "path": "tools/caddyaudit/audit.go",
+      "check": "S1011",
+      "message": "should replace loop with report.ErrorPolicy = append(report.ErrorPolicy, names...)",
+      "count": 1,
+      "owner": "P23-T03",
+      "reason": "laço substituível por append: a P23-T03 mede tamanho e duplicação e remove a forma longa; aceito até lá"
+    },
+    {
+      "path": "tools/drillaudit/ledger.go",
+      "check": "U1000",
+      "message": "const bucketFree is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/drillaudit/ledger.go",
+      "check": "U1000",
+      "message": "const bucketPurchased is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/e2e/database/main.go",
+      "check": "ST1005",
+      "message": "error strings should not end with punctuation or newlines",
+      "count": 1,
+      "owner": "P23-T05",
+      "reason": "mensagem de erro terminando em pontuação: a P23-T05 cuida de erros e mensagens; aceito até lá"
+    },
+    {
+      "path": "tools/e2e/seed/main.go",
+      "check": "ST1005",
+      "message": "error strings should not end with punctuation or newlines",
+      "count": 1,
+      "owner": "P23-T05",
+      "reason": "mensagem de erro terminando em pontuação: a P23-T05 cuida de erros e mensagens; aceito até lá"
+    },
+    {
+      "path": "tools/i18naudit/fixtures/hardcoded/templates.go",
+      "check": "U1000",
+      "message": "const hardcodedDocument is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/i18naudit/fixtures/localized/templates.go",
+      "check": "U1000",
+      "message": "const localizedDocument is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/i18naudit/main.go",
+      "check": "S1011",
+      "message": "should replace loop with options.Skip = append(options.Skip, splitList(*skip)...)",
+      "count": 1,
+      "owner": "P23-T03",
+      "reason": "laço substituível por append: a P23-T03 mede tamanho e duplicação e remove a forma longa; aceito até lá"
+    },
+    {
+      "path": "tools/migrationaudit/audit.go",
+      "check": "U1000",
+      "message": "func sameHistory is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/migrationaudit/schema.go",
+      "check": "U1000",
+      "message": "func (*snapshot).relationNames is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/offlineaudit/run.go",
+      "check": "S1011",
+      "message": "should replace loop with r.lines = append(r.lines, lines[:len(lines)-1]...)",
+      "count": 1,
+      "owner": "P23-T03",
+      "reason": "laço substituível por append: a P23-T03 mede tamanho e duplicação e remove a forma longa; aceito até lá"
+    },
+    {
+      "path": "tools/offlineaudit/run.go",
+      "check": "U1000",
+      "message": "field kept is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/offlineaudit/sensor.go",
+      "check": "S1011",
+      "message": "should replace loop with environment = append(environment, DeniedValues(sensorURL)...)",
+      "count": 1,
+      "owner": "P23-T03",
+      "reason": "laço substituível por append: a P23-T03 mede tamanho e duplicação e remove a forma longa; aceito até lá"
+    },
+    {
+      "path": "tools/qualityinventory/join.go",
+      "check": "S1016",
+      "message": "should convert artifact (type Artifact) to Orphan instead of using struct literal",
+      "count": 1,
+      "owner": "P23-T03",
+      "reason": "literal de struct substituível por conversão: a P23-T03 remove a forma longa; aceito até lá"
+    },
+    {
+      "path": "tools/qualityinventory/join.go",
+      "check": "S1016",
+      "message": "should convert citation (type Citation) to Obsolete instead of using struct literal",
+      "count": 1,
+      "owner": "P23-T03",
+      "reason": "literal de struct substituível por conversão: a P23-T03 remove a forma longa; aceito até lá"
+    },
+    {
+      "path": "tools/qualityinventory/owners.go",
+      "check": "U1000",
+      "message": "func routeOwners.sortedOwners is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/qualitytaxonomy/taxonomy.go",
+      "check": "U1000",
+      "message": "func Violations.has is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/testenv/plan.go",
+      "check": "U1000",
+      "message": "var serviceRoles is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    },
+    {
+      "path": "tools/testenv/providers.go",
+      "check": "U1000",
+      "message": "func (*providerServer).callsSnapshot is unused",
+      "count": 1,
+      "owner": "P23-T04",
+      "reason": "código morto: a P23-T04 remove export, função, campo e constante sem uso; aceito aqui para a árvore poder entrar no gate antes disso"
+    }
+  ]
+}

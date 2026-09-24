@@ -12,6 +12,16 @@ GOVULNCHECK ?= govulncheck
 SQLC ?= $(shell which sqlc 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/sqlc")
 ASSETGEN := $(GO) run ./cmd/assetgen
 
+# Analisador estático fixado (P23-T02, ADR-016): `make lint` roda as análises do
+# `go vet` e o staticcheck na versão abaixo, e o alvo recusa a árvore quando a
+# versão instalada diverge do pino. A toolchain é lida do go.mod — um pino
+# escrito duas vezes é um pino que deriva — porque o analisador lê os dados de
+# exportação da biblioteca padrão que analisa: um staticcheck construído com Go
+# mais antigo recusa um módulo que declara um Go mais novo.
+STATICCHECK_MODULE := honnef.co/go/tools/cmd/staticcheck
+STATICCHECK_VERSION := v0.8.1
+STATICCHECK_TOOLCHAIN := go$(shell sed -n 's/^go //p' go.mod | head -1)
+
 # Gerador de contratos TypeScript (P18-T02): lê o subconjunto versionado do
 # OpenAPI e emite web/src/contracts/generated.ts (nunca editado à mão).
 CONTRACTGEN := $(GO) run ./tools/contractgen
@@ -21,7 +31,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check lint test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -562,14 +572,24 @@ test-load-smoke:
 	"$(K6)" run --summary-export "$$report" tests/load/smoke.js; \
 	printf 'load-smoke report: summary=%s\n' "$$report"
 
-# verify agrega os gates existentes do estágio atual e lista os pendentes.
-# Gates pendentes nunca são executados aqui: eles falham explicitamente
-# quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
-	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
-	@for gate in lint; do \
-		echo "  - $$gate"; \
-	done
+# lint é o gate da análise estática (P23-T02, ADR-016): as análises do `go vet`
+# sobre a árvore entregue e o staticcheck na versão fixada em
+# STATICCHECK_VERSION, mais o portão `tools/staticaudit`, que exige que cada
+# família de regra continue sendo recusada por uma fixture, compara os achados
+# com o baseline versionado (um trinco que só encolhe, com dono e motivo por
+# entrada) e julga cada supressão: local, nomeando o check, com motivo, e na
+# vocabulário que o analisador fixado realmente lê. Ele entra em `make verify`
+# porque a análise estática pertence ao gate de merge; o módulo do analisador é
+# resolvido do proxy do Go (ou do cache de módulos) na primeira execução.
+lint:
+	$(GO) run ./tools/staticaudit -root . -baseline quality/lint-baseline.json \
+		-staticcheck-module "$(STATICCHECK_MODULE)" \
+		-staticcheck-version "$(STATICCHECK_VERSION)" \
+		-toolchain "$(STATICCHECK_TOOLCHAIN)"
+	@echo "lint: ok"
+
+# verify agrega os gates existentes do estágio atual.
+verify: fmt-check lint generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \

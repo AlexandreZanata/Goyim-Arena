@@ -10,7 +10,7 @@ Dois workflows, dez jobs:
 
 | Workflow | Job | Gates | Ferramentas que o job instala |
 | --- | --- | --- | --- |
-| `verify` | `foundation` | `make verify` — formatação, drift dos artefatos gerados, unit, integração PostgreSQL, race selecionado, migrations, contrato OpenAPI, segurança, build do frontend, `tsc` estrito, medição do frontend, auditoria de i18n, auditoria de rastreabilidade dos requisitos, auditoria do próprio CI, auditoria do catálogo de regras, auditoria dos waivers, auditoria do handoff | Go, Node, sqlc, PostgreSQL 18.4 (serviço) |
+| `verify` | `foundation` | `make verify` — formatação, análise estática, drift dos artefatos gerados, unit, integração PostgreSQL, race selecionado, migrations, contrato OpenAPI, segurança, build do frontend, `tsc` estrito, medição do frontend, auditoria de i18n, auditoria de rastreabilidade dos requisitos, auditoria do próprio CI, auditoria do catálogo de regras, auditoria dos waivers, auditoria do handoff | Go, Node, sqlc, PostgreSQL 18.4 (serviço) |
 | `verify` | `browser` | `make test-e2e` — jornadas críticas em Chromium | Go, Node, Playwright (pinado em `tools/e2e`), PostgreSQL 18.4 (serviço) |
 | `verify` | `image` | `make image-verify` e o scan da imagem construída | Go, Docker, trivy (ação) |
 | `verify` | `ingress` | `make caddy-verify` | Go, Docker, openssl |
@@ -39,7 +39,7 @@ A verificação completa é a **união** desses gates. Nenhum deles está copiad
 | `trigger-and-secret-surface` | `pull_request_target`, `workflow_run` ou um passo lendo qualquer segredo além do `GITHUB_TOKEN` da execução |
 | `job-budget` | job sem `timeout-minutes`, ou com um teto acima do orçamento do pipeline |
 
-O `gates-wired` carrega uma tabela de 21 gates, lida de `.local/phases/19-production-operations.md` e de `make verify`. Uma tabela, e não uma lista de alvos: um gate que sai da tabela some do CI em silêncio, e um gate que sai de `verify` mas continua na tabela é exatamente o que a regra pega.
+O `gates-wired` carrega uma tabela de 22 gates, lida de `.local/phases/19-production-operations.md` e de `make verify`. Uma tabela, e não uma lista de alvos: um gate que sai da tabela some do CI em silêncio, e um gate que sai de `verify` mas continua na tabela é exatamente o que a regra pega.
 
 O scan da imagem é o único gate que a tabela aceita por uma forma alternativa — `make image-scan` exige um scanner instalado fora do repositório, e no CI o scanner vem por ação. A alternativa só conta quando ela **pergunta a mesma coisa**: a ação precisa examinar a imagem que aquela execução constrói (`${{ env.IMAGE }}`) e usar os parâmetros que o próprio alvo declara (`--severity CRITICAL,HIGH --ignore-unfixed --exit-code 1`, lidos da receita do `Makefile`). Um scan mais fraco que o gate do operador é recusado como scan mais fraco.
 
@@ -78,13 +78,13 @@ Subir uma versão é um commit que troca o SHA **e** o comentário, do mesmo jei
 - **`make test-load-smoke`** — mede capacidade contra uma instância preparada com dados sintéticos e k6, não correção. Não é gate de release: ele não está em `make verify` nem em nenhum job. Rodar é `K6_BASE_URL=… make test-load-smoke`.
 - **Deploy** — o CI não promove nada. Promover é `deploy/deploy.sh` (`DEPLOYMENT.md` §5), executado por um operador, e continua desativado como automação.
 - **O coletor do listener administrativo** — `/metrics` responde em loopback dentro de um contêiner distroless, então nenhum job o lê de fora. É a pendência registrada na P19-T06 e o que falta para o alerta de 5xx de [RUNBOOKS.md](RUNBOOKS.md) ter uma fonte fora do host.
-- **`lint`** — `make lint` ainda é um alvo pendente: `make verify` o lista como não criado, e nenhum job o chama. [STACK.md](STACK.md) §6 prevê `golangci-lint` como ferramenta de desenvolvimento, mas o alvo não existe no `Makefile` e por isso ele não entra na tabela de gates: a tabela lista o que a fase exige, e um gate que exige uma configuração ainda não escrita seria uma linha decorativa. Quando o alvo existir, ele entra no `Makefile`, num job e na tabela — sem os três, `make audit-ci` recusa.
+Nenhum gate que a fase exige ficou de fora por falta de alvo. O antigo pendente `lint` foi resolvido na P23-T02: `make lint` existe, roda dentro de `make verify`, no job `foundation`, e entrou na tabela do `tools/ciaudit` — os três lugares que a regra de manutenção (§8) exige. Quem decidiu a forma da toolchain é o [ADR-016](adr/ADR-016-static-analysis-toolchain.md); o que ele recusou está lá, não aqui.
 
 ## 7. Reproduzir localmente
 
 Cada job é uma linha de shell, então o pipeline é reproduzível na máquina:
 
-- Go, Node e os `make` de `foundation`: instalar `sqlc@v1.29.0` e rodar `make verify`, com `ARENA_DATABASE_URL` apontando para um PostgreSQL alcançável;
+- Go, Node e os `make` de `foundation`: instalar `sqlc@v1.29.0` e rodar `make verify`, com `ARENA_DATABASE_URL` apontando para um PostgreSQL alcançável. O analisador fixado **não** é instalado: o portão o resolve por `go run honnef.co/go/tools/cmd/staticcheck@v0.8.1` com `GOTOOLCHAIN` lido do `go.mod` (na primeira execução ele vem do proxy do Go e fica no cache de módulos) — um binário instalado fora da árvore seria uma segunda versão a manter de acordo com o pino, e a medição que abriu a P23-T02 mostrou que uma versão divergente não lê esta árvore ([ADR-016](adr/ADR-016-static-analysis-toolchain.md)). A metade barata, só a análise estática, é `make lint`;
 - as jornadas de browser: `npm ci --prefix tools/e2e`, `npx --prefix tools/e2e playwright install-deps chromium` e `make test-e2e`;
 - os gates que exigem daemon Docker: `make image-verify`, `make caddy-verify`, `make compose-verify`, `make backup-verify`, `make deploy-verify`, `make migration-audit`, `make disaster-drill` (todos instalam o que precisam de Go); o `make testenv-verify` (P22-T01) exige ainda uma build do frontend, porque sobe a aplicação de verdade e dirige a prontidão dela pela porta do ambiente; o `disaster-drill` exige ainda `k6`, um navegador instalado pelo runner do `tools/e2e` e uma build do frontend, como `test-e2e` e `test-load-smoke`; a `make release-verify` (P20-T07) exige o daemon, um PostgreSQL alcançável em `127.0.0.1:54329`, Node com npm e uma árvore limpa, porque ela **cria um checkout limpo do commit** e roda o próprio `make verify` duas vezes;
 - os scans: `make vuln` exige `govulncheck@v1.8.0`, `make image-scan` exige `trivy`, e ambos falham com mensagem explícita quando a ferramenta não está instalada. O `govulncheck` tem de ser construído com o Go que o `go.mod` declara (`GOTOOLCHAIN=go1.27.1 go install golang.org/x/vuln/cmd/govulncheck@v1.8.0`): um binário construído com uma versão anterior não processa os pacotes e o gate fica vermelho por ambiente, não por vulnerabilidade;

@@ -54,6 +54,7 @@ type gate struct {
 // release gate (docs/CI.md).
 var requiredGates = []gate{
 	{"formatting", "fmt-check"},
+	{"static analysis", "lint"},
 	{"generated-artifact drift", "generate-check"},
 	{"unit tests", "test-unit"},
 	{"PostgreSQL integration", "test-integration"},

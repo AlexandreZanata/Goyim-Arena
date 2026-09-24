@@ -677,7 +677,7 @@ func TestEnqueuerRequiresTheQueueAndAContext(t *testing.T) {
 		Locale:    domain.LocaleDefault,
 		EventKey:  domain.EventKey(domain.TemplateVerification, "ana@example.com", knownCode),
 	}
-	//nolint:staticcheck // the explicit nil context is the failure under test
+	//lint:ignore SA1012 the explicit nil context is the failure under test
 	if _, err := built.enqueuer.Enqueue(nil, resolved); err == nil {
 		t.Error("Enqueue(nil) error = nil, want a refusal")
 	}
