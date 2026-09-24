@@ -61,6 +61,7 @@ var requiredGates = []gate{
 	{"errors, contexts and resources", "audit-errors"},
 	{"generated-artifact provenance", "audit-provenance"},
 	{"test quality", "audit-tests"},
+	{"production change evidence", "audit-diff"},
 	{"generated-artifact drift", "generate-check"},
 	{"unit tests", "test-unit"},
 	{"PostgreSQL integration", "test-integration"},

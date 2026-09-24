@@ -31,7 +31,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
+.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -55,15 +55,16 @@ fmt-check:
 # obrigatórios na microtarefa local; estes packages críticos dão um piso real
 # ao PR sem banco, browser ou Docker. A suíte integral é gate de versão.
 #
-# Os seis gates baratos da fase 23 rodam aqui **e** em `verify`: `lint`
+# Os sete gates baratos da fase 23 rodam aqui **e** em `verify`: `lint`
 # (P23-T02), `audit-complexity` (P23-T03), `audit-deadcode` (P23-T04),
-# `audit-errors` (P23-T05), `audit-provenance` (P23-T06) e `audit-tests`
-# (P23-T07) são biblioteca padrão mais o analisador fixado, não precisam de
-# banco, browser nem Docker, e o critério de saída da fase pede que código
-# estruturalmente ruim, duplicado, morto, sem tratamento de erro, sem procedência
-# ou provado por um teste que não prova nada seja recusado **antes** dos testes
-# caros — o que só acontece no caminho que roda em cada PR.
-quick-verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests
+# `audit-errors` (P23-T05), `audit-provenance` (P23-T06), `audit-tests`
+# (P23-T07) e `audit-diff` (P23-T08) são biblioteca padrão mais o analisador
+# fixado — não precisam de banco, browser nem Docker —, e o critério de saída da
+# fase pede que código estruturalmente ruim, duplicado, morto, sem tratamento de
+# erro, sem procedência, provado por um teste que não prova nada ou mudado sem a
+# evidência da classe seja recusado **antes** dos testes caros — o que só acontece
+# no caminho que roda em cada PR.
+quick-verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff
 	$(GO) test -run '^$$' ./...
 	$(GO) test ./internal/wallet/domain/... ./internal/identity/domain/... ./internal/arguments/domain/... ./internal/arenas/domain/... ./tools/ciaudit/...
 	$(NPM) --prefix web run typecheck
@@ -693,8 +694,31 @@ audit-tests:
 	$(GO) run ./tools/testaudit -root .
 	@echo "audit-tests: ok"
 
+# audit-diff é o gate da mudança de produção com evidência (P23-T08): o portão
+# `tools/diffaudit` julga a **faixa** que a branch traz sobre aquela a que ela
+# aponta (`origin/main`, ou `main`), commit a commit, e não a árvore. Ele
+# classifica cada arquivo que cada commit toca pela política versionada
+# `quality/diff-policy.json` e exige a evidência que a classe declara, com oito
+# regras: o arquivo que nenhuma classe cobre (recusa, e não silêncio); o arquivo
+# **novo** de produção sem teste da mesma área na mesma mudança; a migration sem a
+# prova de atualização; o conjunto de rotas que muda sem o contrato publicado; o
+# artefato gerado sem o insumo que o produz — e o insumo sem o artefato
+# regenerado, que é a mesma falha vista do outro lado; a referência que o catálogo
+# declara e a árvore não tem; a regra Q0 que muda na tabela sem a regressão
+# nominal e adversarial; e a mensagem de commit que anuncia a dispensa, que o
+# programa proíbe por nome. Os registros que ele lê já são desta fase: o gerado e
+# o par insumo/artefato vêm de `quality/provenance.json` (P23-T06) e as regras e a
+# sua evidência vêm de `quality/catalog.json` (P21), de modo que este portão e o
+# `make generate-check` nunca discordam sobre o que pertence a quê. Uma base que
+# não resolve é recusa: um portão que não vê o diff não responde verde sobre ele.
+# O portão **nunca** escreve: `-print-document` imprime o documento que ele julgou
+# para uma recusa ser discutida com o diff na mão.
+audit-diff:
+	$(GO) run ./tools/diffaudit -root .
+	@echo "audit-diff: ok"
+
 # verify agrega os gates existentes do estágio atual.
-verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
+verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \

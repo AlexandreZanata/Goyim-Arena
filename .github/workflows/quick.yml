@@ -23,6 +23,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # `make audit-diff` (P23-T08) judges the range the branch brings over
+          # the branch it targets, so the job needs the other branch: with the
+          # default shallow clone `origin/main` is not there and the gate would
+          # have to refuse the base it cannot resolve.
+          fetch-depth: 0
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:

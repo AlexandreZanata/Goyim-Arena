@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "base": "base0000",
+  "head": "head0000",
+  "commits": [
+    {
+      "sha": "aaaaaaa6",
+      "message": "feat(db): add the p23t08 pillar and prove the upgrade",
+      "files": [
+        {
+          "status": "A",
+          "path": "internal/platform/dbmigrate/migrations/00099_p23t08.sql"
+        },
+        {
+          "status": "M",
+          "path": "internal/platform/dbmigrate/dbmigrate_test.go"
+        }
+      ]
+    }
+  ]
+}
