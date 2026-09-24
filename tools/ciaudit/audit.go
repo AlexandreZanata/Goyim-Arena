@@ -60,6 +60,7 @@ var requiredGates = []gate{
 	{"dead code, placeholders and impossible paths", "audit-deadcode"},
 	{"errors, contexts and resources", "audit-errors"},
 	{"generated-artifact provenance", "audit-provenance"},
+	{"test quality", "audit-tests"},
 	{"generated-artifact drift", "generate-check"},
 	{"unit tests", "test-unit"},
 	{"PostgreSQL integration", "test-integration"},
