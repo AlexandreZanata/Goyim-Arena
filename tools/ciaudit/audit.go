@@ -55,6 +55,14 @@ type gate struct {
 // release gate (docs/CI.md).
 var requiredGates = []gate{
 	{"formatting", "fmt-check"},
+	{"static analysis", "lint"},
+	{"complexity, duplication and size", "audit-complexity"},
+	{"dead code, placeholders and impossible paths", "audit-deadcode"},
+	{"errors, contexts and resources", "audit-errors"},
+	{"generated-artifact provenance", "audit-provenance"},
+	{"test quality", "audit-tests"},
+	{"production change evidence", "audit-diff"},
+	{"dependency provenance", "audit-deps"},
 	{"generated-artifact drift", "generate-check"},
 	{"unit tests", "test-unit"},
 	{"PostgreSQL integration", "test-integration"},

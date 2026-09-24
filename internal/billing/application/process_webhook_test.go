@@ -2,9 +2,6 @@ package application_test
 
 import (
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -172,15 +169,6 @@ func testUnknownEventBody() []byte {
 			"object": {}
 		}
 	}`)
-}
-
-// signBody computes the Stripe-Signature header for a given body and secret.
-func signBody(body []byte, secret string, timestamp int64) string {
-	signedPayload := fmt.Sprintf("%d.%s", timestamp, body)
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(signedPayload))
-	signature := hex.EncodeToString(mac.Sum(nil))
-	return fmt.Sprintf("t=%d,v1=%s", timestamp, signature)
 }
 
 func TestProcessWebhookRejectsOversizedBody(t *testing.T) {

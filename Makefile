@@ -12,6 +12,16 @@ GOVULNCHECK ?= govulncheck
 SQLC ?= $(shell which sqlc 2>/dev/null || echo "$(shell $(GO) env GOPATH)/bin/sqlc")
 ASSETGEN := $(GO) run ./cmd/assetgen
 
+# Analisador estático fixado (P23-T02, ADR-016): `make lint` roda as análises do
+# `go vet` e o staticcheck na versão abaixo, e o alvo recusa a árvore quando a
+# versão instalada diverge do pino. A toolchain é lida do go.mod — um pino
+# escrito duas vezes é um pino que deriva — porque o analisador lê os dados de
+# exportação da biblioteca padrão que analisa: um staticcheck construído com Go
+# mais antigo recusa um módulo que declara um Go mais novo.
+STATICCHECK_MODULE := honnef.co/go/tools/cmd/staticcheck
+STATICCHECK_VERSION := v0.8.1
+STATICCHECK_TOOLCHAIN := go$(shell sed -n 's/^go //p' go.mod | head -1)
+
 # Gerador de contratos TypeScript (P18-T02): lê o subconjunto versionado do
 # OpenAPI e emite web/src/contracts/generated.ts (nunca editado à mão).
 CONTRACTGEN := $(GO) run ./tools/contractgen
@@ -21,8 +31,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
-.PHONY: quick-verify
+.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -45,7 +54,18 @@ fmt-check:
 # Gate curto de integração. Testes de comportamento direcionados permanecem
 # obrigatórios na microtarefa local; estes packages críticos dão um piso real
 # ao PR sem banco, browser ou Docker. A suíte integral é gate de versão.
-quick-verify: fmt-check
+#
+# Os oito gates baratos da fase 23 rodam aqui **e** em `verify`: `lint`
+# (P23-T02), `audit-complexity` (P23-T03), `audit-deadcode` (P23-T04),
+# `audit-errors` (P23-T05), `audit-provenance` (P23-T06), `audit-tests`
+# (P23-T07), `audit-diff` (P23-T08) e `audit-deps` (P23-T09) são biblioteca
+# padrão mais o analisador fixado — não precisam de banco, browser nem Docker —,
+# e o critério de saída da fase pede que código estruturalmente ruim, duplicado,
+# morto, sem tratamento de erro, sem procedência, provado por um teste que não
+# prova nada, mudado sem a evidência da classe ou montado com dependência que
+# ninguém aprovou seja recusado **antes** dos testes caros — o que só acontece no
+# caminho que roda em cada PR.
+quick-verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps
 	$(GO) test -run '^$$' ./...
 	$(GO) test ./internal/wallet/domain/... ./internal/identity/domain/... ./internal/arguments/domain/... ./internal/arenas/domain/... ./tools/ciaudit/...
 	$(NPM) --prefix web run typecheck
@@ -572,14 +592,166 @@ test-load-smoke:
 	"$(K6)" run --summary-export "$$report" tests/load/smoke.js; \
 	printf 'load-smoke report: summary=%s\n' "$$report"
 
-# verify agrega os gates existentes do estágio atual e lista os pendentes.
-# Gates pendentes nunca são executados aqui: eles falham explicitamente
-# quando invocados diretamente e nunca retornam sucesso falso.
-verify: fmt-check generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
-	@echo "verify: gates ainda não criados (invocar falha explicitamente, nunca retorna sucesso falso):"
-	@for gate in lint; do \
-		echo "  - $$gate"; \
-	done
+# lint é o gate da análise estática (P23-T02, ADR-016): as análises do `go vet`
+# sobre a árvore entregue e o staticcheck na versão fixada em
+# STATICCHECK_VERSION, mais o portão `tools/staticaudit`, que exige que cada
+# família de regra continue sendo recusada por uma fixture, compara os achados
+# com o baseline versionado (um trinco que só encolhe, com dono e motivo por
+# entrada) e julga cada supressão: local, nomeando o check, com motivo, e na
+# vocabulário que o analisador fixado realmente lê. Ele entra em `make verify`
+# porque a análise estática pertence ao gate de merge; o módulo do analisador é
+# resolvido do proxy do Go (ou do cache de módulos) na primeira execução.
+lint:
+	$(GO) run ./tools/staticaudit -root . -baseline quality/lint-baseline.json \
+		-staticcheck-module "$(STATICCHECK_MODULE)" \
+		-staticcheck-version "$(STATICCHECK_VERSION)" \
+		-toolchain "$(STATICCHECK_TOOLCHAIN)"
+	@echo "lint: ok"
+
+# audit-complexity é o gate de complexidade, duplicação e tamanho (P23-T03): o
+# portão `tools/complexityaudit` mede cada função da árvore — pontos de decisão,
+# aninhamento, parâmetros, tamanho e blocos copiados — contra orçamentos
+# declarados por escopo (produto, ferramentas e teste), com piso em cada
+# orçamento para que a barra não desça sem revisão. Código gerado sai do corpus
+# por proveniência: o marcador do Go é lido nos comentários antes da cláusula
+# `package`, nunca nos bytes do arquivo. Ele entra em `make verify` porque um
+# gate de merge é exatamente onde a função gerada sem ninguém olhando precisa
+# ser recusada — `-print-findings` imprime o baseline para um humano atualizar,
+# e o portão nunca reescreve o arquivo.
+audit-complexity:
+	$(GO) run ./tools/complexityaudit -root .
+	@echo "audit-complexity: ok"
+
+# audit-deadcode é o gate de código morto, placeholder e caminho impossível
+# (P23-T04): o portão `tools/deadcodeaudit` julga a árvore inteira com seis
+# regras — panic com vocabulário de placeholder, função que se anuncia como não
+# pronta e devolve sucesso, adiamento sem dono (o marcador tem de nomear
+# `Pnn-Tnn` ou `#nn`), sentença depois de um término incondicional, desvio sobre
+# literal e configuração que mente nas cinco direções (aceita e não lida, não
+# documentada em `.env.example`, lida e não aceita, documentada e recusada, e
+# chave `ARENA_*` lida direto do ambiente fora do registro). Cada regra prova a
+# própria fixture nas duas direções — a que ela recusa e a que ela aceita — e o
+# código gerado sai do corpus por proveniência. Não há baseline: a árvore não
+# tem achado, e um achado futuro é uma recusa e não uma linha nova.
+audit-deadcode:
+	$(GO) run ./tools/deadcodeaudit -root .
+	@echo "audit-deadcode: ok"
+
+# audit-errors é o gate de erros, contextos e recursos (P23-T05): o portão
+# `tools/erroraudit` julga a árvore inteira com nove regras — recurso adquirido e
+# não liberado, transação sem rollback no caminho de erro, cliente HTTP sem teto,
+# contexto de parâmetro que o corpo ignora, `context.TODO`, `fmt.Errorf` sobre um
+# erro sem `%w`, resultado de chamada do módulo descartado, mensagem pública que
+# carrega o erro interno ou a credencial e goroutine sem dono. Cada regra prova a
+# própria fixture nas duas direções — a que ela recusa e a limpa que ela aceita —,
+# o código gerado sai do corpus por proveniência e os testes ficam fora dele por
+# papel (P23-T07). O que o portão não consegue julgar sem type-checker — o erro
+# descartado de um método de interface, de uma função da biblioteca padrão ou de
+# uma variável — é medido e impresso: sem contagem a lacuna não é revisada. Não há
+# baseline: a árvore não tem achado, e um achado futuro é uma recusa.
+audit-errors:
+	$(GO) run ./tools/erroraudit -root .
+	@echo "audit-errors: ok"
+
+# audit-provenance é o gate de procedência e drift dos artefatos gerados
+# (P23-T06): o portão `tools/provenanceaudit` lê `quality/provenance.json`, o
+# registro que nomeia para cada pipeline o gerador, o comando que o regenera, o
+# pino de versão com a evidência na árvore, o que ele lê, o que ele escreve e como
+# a sua reprodutibilidade é provada, e recusa o artefato cujos bytes não são os
+# registrados (o que uma edição à mão parece de fora), o insumo ou o gerador que se
+# moveu sem regenerar, o gerado que não se anuncia, o gerado que nenhuma família
+# declara, o pino sem evidência, a família que não diz quem prova o seu
+# determinismo e o produto de build que o `.gitignore` não cobre. Ele complementa
+# `make generate-check`, que responde as mesmas perguntas de drift com sqlc, Node e
+# uma regeneração completa; este responde as que não precisam de toolchain, e por
+# isso cabe no caminho rápido de cada PR. Não há baseline: a árvore não tem achado.
+# O portão **nunca** reescreve o registro — `$(GO) run ./tools/provenanceaudit
+# -print-register` imprime o documento atualizado para um humano commitar, porque a
+# revisão de uma regeneração é um diff de digests e não um diff de mil linhas
+# geradas.
+audit-provenance:
+	$(GO) run ./tools/provenanceaudit -root .
+	@echo "audit-provenance: ok"
+
+# audit-tests é o gate da qualidade dos próprios testes (P23-T07): o portão
+# `tools/testaudit` é o único do estágio que julga o corpus que os outros deixam
+# de fora de propósito — um portão que julgasse um dublê recusaria o andaime que
+# torna o caminho de erro alcançável. Ele lê os arquivos `_test.go` e as fixtures
+# sob `testdata/` com nove regras: o teste que se desliga (`t.Skip`), o que não
+# chama, não assere e não entra em pânico, a asserção que compara uma expressão com
+# ela mesma, a fixture que nenhum arquivo nomeia, o arquivo cujos dublês são mais
+# numerosos que as asserções, o `time.Sleep` que o corpo do teste executa, a
+# entropia de um `math/rand` global não semeado, o erro observado e não cobrado e a
+# condição que pede dois resultados incompatíveis ao mesmo sujeito. Cada regra
+# prova a própria fixture nas duas direções, e a pausa que o teste **entrega** a um
+# dublê e a que fica dentro de um laço são medidas e impressas em vez de recusadas,
+# porque nenhuma das duas é o teste esperando pelo sujeito. A exceção é
+# `quality/test-waivers.json`: um registro com lugar, regra, classe de risco não
+# crítica, dono, razão, data de expiração e teste compensatório — e o portão recusa
+# a exceção crítica, a expirada e a que sobrou, porque a lista só encolhe. Não há
+# baseline. O portão **nunca** reescreve o registro, e uma execução que julga zero
+# arquivo é recusada: corpus vazio é a forma de um portão que parou de funcionar.
+audit-tests:
+	$(GO) run ./tools/testaudit -root .
+	@echo "audit-tests: ok"
+
+# audit-diff é o gate da mudança de produção com evidência (P23-T08): o portão
+# `tools/diffaudit` julga a **faixa** que a branch traz sobre aquela a que ela
+# aponta (`origin/main`, ou `main`), commit a commit, e não a árvore. Ele
+# classifica cada arquivo que cada commit toca pela política versionada
+# `quality/diff-policy.json` e exige a evidência que a classe declara, com oito
+# regras: o arquivo que nenhuma classe cobre (recusa, e não silêncio); o arquivo
+# **novo** de produção sem teste da mesma área na mesma mudança; a migration sem a
+# prova de atualização; o conjunto de rotas que muda sem o contrato publicado; o
+# artefato gerado sem o insumo que o produz — e o insumo sem o artefato
+# regenerado, que é a mesma falha vista do outro lado; a referência que o catálogo
+# declara e a árvore não tem; a regra Q0 que muda na tabela sem a regressão
+# nominal e adversarial; e a mensagem de commit que anuncia a dispensa, que o
+# programa proíbe por nome. Os registros que ele lê já são desta fase: o gerado e
+# o par insumo/artefato vêm de `quality/provenance.json` (P23-T06) e as regras e a
+# sua evidência vêm de `quality/catalog.json` (P21), de modo que este portão e o
+# `make generate-check` nunca discordam sobre o que pertence a quê. Uma base que
+# não resolve é recusa: um portão que não vê o diff não responde verde sobre ele.
+# O portão **nunca** escreve: `-print-document` imprime o documento que ele julgou
+# para uma recusa ser discutida com o diff na mão.
+audit-diff:
+	$(GO) run ./tools/diffaudit -root .
+	@echo "audit-diff: ok"
+
+# audit-deps é o gate da procedência das dependências (P23-T09): o portão
+# `tools/dependencyaudit` julga o que a árvore é feita — os módulos que o
+# `go.mod` exige (diretos e indiretos), os pacotes que os manifestos npm
+# instalam, as imagens que os arquivos de contêiner nomeiam, as actions que os
+# workflows rodam e as ferramentas que os alvos exigem — contra o registro
+# versionado `quality/dependencies.json`, que aprova cada componente com
+# **classe, dono, finalidade, alcance e licença**, e contra o catálogo de
+# licenças `docs/DEPENDENCIES.md`. Treze regras: o componente que nenhuma
+# entrada aprova (que é a dependência transitiva nova); a entrada que a árvore
+# não declara mais, porque remover dependência é atualizar a evidência dela; a
+# entrada sem dono, finalidade, alcance, classe, licença ou evidência de versão;
+# a linha do catálogo que sobrevive à dependência que ela descreve; a licença
+# fora do que a classe homologa (a reciprocidade forte que é aceitável num
+# linter executado fora e proibida no binário); a faixa onde a classe exige pino
+# exato; a imagem sem digest no arquivo que roda em produção; a action presa a
+# uma tag em vez de a um commit; o módulo direto que ninguém importa; o
+# componente fixado em duas versões; o nome que a política bane; o import do
+# browser que sai da árvore; e a lista de materiais `quality/sbom.json`, que é
+# **derivada** do mesmo censo e por isso recusa quando discorda do que se
+# entrega.
+#
+# O portão nunca escreve: `-print-register` imprime o inventário que a árvore
+# declara (com os campos vazios que o próximo run recusa) e `-print-sbom`
+# imprime a lista de materiais, porque aprovar uma dependência é decisão humana e
+# o documento impresso é o que um humano commita. Duas classes declaram a própria
+# lacuna em vez de fingir um pino: `tooling-external` é a ferramenta que a árvore
+# exige pelo nome — `k6` e `trivy` hoje —, e o portão mede e imprime essa
+# população em toda execução.
+audit-deps:
+	$(GO) run ./tools/dependencyaudit -root .
+	@echo "audit-deps: ok"
+
+# verify agrega os gates existentes do estágio atual.
+verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \
