@@ -31,7 +31,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
+.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -55,14 +55,14 @@ fmt-check:
 # obrigatórios na microtarefa local; estes packages críticos dão um piso real
 # ao PR sem banco, browser ou Docker. A suíte integral é gate de versão.
 #
-# Os quatro gates baratos da fase 23 rodam aqui **e** em `verify`: `lint`
-# (P23-T02), `audit-complexity` (P23-T03), `audit-deadcode` (P23-T04) e
-# `audit-errors` (P23-T05) são biblioteca padrão mais o analisador fixado, não
-# precisam de banco, browser nem Docker, e o critério de saída da fase pede que
-# código estruturalmente ruim, duplicado, morto ou sem tratamento de erro seja
-# recusado **antes** dos testes caros — o que só acontece no caminho que roda em
-# cada PR.
-quick-verify: fmt-check lint audit-complexity audit-deadcode audit-errors
+# Os cinco gates baratos da fase 23 rodam aqui **e** em `verify`: `lint`
+# (P23-T02), `audit-complexity` (P23-T03), `audit-deadcode` (P23-T04),
+# `audit-errors` (P23-T05) e `audit-provenance` (P23-T06) são biblioteca padrão
+# mais o analisador fixado, não precisam de banco, browser nem Docker, e o
+# critério de saída da fase pede que código estruturalmente ruim, duplicado,
+# morto, sem tratamento de erro ou sem procedência seja recusado **antes** dos
+# testes caros — o que só acontece no caminho que roda em cada PR.
+quick-verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance
 	$(GO) test -run '^$$' ./...
 	$(GO) test ./internal/wallet/domain/... ./internal/identity/domain/... ./internal/arguments/domain/... ./internal/arenas/domain/... ./tools/ciaudit/...
 	$(NPM) --prefix web run typecheck
@@ -650,8 +650,28 @@ audit-errors:
 	$(GO) run ./tools/erroraudit -root .
 	@echo "audit-errors: ok"
 
+# audit-provenance é o gate de procedência e drift dos artefatos gerados
+# (P23-T06): o portão `tools/provenanceaudit` lê `quality/provenance.json`, o
+# registro que nomeia para cada pipeline o gerador, o comando que o regenera, o
+# pino de versão com a evidência na árvore, o que ele lê, o que ele escreve e como
+# a sua reprodutibilidade é provada, e recusa o artefato cujos bytes não são os
+# registrados (o que uma edição à mão parece de fora), o insumo ou o gerador que se
+# moveu sem regenerar, o gerado que não se anuncia, o gerado que nenhuma família
+# declara, o pino sem evidência, a família que não diz quem prova o seu
+# determinismo e o produto de build que o `.gitignore` não cobre. Ele complementa
+# `make generate-check`, que responde as mesmas perguntas de drift com sqlc, Node e
+# uma regeneração completa; este responde as que não precisam de toolchain, e por
+# isso cabe no caminho rápido de cada PR. Não há baseline: a árvore não tem achado.
+# O portão **nunca** reescreve o registro — `$(GO) run ./tools/provenanceaudit
+# -print-register` imprime o documento atualizado para um humano commitar, porque a
+# revisão de uma regeneração é um diff de digests e não um diff de mil linhas
+# geradas.
+audit-provenance:
+	$(GO) run ./tools/provenanceaudit -root .
+	@echo "audit-provenance: ok"
+
 # verify agrega os gates existentes do estágio atual.
-verify: fmt-check lint audit-complexity audit-deadcode audit-errors generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
+verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \

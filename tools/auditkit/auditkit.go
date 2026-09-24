@@ -81,10 +81,11 @@ func IsGenerated(file *ast.File) bool {
 	return false
 }
 
-// GoFiles lists every Go file under a root, refusing to enter the directories a
-// caller names. The list is ordered, because two runs of a gate that answers
-// differently are two gates.
-func GoFiles(root string, skipped map[string]bool) ([]string, error) {
+// Files lists every file under a root that a caller accepts, refusing to enter
+// the directories it was given. The list is ordered, because two runs of a gate
+// that answers differently are two gates. A nil skip list is the walk of a
+// fixture, where nothing is held back.
+func Files(root string, skipped map[string]bool, accept func(name string) bool) ([]string, error) {
 	files := []string{}
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -96,7 +97,7 @@ func GoFiles(root string, skipped map[string]bool) ([]string, error) {
 			}
 			return nil
 		}
-		if strings.HasSuffix(entry.Name(), ".go") {
+		if accept(entry.Name()) {
 			files = append(files, filepath.ToSlash(path))
 		}
 		return nil
@@ -106,6 +107,12 @@ func GoFiles(root string, skipped map[string]bool) ([]string, error) {
 	}
 	sort.Strings(files)
 	return files, nil
+}
+
+// GoFiles lists every Go file under a root, refusing to enter the directories a
+// caller names.
+func GoFiles(root string, skipped map[string]bool) ([]string, error) {
+	return Files(root, skipped, func(name string) bool { return strings.HasSuffix(name, ".go") })
 }
 
 // Family is one rule with the fixture that proves it still bites. Every family
