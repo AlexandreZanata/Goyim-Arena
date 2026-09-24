@@ -4,7 +4,7 @@
 
 ## Política vigente
 
-- Todo PR (inclusive rascunho) e push em `main` executa `quick.yml` / `Quick verification`: formato Go, compilação de todos os pacotes e testes Go sem executar sua lógica (`go test -run '^$' ./...`), e TypeScript estrito. O check é obrigatório na proteção da `main`; não afirma que testes de negócio passaram.
+- Todo PR (inclusive rascunho) e push em `main` executa `quick.yml` / `Quick verification`: formato Go, compilação de todos os pacotes e testes Go (`go test -run '^$' ./...`), testes reais dos domínios wallet/identity/arguments/arenas e do auditor CI, e TypeScript estrito. O check é obrigatório na proteção da `main`; não substitui testes direcionados de integração/segurança.
 - Cada microtarefa executa localmente testes de comportamento direcionados e sua validação mínima, incluindo PostgreSQL real, falhas, autorização e concorrência em Q0 quando aplicável. A fase só fecha após seus gates especializados, `make quick-verify` e o check remoto verde. A `main` pode conter fases ainda não certificadas para release.
 - `verify.yml` e `supply-chain.yml` rodam por `workflow_dispatch` no candidato de versão e em tag `v*`, não por push comum nem PR. P30 e P44 são marcos de certificação completa. Tag estável, release e deploy requerem todos os jobs completos verdes no mesmo SHA; falha exige novo commit/candidato, nunca mover uma tag publicada.
 - A troca economiza repetição, mas aumenta o tempo até detectar uma regressão fora dos testes direcionados. Não alegue qualidade certificada antes da matriz completa. O auditor `tools/ciaudit` verifica os gatilhos e a presença do check rápido.

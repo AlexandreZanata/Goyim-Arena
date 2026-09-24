@@ -43,9 +43,11 @@ fmt-check:
 	echo "fmt-check: ok"
 
 # Gate curto de integração. Testes de comportamento direcionados permanecem
-# obrigatórios na microtarefa local; a suíte integral é gate de versão.
+# obrigatórios na microtarefa local; estes packages críticos dão um piso real
+# ao PR sem banco, browser ou Docker. A suíte integral é gate de versão.
 quick-verify: fmt-check
 	$(GO) test -run '^$$' ./...
+	$(GO) test ./internal/wallet/domain/... ./internal/identity/domain/... ./internal/arguments/domain/... ./internal/arenas/domain/... ./tools/ciaudit/...
 	$(NPM) --prefix web run typecheck
 	@echo "quick-verify: ok"
 
