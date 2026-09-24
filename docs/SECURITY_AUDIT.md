@@ -48,7 +48,7 @@ Cada área tem um comando que o portão **roda** (não uma promessa) e, quando o
 | `double-spend` | Débito e publicação na mesma transação, `SELECT … FOR UPDATE` no saldo, `CHECK (balance >= 0)` no schema e chave de idempotência com `ON CONFLICT … DO NOTHING` — medido com o detector de corrida. | `go test -count=1 -race ./internal/arguments/adapters/postgres/... ./internal/wallet/adapters/postgres/...` | — |
 | `idor` | Leitura e escrita de argumento, arena e faturamento conferem a titularidade no servidor; recurso alheio não vira 200. | `go test -count=1 ./internal/arguments/adapters/http/... ./internal/arenas/adapters/http/... ./internal/billing/adapters/http/...` | — |
 | `secrets` | Redação de valores e de endereços no log; varredura estrutural da árvore (`.env` rastreado, bloco de chave privada, `.env` fora do `.gitignore`) feita pelo próprio portão. | `go test -count=1 ./internal/platform/logging/...` | `source-scans` (gitleaks) |
-| `dependencies` | Vulnerabilidades conhecidas nas dependências Go pelo `govulncheck`. | `make vuln` | `source-scans` (`npm audit`), `dependency-review` |
+| `dependencies` | Vulnerabilidades conhecidas nas dependências Go pelo `govulncheck`, e a procedência de cada dependência, action e imagem: o componente sem aprovação, a versão que se moveu sem o registro, a licença fora do que a classe homologa e a lista de materiais que discorda da árvore. | `make vuln`, `make audit-deps` | `source-scans` (`govulncheck`, `npm audit`), `quick` (`make audit-deps` em cada pull request) |
 | `container` | As regras da receita e do artefato (base por digest, sem `ADD`/`COPY . .`, `USER` não-root, sem compilador, cache, fonte ou credencial na imagem). | `go test -count=1 ./tools/imageaudit/...` | `image` (`make image-verify`), `image-scan` (trivy) |
 
 ---
@@ -389,9 +389,9 @@ O bloco abaixo é lido por `tools/secaudit`. Ele é a forma mecânica do que est
     {
       "key": "dependencies",
       "execution": "make vuln",
-      "deferred_to": ["source-scans", "dependency-review"],
-      "evidence": ["go.mod", "go.sum", "docs/DEPENDENCIES.md"],
-      "note": "govulncheck sobre todos os pacotes; npm audit e a revisão de dependências alteradas ficam na esteira."
+      "deferred_to": ["source-scans", "quick"],
+      "evidence": ["go.mod", "go.sum", "quality/dependencies.json", "quality/sbom.json", "docs/DEPENDENCIES.md"],
+      "note": "govulncheck sobre todos os pacotes e, no caminho rápido de cada pull request, a procedência: `make audit-deps` recusa a dependência que ninguém aprovou — inclusive a transitiva —, a versão que se moveu sem o registro, a licença fora do que a classe homologa e a lista de materiais que discorda da árvore. A revisão de dependências que a esteira de release prometia é hoje um portão local que roda antes dos testes caros; `npm audit` continua na esteira."
     },
     {
       "key": "container",

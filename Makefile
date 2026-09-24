@@ -31,7 +31,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
+.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -55,16 +55,17 @@ fmt-check:
 # obrigatórios na microtarefa local; estes packages críticos dão um piso real
 # ao PR sem banco, browser ou Docker. A suíte integral é gate de versão.
 #
-# Os sete gates baratos da fase 23 rodam aqui **e** em `verify`: `lint`
+# Os oito gates baratos da fase 23 rodam aqui **e** em `verify`: `lint`
 # (P23-T02), `audit-complexity` (P23-T03), `audit-deadcode` (P23-T04),
 # `audit-errors` (P23-T05), `audit-provenance` (P23-T06), `audit-tests`
-# (P23-T07) e `audit-diff` (P23-T08) são biblioteca padrão mais o analisador
-# fixado — não precisam de banco, browser nem Docker —, e o critério de saída da
-# fase pede que código estruturalmente ruim, duplicado, morto, sem tratamento de
-# erro, sem procedência, provado por um teste que não prova nada ou mudado sem a
-# evidência da classe seja recusado **antes** dos testes caros — o que só acontece
-# no caminho que roda em cada PR.
-quick-verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff
+# (P23-T07), `audit-diff` (P23-T08) e `audit-deps` (P23-T09) são biblioteca
+# padrão mais o analisador fixado — não precisam de banco, browser nem Docker —,
+# e o critério de saída da fase pede que código estruturalmente ruim, duplicado,
+# morto, sem tratamento de erro, sem procedência, provado por um teste que não
+# prova nada, mudado sem a evidência da classe ou montado com dependência que
+# ninguém aprovou seja recusado **antes** dos testes caros — o que só acontece no
+# caminho que roda em cada PR.
+quick-verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps
 	$(GO) test -run '^$$' ./...
 	$(GO) test ./internal/wallet/domain/... ./internal/identity/domain/... ./internal/arguments/domain/... ./internal/arenas/domain/... ./tools/ciaudit/...
 	$(NPM) --prefix web run typecheck
@@ -717,8 +718,40 @@ audit-diff:
 	$(GO) run ./tools/diffaudit -root .
 	@echo "audit-diff: ok"
 
+# audit-deps é o gate da procedência das dependências (P23-T09): o portão
+# `tools/dependencyaudit` julga o que a árvore é feita — os módulos que o
+# `go.mod` exige (diretos e indiretos), os pacotes que os manifestos npm
+# instalam, as imagens que os arquivos de contêiner nomeiam, as actions que os
+# workflows rodam e as ferramentas que os alvos exigem — contra o registro
+# versionado `quality/dependencies.json`, que aprova cada componente com
+# **classe, dono, finalidade, alcance e licença**, e contra o catálogo de
+# licenças `docs/DEPENDENCIES.md`. Treze regras: o componente que nenhuma
+# entrada aprova (que é a dependência transitiva nova); a entrada que a árvore
+# não declara mais, porque remover dependência é atualizar a evidência dela; a
+# entrada sem dono, finalidade, alcance, classe, licença ou evidência de versão;
+# a linha do catálogo que sobrevive à dependência que ela descreve; a licença
+# fora do que a classe homologa (a reciprocidade forte que é aceitável num
+# linter executado fora e proibida no binário); a faixa onde a classe exige pino
+# exato; a imagem sem digest no arquivo que roda em produção; a action presa a
+# uma tag em vez de a um commit; o módulo direto que ninguém importa; o
+# componente fixado em duas versões; o nome que a política bane; o import do
+# browser que sai da árvore; e a lista de materiais `quality/sbom.json`, que é
+# **derivada** do mesmo censo e por isso recusa quando discorda do que se
+# entrega.
+#
+# O portão nunca escreve: `-print-register` imprime o inventário que a árvore
+# declara (com os campos vazios que o próximo run recusa) e `-print-sbom`
+# imprime a lista de materiais, porque aprovar uma dependência é decisão humana e
+# o documento impresso é o que um humano commita. Duas classes declaram a própria
+# lacuna em vez de fingir um pino: `tooling-external` é a ferramenta que a árvore
+# exige pelo nome — `k6` e `trivy` hoje —, e o portão mede e imprime essa
+# população em toda execução.
+audit-deps:
+	$(GO) run ./tools/dependencyaudit -root .
+	@echo "audit-deps: ok"
+
 # verify agrega os gates existentes do estágio atual.
-verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
+verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \
