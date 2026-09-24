@@ -11,6 +11,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/AlexandreZanata/Regnovum/tools/auditkit"
 )
 
 // The configuration surface of the delivered process is the one place in this
@@ -88,7 +90,7 @@ func configurationFindings(registryDirectory, template string, readRoots []strin
 	documented := documentedKeys(string(raw))
 	compared := compareConfiguration(registry, documented, template)
 	for _, root := range readRoots {
-		files, err := goFiles(root, skippedDirectories)
+		files, err := auditkit.GoFiles(root, auditkit.SkippedDirectories)
 		if err != nil {
 			return configuration{}, err
 		}
@@ -98,7 +100,7 @@ func configurationFindings(registryDirectory, template string, readRoots []strin
 		}
 		compared = append(compared, direct...)
 	}
-	sortFindings(compared)
+	auditkit.SortFindings(compared)
 	return configuration{
 		accepted:   len(registry.accepted),
 		documented: len(documented),
@@ -147,7 +149,7 @@ func readRegistry(directory string) (registry, error) {
 // loader holds, and a package without one is a refusal and not an empty answer.
 func parseConfigurationPackage(directory string) (configurationPackage, error) {
 	source := configurationPackage{directory: directory, positions: token.NewFileSet(), constants: map[string]string{}}
-	files, err := goFiles(directory, nil)
+	files, err := auditkit.GoFiles(directory, nil)
 	if err != nil {
 		return source, err
 	}

@@ -5,12 +5,13 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/AlexandreZanata/Regnovum/tools/auditkit"
 )
 
 // The rules of this gate. Every finding names one of them, and the report has no
@@ -30,40 +31,23 @@ const (
 // scan returns findings by name, and a name outside this table is a programming
 // error the gate turns into a refusal instead of a line.
 var rules = []rule{
-	{RulePlaceholderPanic, "um panic que diz que o trabalho não foi feito é a falha mais barata de escrever e a mais cara de encontrar em produção"},
-	{RuleFalseSuccess, "a função que se anuncia como não pronta e devolve sucesso é a que faz o chamador seguir como se tivesse funcionado"},
-	{RuleDeferred, "o adiamento só é honesto quando nomeia quem o resolve: marcador sem referência é uma frase que ninguém cobra"},
-	{RuleUnreachable, "código depois de um término incondicional nunca roda, e o leitor paga por ele em toda revisão"},
-	{RuleConstantBranch, "um desvio sobre literal constante é uma decisão que já foi tomada e ficou escrita como se não fosse"},
-	{RuleConfigurationKey, "a variável que o operador define e o processo ignora, ou a que o processo aceita e ninguém documenta, é configuração que mente"},
+	{Name: RulePlaceholderPanic, Reason: "um panic que diz que o trabalho não foi feito é a falha mais barata de escrever e a mais cara de encontrar em produção"},
+	{Name: RuleFalseSuccess, Reason: "a função que se anuncia como não pronta e devolve sucesso é a que faz o chamador seguir como se tivesse funcionado"},
+	{Name: RuleDeferred, Reason: "o adiamento só é honesto quando nomeia quem o resolve: marcador sem referência é uma frase que ninguém cobra"},
+	{Name: RuleUnreachable, Reason: "código depois de um término incondicional nunca roda, e o leitor paga por ele em toda revisão"},
+	{Name: RuleConstantBranch, Reason: "um desvio sobre literal constante é uma decisão que já foi tomada e ficou escrita como se não fosse"},
+	{Name: RuleConfigurationKey, Reason: "a variável que o operador define e o processo ignora, ou a que o processo aceita e ninguém documenta, é configuração que mente"},
 }
 
-type rule struct {
-	Name   string
-	Reason string
-}
+// rule and finding are the vocabulary every gate of the phase prints, shared so
+// that a finding of this gate reads exactly like a finding of the next one. What
+// stays here is the table: the rules of *this* gate are the ones this file
+// declares.
+type rule = auditkit.Rule
+type finding = auditkit.Finding
 
 func ruleKnown(name string) bool {
-	for _, entry := range rules {
-		if entry.Name == name {
-			return true
-		}
-	}
-	return false
-}
-
-// finding is one refusal: where it is, which rule it breaks and what the gate
-// read to decide. The detail is part of the finding on purpose — a refusal that
-// does not show the text it refused is a refusal nobody can argue with.
-type finding struct {
-	Rule   string
-	Path   string
-	Line   int
-	Detail string
-}
-
-func (f finding) String() string {
-	return fmt.Sprintf("%s:%d: %s: %s", f.Path, f.Line, f.Rule, f.Detail)
+	return auditkit.RuleKnown(rules, name)
 }
 
 // measured is everything one run observed.
@@ -172,34 +156,10 @@ func isWordByte(character byte) bool {
 		character >= 0x80
 }
 
-// skippedDirectories are the directories the walk does not enter. Generated code
-// is excluded by provenance (the marker in the file), never by where it lives.
-var skippedDirectories = map[string]bool{
-	".git": true, "node_modules": true, "vendor": true, "testdata": true, ".local": true, "dist": true,
-}
-
-var generatedLine = regexp.MustCompile(`^// Code generated .* DO NOT EDIT\.$`)
-
-// isGenerated reads the generated marker the way the Go toolchain does: in the
-// comments before the package clause. A file that merely mentions the text — the
-// generators of this repository do, inside a string — is code and is judged.
-func isGenerated(file *ast.File) bool {
-	for _, group := range file.Comments {
-		if group.Pos() >= file.Package {
-			break
-		}
-		for _, comment := range group.List {
-			if generatedLine.MatchString(strings.TrimRight(comment.Text, " \t")) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// scanTree judges the repository.
+// scanTree judges the repository: the walk skips the same directories every gate
+// of the phase skips, and generated code is excluded by provenance below.
 func scanTree() (measured, error) {
-	files, err := goFiles(".", skippedDirectories)
+	files, err := auditkit.GoFiles(".", auditkit.SkippedDirectories)
 	if err != nil {
 		return measured{}, err
 	}
@@ -210,38 +170,11 @@ func scanTree() (measured, error) {
 // gate exercises its own fixtures: a fixture lives under testdata, exactly the
 // place the tree walk refuses to enter.
 func scanDirectory(directory string) (measured, error) {
-	files, err := goFiles(directory, nil)
+	files, err := auditkit.GoFiles(directory, nil)
 	if err != nil {
 		return measured{}, err
 	}
 	return scan(files)
-}
-
-// goFiles lists every Go file under a root, refusing to enter the directories a
-// caller names. The list is ordered, because two runs of a gate that answers
-// differently are two gates.
-func goFiles(root string, skipped map[string]bool) ([]string, error) {
-	files := []string{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			if path != root && skipped[entry.Name()] {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if strings.HasSuffix(entry.Name(), ".go") {
-			files = append(files, filepath.ToSlash(path))
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("walk %s: %w", root, err)
-	}
-	sort.Strings(files)
-	return files, nil
 }
 
 // scan reads every file and returns what it found. A file it cannot read is a
@@ -262,7 +195,7 @@ func scan(files []string) (measured, error) {
 			continue
 		}
 		result.Files++
-		if isGenerated(file) {
+		if auditkit.IsGenerated(file) {
 			result.Generated = append(result.Generated, path)
 			continue
 		}
@@ -277,23 +210,9 @@ func scan(files []string) (measured, error) {
 		}
 	}
 	sort.Strings(result.Unconsumed)
-	sortFindings(result.Findings)
-	sortFindings(result.Accepted)
+	auditkit.SortFindings(result.Findings)
+	auditkit.SortFindings(result.Accepted)
 	return result, nil
-}
-
-// sortFindings orders findings by path, line and rule. Two runs of a gate that
-// answers in a different order are two gates.
-func sortFindings(findings []finding) {
-	sort.Slice(findings, func(one, other int) bool {
-		if findings[one].Path != findings[other].Path {
-			return findings[one].Path < findings[other].Path
-		}
-		if findings[one].Line != findings[other].Line {
-			return findings[one].Line < findings[other].Line
-		}
-		return findings[one].Rule < findings[other].Rule
-	})
 }
 
 func scanFile(result *measured, positions *token.FileSet, path string, file *ast.File) {

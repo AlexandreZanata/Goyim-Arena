@@ -295,11 +295,11 @@ func (a *audit) walkHistory(ctx context.Context, data *reportData) error {
 				return err
 			}
 			data.Failure = *failure
-			if err := a.cluster.drop(ctx, failureName); err != nil {
+			if err := a.cluster.drop(failureName); err != nil {
 				return err
 			}
 		}
-		if err := a.cluster.drop(ctx, upgradeName); err != nil {
+		if err := a.cluster.drop(upgradeName); err != nil {
 			return err
 		}
 	}

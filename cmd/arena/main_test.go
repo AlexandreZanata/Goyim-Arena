@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -130,10 +131,21 @@ func TestRunHelpRejectsArguments(t *testing.T) {
 	assertError(t, err, `help takes no arguments`)
 }
 
+// TestRunUnknownCommandFailsWithSuggestion holds the shape the usage error has:
+// the failure is the sentinel of the bad invocation wrapped with the command it
+// could not place, and the help text is printed where usage belongs — on the
+// output of the process — instead of travelling inside the error string.
 func TestRunUnknownCommandFailsWithSuggestion(t *testing.T) {
-	_, _, err := runForTest(t, "serve")
+	stdout, _, err := runForTest(t, "serve")
 	assertError(t, err, `unknown command "serve"`)
-	assertError(t, err, `Run "arena help" for usage.`)
+	if !errors.Is(err, errUsage) {
+		t.Fatalf("an unknown command must wrap errUsage, got %v", err)
+	}
+	for _, want := range []string{"Usage:", "help       show this help"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("the usage text did not reach the output (%q missing): %q", want, stdout)
+		}
+	}
 }
 
 func TestModulePathMatchesMasterPlan(t *testing.T) {

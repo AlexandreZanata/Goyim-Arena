@@ -240,7 +240,7 @@ func auditFamilies(options options) ([]family, []string, error) {
 			// coverage outlives the code that made it true.
 			raw, err := os.ReadFile(entry.Target)
 			if err != nil {
-				return nil, nil, fmt.Errorf("the %s family names %s as its owner and that file is not there: %v", entry.Name, entry.Target, err)
+				return nil, nil, fmt.Errorf("the %s family names %s as its owner and that file is not there: %w", entry.Name, entry.Target, err)
 			}
 			if !strings.Contains(string(raw), "func "+entry.Proof+"(") {
 				return nil, nil, fmt.Errorf("the %s family names %s in %s as its owner and that test does not exist", entry.Name, entry.Proof, entry.Target)

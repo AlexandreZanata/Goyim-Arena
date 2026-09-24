@@ -26,7 +26,7 @@ import (
 // file — and the aggregate lists the real foundation gates.
 const fixtureMakefile = `IMAGE ?= goyim-arena:local
 
-verify: fmt-check lint audit-complexity audit-deadcode generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck audit-web audit-i18n
+verify: fmt-check lint audit-complexity audit-deadcode audit-errors generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck audit-web audit-i18n
 	@echo "verify: ok"
 
 fmt-check:
@@ -40,6 +40,9 @@ audit-complexity:
 
 audit-deadcode:
 	@echo "audit-deadcode: ok"
+
+audit-errors:
+	@echo "audit-errors: ok"
 
 generate-check:
 	@echo "generate-check: ok"

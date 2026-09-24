@@ -49,6 +49,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/AlexandreZanata/Regnovum/tools/auditkit"
 )
 
 // Where the configuration surface lives. The three paths are named here, once,
@@ -68,12 +70,10 @@ var readRoots = []string{"cmd", "internal"}
 // enter: the Go toolchain skips testdata in every ./... pattern.
 const fixtureRoot = "tools/deadcodeaudit/testdata"
 
-// family is one rule with the fixture that proves it still bites.
-type family struct {
-	Name   string // the rule, as the report names it
-	Target string // the fixture directory under fixtureRoot
-	Reason string // why the family is part of the gate
-}
+// family is one rule with the fixture that proves it still bites, in the shape
+// every gate of the phase declares: the rule, the fixture under fixtureRoot and
+// why the family is part of the gate.
+type family = auditkit.Family
 
 // families is the executable map of the rules. Every family has a fixture that
 // must be refused: a rule that stopped biting has to fail here, by name, instead
@@ -138,11 +138,7 @@ var cleanFixtures = []family{
 // the marked file has to be excluded, and the file that only mentions the marker
 // has to be judged. A provenance rule proved in one direction only is a rule that
 // could be excluding the wrong files while looking correct.
-type provenanceProbe struct {
-	Name     string
-	Target   string
-	Excluded bool
-}
+type provenanceProbe = auditkit.ProvenanceProbe
 
 var provenanceProbes = []provenanceProbe{
 	{Name: "um arquivo gerado é excluído pelo marcador", Target: "generated", Excluded: true},
@@ -190,7 +186,7 @@ func run(root string) error {
 		return err
 	}
 	tree.Findings = append(tree.Findings, configuration.comparison...)
-	sortFindings(tree.Findings)
+	auditkit.SortFindings(tree.Findings)
 
 	// The report has no bucket called "other": a finding whose rule is not the
 	// table is a programming error, and it is refused as one instead of being
@@ -217,72 +213,42 @@ func run(root string) error {
 	return nil
 }
 
-// proveFamilies runs every fixture and requires its rule to refuse it. The root
-// is a parameter because the proof of the rules and the tree the gate judges are
-// asked for from two working directories; the configuration family goes through
-// the same entry point the delivered tree does, with the fixture's own registry,
-// template and read roots.
+// proveFamilies runs every fixture and requires its rule to refuse it, requires
+// the clean fixtures to be silent and holds the two directions of the provenance
+// exclusion. The root is a parameter because the proof of the rules and the tree
+// the gate judges are asked for from two working directories; the configuration
+// family goes through the same entry point the delivered tree does, with the
+// fixture's own registry, template and read roots.
 func proveFamilies(root string) error {
-	for _, entry := range families {
-		directory := root + "/" + entry.Target
-		if entry.Name == RuleConfigurationKey {
-			measured, err := configurationFindings(
-				directory+"/registry", directory+"/env.example",
-				[]string{directory + "/outside", directory + "/inside"})
-			if err != nil {
-				return fmt.Errorf("a família %q não pôde ser provada: %w", entry.Name, err)
-			}
-			if len(measured.comparison) == 0 {
-				return fmt.Errorf("a família %q deixou de recusar: a fixture %s produziu zero achado", entry.Name, directory)
-			}
-			continue
-		}
-		measured, err := scanDirectory(directory)
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, refusal := range measured.Findings {
-			if refusal.Rule == entry.Name {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf(
-				"a família %q deixou de recusar: a fixture %s produziu %d achado(s) e nenhum deles é dela",
-				entry.Name, directory, len(measured.Findings))
-		}
+	if err := auditkit.ProveRefused(root, families, readFixture); err != nil {
+		return err
 	}
-	for _, entry := range cleanFixtures {
-		directory := root + "/" + entry.Target
-		measured, err := scanDirectory(directory)
-		if err != nil {
-			return err
-		}
-		if len(measured.Findings) != 0 {
-			return fmt.Errorf(
-				"a fixture limpa %s (família %q) produziu %d achado(s) e nenhum é esperado: %s",
-				directory, entry.Name, len(measured.Findings), measured.Findings[0])
-		}
+	if err := auditkit.ProveAccepted(root, cleanFixtures, readFixture); err != nil {
+		return err
 	}
-	for _, probe := range provenanceProbes {
-		directory := root + "/" + probe.Target
-		measured, err := scanDirectory(directory)
+	return auditkit.ProveProvenance(root, provenanceProbes, readFixture)
+}
+
+// readFixture reads one fixture of this gate. Every family goes through the tree
+// scan except the configuration family, whose subject is a registry, a template
+// and the roots where a direct read of the environment is judged: it is asked for
+// through the function the delivered tree goes through, so the proof and the
+// delivery read the same code.
+func readFixture(entry family, directory string) (auditkit.ScanResult, error) {
+	if entry.Name == RuleConfigurationKey {
+		measured, err := configurationFindings(
+			directory+"/registry", directory+"/env.example",
+			[]string{directory + "/outside", directory + "/inside"})
 		if err != nil {
-			return err
+			return auditkit.ScanResult{}, fmt.Errorf("a família %q não pôde ser provada: %w", entry.Name, err)
 		}
-		excluded := len(measured.Generated) > 0
-		if excluded != probe.Excluded {
-			return fmt.Errorf(
-				"%s: a fixture %s excluiu %d arquivo(s) por proveniência e este portão exige %v",
-				probe.Name, directory, len(measured.Generated), probe.Excluded)
-		}
-		if !probe.Excluded && len(measured.Findings) == 0 {
-			return fmt.Errorf("%s: a fixture %s não produziu achado, então não prova nada sobre arquivo julgado", probe.Name, directory)
-		}
+		return auditkit.ScanResult{Findings: measured.comparison}, nil
 	}
-	return nil
+	measured, err := scanDirectory(directory)
+	if err != nil {
+		return auditkit.ScanResult{}, err
+	}
+	return auditkit.ScanResult{Generated: measured.Generated, Findings: measured.Findings}, nil
 }
 
 // report prints everything this run measured: the corpus, the rules, what the
