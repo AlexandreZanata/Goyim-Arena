@@ -113,6 +113,12 @@ type Config struct {
 	PostHogAPIKey string
 	// PostHogHost overrides the API root. Empty selects the US cloud.
 	PostHogHost string
+	// SentryBaseURL overrides the origin the error envelope is posted to.
+	// Empty uses the origin of the DSN. It is the same loopback allowance
+	// PostHogHost carries, and it is what lets a hermetic suite point the
+	// reporter at the fake error tracker of the test platform instead of at
+	// the internet (P22-T05).
+	SentryBaseURL string
 	// SampleRatePercent is the deterministic sampling rate of analytics,
 	// 0..100, where 100 records every event and 0 records none. Errors are
 	// never sampled.
@@ -156,6 +162,7 @@ func New(config Config) (*Telemetry, error) {
 	if config.SentryDSN != "" {
 		reporter, err := newSentryReporter(sentryConfig{
 			DSN:         config.SentryDSN,
+			BaseURL:     config.SentryBaseURL,
 			Environment: config.Environment,
 			Clock:       config.Clock,
 			Logger:      config.Logger,
