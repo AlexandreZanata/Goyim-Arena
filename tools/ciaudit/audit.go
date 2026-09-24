@@ -481,12 +481,21 @@ func databaseGateOfJob(w workflow, job string) string {
 // gate that never runs.
 func auditDraftSkips(workflows []workflow) []Finding {
 	// Once a bounded PR workflow exists, the complete workflows must be
-	// release-only. Keep the legacy path for historical fixture falsifications.
+	// release-only. A missing quick workflow in that topology is a failure,
+	// not permission to fall back to the legacy PR model. Keep the legacy path
+	// only for historical fixture falsifications that still have PR full gates.
 	quickPresent := false
+	releaseOnly := false
 	for _, w := range workflows {
 		if strings.HasSuffix(w.Path, "/quick.yml") {
 			quickPresent = true
 		}
+		if (strings.HasSuffix(w.Path, "/verify.yml") || strings.HasSuffix(w.Path, "/supply-chain.yml")) && w.has("on.workflow_dispatch") && !w.has("on.pull_request") {
+			releaseOnly = true
+		}
+	}
+	if releaseOnly && !quickPresent {
+		return []Finding{{".github/workflows/quick.yml", 0, RuleCadence, "mandatory quick workflow is missing"}}
 	}
 	if quickPresent {
 		return auditReleaseCadence(workflows)

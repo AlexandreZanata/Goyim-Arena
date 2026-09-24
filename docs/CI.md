@@ -41,7 +41,7 @@ A verificação completa é a **união** desses gates. Nenhum deles está copiad
 | `permissions-minimal` | token com escrita (`contents: write`, `read-all`, `write-all`, escopo que não seja `read`/`none`) |
 | `failure-never-masked` | passo que engole a própria falha: `\|\| true`, `\|\| exit 0`, `set +e`, `continue-on-error`, gate com `if: always()`/`failure()` |
 | `database-service` | job que roda um gate que abre PostgreSQL e não declara o serviço `postgres`, não define `ARENA_DATABASE_URL`, ou aponta para uma porta que o serviço não publica |
-| `release-only-cadence` | quick ausente/filtrado/condicional, ou suíte completa voltando a rodar em todo PR/push de `main`, ou sem gatilho de tag |
+| `release-only-cadence` | workflow quick ausente/filtrado/condicional, ou suíte completa voltando a rodar em todo PR/push de `main`, ou sem gatilho de tag |
 | `trigger-and-secret-surface` | `pull_request_target`, `workflow_run` ou um passo lendo qualquer segredo além do `GITHUB_TOKEN` da execução |
 | `job-budget` | job sem `timeout-minutes`, ou com um teto acima do orçamento do pipeline |
 
@@ -110,6 +110,6 @@ Cada job é uma linha de shell, então o pipeline é reproduzível na máquina:
 
 ## 8. Regra de manutenção
 
-- Um gate novo entra no `Makefile`, num job e na tabela do `tools/ciaudit`. Sem os três, `make audit-ci` recusa — e é isso que impede um gate de existir no documento e não no pipeline. A tabela carrega a superfície que a fase 19 exigiu; um gate de fase posterior que roda dentro de `make verify` — como `make audit-req` ([REQUIREMENTS.md](REQUIREMENTS.md) §8, P20) ou `make quality-catalog`, `make quality-waivers`, `make quality-taxonomy` e `make quality-inventory` ([catalog.json](../quality/catalog.json), [waivers.json](../quality/waivers.json), [evidence.json](../quality/evidence.json) e [coverage.json](../quality/coverage.json), P21) — aparece no alvo e nos mesmos jobs, e o `make audit-ci` é quem prova que a tabela não regrediu.
+- Um gate completo novo entra no `Makefile`, num job de versão e na tabela `requiredGates` do `tools/ciaudit`. O gate rápido é exigido separadamente por `release-only-cadence`, inclusive sua presença, gatilhos, ausência de filtro e invocação de `make quick-verify`. Gates posteriores que entram em `make verify` são alcançados pelo job de versão sem rodar em todo PR.
 - O CI não pode ser mais fraco que o alvo que ele chama: parâmetros de scan, versão de scanner e conjunto de gates são lidos do `Makefile`, nunca redigitados.
 - Achado de gate que precise de correção entra por um commit novo na branch da fase: nada de `--force`, de `--admin`, de `--no-verify` ou de limiar reduzido para obter verde.

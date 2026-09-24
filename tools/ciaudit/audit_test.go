@@ -529,6 +529,24 @@ on:
 			}
 		})
 	}
+	t.Run("quick workflow removed", func(t *testing.T) {
+		files := make(map[string]string, len(base)-1)
+		for k, v := range base {
+			if k != ".github/workflows/quick.yml" {
+				files[k] = v
+			}
+		}
+		report, err := Audit(writeFixture(t, files))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, finding := range report.Findings {
+			if finding.Rule == RuleCadence {
+				return
+			}
+		}
+		t.Fatal("missing quick workflow was not rejected")
+	})
 }
 
 // TestReaderRefusesAFixtureItCannotTrust requires the reader to fail instead of
