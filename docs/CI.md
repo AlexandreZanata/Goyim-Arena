@@ -1,12 +1,19 @@
-# Verificação de release no CI
+# Verificação rápida de integração e certificação de release
 
-**Status:** entregue na P19-T08. O CI verifica; ele **não** publica, não faz deploy e não tem credencial de produção.
+**Status:** cadência atualizada em 2026-09-24. O CI verifica; ele **não** publica, não faz deploy e não tem credencial de produção.
+
+## Política vigente
+
+- Todo PR (inclusive rascunho) e push em `main` executa `quick.yml` / `Quick verification`: formato Go, compilação de todos os pacotes e testes Go (`go test -run '^$' ./...`), testes reais dos domínios wallet/identity/arguments/arenas e do auditor CI, e TypeScript estrito. O check é obrigatório na proteção da `main`; não substitui testes direcionados de integração/segurança.
+- Cada microtarefa executa localmente testes de comportamento direcionados e sua validação mínima, incluindo PostgreSQL real, falhas, autorização e concorrência em Q0 quando aplicável. A fase só fecha após seus gates especializados, `make quick-verify` e o check remoto verde. A `main` pode conter fases ainda não certificadas para release.
+- `verify.yml` e `supply-chain.yml` rodam por `workflow_dispatch` no candidato de versão e em tag `v*`, não por push comum nem PR. P30 e P44 são marcos de certificação completa. Tag estável, release e deploy requerem todos os jobs completos verdes no mesmo SHA; falha exige novo commit/candidato, nunca mover uma tag publicada.
+- A troca economiza repetição, mas aumenta o tempo até detectar uma regressão fora dos testes direcionados. Não alegue qualidade certificada antes da matriz completa. O auditor `tools/ciaudit` verifica os gatilhos e a presença do check rápido.
 
 Este documento é a superfície do pipeline: quais gates um merge exige, em que job cada um roda, o que o `tools/ciaudit` recusa, quanto tempo a verificação pode levar e o que ficou deliberadamente de fora. Onde ele afirma um número, o número foi medido no commit que o escreveu.
 
-## 1. O que um merge exige
+## 1. O que uma versão exige (não cada merge)
 
-Dois workflows, dez jobs:
+Os dois workflows completos, executados apenas no versionamento, contêm os jobs abaixo. A revisão de dependências por ação de PR foi retirada da esteira de release porque precisa de contexto de PR; os scans de dependências e imagem continuam em `source-scans`/`image-scan`.
 
 | Workflow | Job | Gates | Ferramentas que o job instala |
 | --- | --- | --- | --- |
@@ -17,7 +24,6 @@ Dois workflows, dez jobs:
 | `verify` | `stack` | `make compose-verify` | Go, Docker, openssl |
 | `verify` | `backup` | `make backup-verify` | Go, Docker, openssl |
 | `verify` | `deploy` | `make deploy-verify` | Go, Docker, openssl |
-| `supply-chain` | `dependency-review` | revisão de dependências alteradas (`fail-on-severity: high`) | — |
 | `supply-chain` | `source-scans` | `make vuln` (`govulncheck`), `npm audit --audit-level=high`, gitleaks | Go, Node, govulncheck (versão fixada) |
 | `supply-chain` | `image-scan` | scan da imagem do PostgreSQL que o compose fixa | trivy (ação) |
 
@@ -35,7 +41,7 @@ A verificação completa é a **união** desses gates. Nenhum deles está copiad
 | `permissions-minimal` | token com escrita (`contents: write`, `read-all`, `write-all`, escopo que não seja `read`/`none`) |
 | `failure-never-masked` | passo que engole a própria falha: `\|\| true`, `\|\| exit 0`, `set +e`, `continue-on-error`, gate com `if: always()`/`failure()` |
 | `database-service` | job que roda um gate que abre PostgreSQL e não declara o serviço `postgres`, não define `ARENA_DATABASE_URL`, ou aponta para uma porta que o serviço não publica |
-| `draft-skip-without-reduction` | PR em rascunho que deixa de ser adiado e passa a ser **aprovado** (job sem a condição de rascunho, gatilho sem `ready_for_review`, filtro de caminho no `pull_request`) |
+| `release-only-cadence` | quick ausente/filtrado/condicional, ou suíte completa voltando a rodar em todo PR/push de `main`, ou sem gatilho de tag |
 | `trigger-and-secret-surface` | `pull_request_target`, `workflow_run` ou um passo lendo qualquer segredo além do `GITHUB_TOKEN` da execução |
 | `job-budget` | job sem `timeout-minutes`, ou com um teto acima do orçamento do pipeline |
 
@@ -47,23 +53,13 @@ O scan da imagem é o único gate que a tabela aceita por uma forma alternativa 
 
 Ele nunca reescreve nada: a correção pertence ao commit que mudou o workflow.
 
-## 3. Rascunho é adiado, não aprovado
+## 3. PR rápido não é certificação
 
-Os dois workflows têm `on.pull_request.types: [opened, synchronize, reopened, ready_for_review]` e **todos** os jobs carregam `if: github.event_name != 'pull_request' || github.event.pull_request.draft == false`.
-
-As duas metades são necessárias e o auditor exige as duas: sem o gatilho, marcar o PR como pronto não iniciaria a verificação; sem a condição, cada push num rascunho rodaria a suíte inteira.
-
-O que isso significa, e o que não significa:
-
-- durante uma fase, o ciclo de microtarefas roda local (`make fmt-check`, os testes diretamente relacionados e os gates especializados: `.local/GIT_FLOW.md` §5);
-- o gate da fase roda inteiro sobre o PR marcado como pronto, e o `finish` só mergeia com o CI completo verde;
-- **nada é dispensado**: os mesmos dez jobs, os mesmos gates. Um rascunho não é uma verificação parcial aprovada; é uma verificação que ainda não começou.
-
-Por isso `draft-skip-without-reduction` também recusa um filtro de caminho no `pull_request`: um filtro é uma segunda maneira de um merge passar sem a verificação completa, e ela não deixa rastro no PR.
+`quick.yml` roda também em rascunhos. A suíte completa não roda automaticamente no PR: é uma verificação adiada para o candidato de versão, não uma aprovação implícita do código. O auditor recusa filtros de caminho ou condição no job rápido e exige os gatilhos de versão nos workflows completos. O `finish` só mergeia depois do gate local rápido e do check remoto verde, além dos testes direcionados que o executor registrou.
 
 ## 4. Orçamento de tempo
 
-`.local/git-flow.sh` espera 1800 segundos pelos checks do PR. Cada job declara `timeout-minutes`, e o auditor recusa acima de 30: um job que pode viver mais que a espera transforma um runner travado numa espera que expira, em vez de uma falha relatada. Os limites entregues são 30 minutos para os sete jobs de `verify` e 15 para os três de `supply-chain`.
+`.local/git-flow.sh` espera 1800 segundos pelos checks do PR, mas o único check de integração obrigatório é `Quick verification` (12 minutos de teto). Os jobs de versão mantêm tetos de 30 minutos por job, executados fora do fluxo de cada fase.
 
 Um job que estoura o próprio teto falha, e um check vermelho não tem merge (§5 de `GIT_FLOW.md`).
 

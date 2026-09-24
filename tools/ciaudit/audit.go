@@ -25,6 +25,7 @@ const (
 	RuleGatesWired    = "gates-wired"
 	RuleDatabase      = "database-service"
 	RuleDraftSkip     = "draft-skip-without-reduction"
+	RuleCadence       = "release-only-cadence"
 	RuleSurface       = "trigger-and-secret-surface"
 	RuleBudget        = "job-budget"
 )
@@ -479,6 +480,17 @@ func databaseGateOfJob(w workflow, job string) string {
 // request is marked ready. Only the pair is a deferral; either half alone is a
 // gate that never runs.
 func auditDraftSkips(workflows []workflow) []Finding {
+	// Once a bounded PR workflow exists, the complete workflows must be
+	// release-only. Keep the legacy path for historical fixture falsifications.
+	quickPresent := false
+	for _, w := range workflows {
+		if strings.HasSuffix(w.Path, "/quick.yml") {
+			quickPresent = true
+		}
+	}
+	if quickPresent {
+		return auditReleaseCadence(workflows)
+	}
 	var findings []Finding
 	for _, w := range workflows {
 		if !w.has("on.pull_request") {
@@ -491,6 +503,48 @@ func auditDraftSkips(workflows []workflow) []Finding {
 				findings = append(findings, Finding{w.Path, jobLine(w, job), RuleDraftSkip,
 					fmt.Sprintf("job %q does not skip draft pull requests: the complete verification is deferred to `ready_for_review`, and a job that ignores that runs on every draft push", job)})
 			}
+		}
+	}
+	return findings
+}
+
+func auditReleaseCadence(workflows []workflow) []Finding {
+	var findings []Finding
+	for _, w := range workflows {
+		if strings.HasSuffix(w.Path, "/quick.yml") {
+			if !w.has("on.pull_request") || !containsString(w.flowList("on.pull_request.types"), "synchronize") || !containsString(w.flowList("on.push.branches"), "main") {
+				findings = append(findings, Finding{w.Path, 0, RuleCadence, "quick must run for every pull request update and main push"})
+			}
+			for _, filter := range []string{"paths", "paths-ignore"} {
+				if w.has("on.pull_request." + filter) {
+					findings = append(findings, Finding{w.Path, 0, RuleCadence, "quick may not filter pull request paths"})
+				}
+			}
+			found := false
+			for _, job := range w.jobIDs() {
+				if w.has("jobs." + job + ".if") {
+					findings = append(findings, Finding{w.Path, jobLine(w, job), RuleCadence, "quick job may not be conditional"})
+				}
+				for _, e := range w.under("jobs." + job) {
+					if e.Key == "run" && containsString(invokedTargets(e.Value), "quick-verify") {
+						found = true
+					}
+				}
+			}
+			if !found {
+				findings = append(findings, Finding{w.Path, 0, RuleCadence, "quick workflow does not invoke make quick-verify"})
+			}
+			continue
+		}
+		if !strings.HasSuffix(w.Path, "/verify.yml") && !strings.HasSuffix(w.Path, "/supply-chain.yml") {
+			continue
+		}
+		if w.has("on.pull_request") || w.has("on.push.branches") || !w.has("on.workflow_dispatch") {
+			findings = append(findings, Finding{w.Path, 0, RuleCadence, "complete workflow must be manual/release-only, never a normal PR or main push"})
+		}
+		tags, ok := w.at("on.push.tags")
+		if !ok || !strings.Contains(tags.Value, "v*") {
+			findings = append(findings, Finding{w.Path, 0, RuleCadence, "complete workflow must run for version tags"})
 		}
 	}
 	return findings

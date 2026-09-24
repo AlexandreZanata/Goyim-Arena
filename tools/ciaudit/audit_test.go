@@ -470,6 +470,67 @@ func TestDeliveredWorkflowsVerifyEveryGate(t *testing.T) {
 	}
 }
 
+func TestReleaseCadenceRejectsBypasses(t *testing.T) {
+	base := map[string]string{
+		".github/workflows/quick.yml": `name: quick
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+jobs:
+  quick:
+    name: Quick verification
+    timeout-minutes: 12
+    steps:
+      - run: make quick-verify
+`,
+		".github/workflows/verify.yml": `name: verify
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+`,
+		".github/workflows/supply-chain.yml": `name: supply-chain
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+`,
+		"Makefile": "quick-verify:\n\t@true\n",
+	}
+	tests := []struct {
+		name, file, old, replacement string
+	}{
+		{"quick missing synchronize", ".github/workflows/quick.yml", "opened, synchronize, reopened", "opened, reopened"},
+		{"quick path filtered", ".github/workflows/quick.yml", "    types: [opened, synchronize, reopened, ready_for_review]", "    types: [opened, synchronize, reopened, ready_for_review]\n    paths: [docs/**]"},
+		{"quick conditionally skipped", ".github/workflows/quick.yml", "    name: Quick verification", "    name: Quick verification\n    if: false"},
+		{"quick no target", ".github/workflows/quick.yml", "make quick-verify", "echo green"},
+		{"full on every PR", ".github/workflows/verify.yml", "  workflow_dispatch:", "  pull_request:\n  workflow_dispatch:"},
+		{"full missing version tag", ".github/workflows/verify.yml", "tags: ['v*']", "tags: ['ignored']"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			files := make(map[string]string, len(base))
+			for k, v := range base {
+				files[k] = v
+			}
+			files[tc.file] = strings.Replace(files[tc.file], tc.old, tc.replacement, 1)
+			report, err := Audit(writeFixture(t, files))
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, finding := range report.Findings {
+				found = found || finding.Rule == RuleCadence
+			}
+			if !found {
+				t.Fatal("cadence bypass was not rejected")
+			}
+		})
+	}
+}
+
 // TestReaderRefusesAFixtureItCannotTrust requires the reader to fail instead of
 // guessing. A reader that misread a file would let every rule pass over it.
 func TestReaderRefusesAFixtureItCannotTrust(t *testing.T) {
