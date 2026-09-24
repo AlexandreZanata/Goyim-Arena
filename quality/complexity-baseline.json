@@ -107,6 +107,7 @@
     {"kind":"function","path":"tools/caddyaudit/audit.go","function":"auditRoute","metric":"cyclomatic","value":31,"owner":"tools/caddyaudit"},
     {"kind":"function","path":"tools/caddyaudit/audit_test.go","function":"TestEachRuleRefusesItsOwnMutation","metric":"lines","value":330,"owner":"tools/caddyaudit"},
     {"kind":"function","path":"tools/ciaudit/audit.go","function":"auditMasking","metric":"nesting","value":5,"owner":"tools/ciaudit"},
+    {"kind":"function","path":"tools/ciaudit/audit.go","function":"auditReleaseCadence","metric":"nesting","value":5,"owner":"tools/ciaudit"},
     {"kind":"function","path":"tools/composeaudit/audit.go","function":"Audit","metric":"cyclomatic","value":61,"owner":"tools/composeaudit"},
     {"kind":"function","path":"tools/composeaudit/audit.go","function":"Audit","metric":"lines","value":311,"owner":"tools/composeaudit"},
     {"kind":"function","path":"tools/composeaudit/audit.go","function":"Audit","metric":"nesting","value":5,"owner":"tools/composeaudit"},

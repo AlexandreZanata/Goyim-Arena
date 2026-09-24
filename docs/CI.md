@@ -1,12 +1,19 @@
-# Verificação de release no CI
+# Verificação rápida de integração e certificação de release
 
-**Status:** entregue na P19-T08. O CI verifica; ele **não** publica, não faz deploy e não tem credencial de produção.
+**Status:** cadência atualizada em 2026-09-24. O CI verifica; ele **não** publica, não faz deploy e não tem credencial de produção.
+
+## Política vigente
+
+- Todo PR (inclusive rascunho) e push em `main` executa `quick.yml` / `Quick verification`: formato Go, compilação de todos os pacotes e testes Go (`go test -run '^$' ./...`), testes reais dos domínios wallet/identity/arguments/arenas e do auditor CI, TypeScript estrito, e os dois gates baratos da fase 23 — `make lint` (P23-T02) e `make audit-complexity` (P23-T03), que rodam **também** em `make verify`, no versionamento. Eles entram no caminho rápido porque o critério de saída da fase pede que código estruturalmente ruim, duplicado ou morto seja recusado **antes** dos testes caros, e o caminho rápido é o único que roda em cada PR. Custo declarado: o job rápido resolve o módulo do analisador fixado (o `setup-go` cacheia `go.sum`, e o analisador não está nele, então ele é baixado e construído no runner); o teto do job é de 12 minutos. O check é obrigatório na proteção da `main`; não substitui testes direcionados de integração/segurança.
+- Cada microtarefa executa localmente testes de comportamento direcionados e sua validação mínima, incluindo PostgreSQL real, falhas, autorização e concorrência em Q0 quando aplicável. A fase só fecha após seus gates especializados, `make quick-verify` e o check remoto verde. A `main` pode conter fases ainda não certificadas para release.
+- `verify.yml` e `supply-chain.yml` são acionáveis por `workflow_dispatch` ou tag `v*`, não por push comum nem PR. Pela política do projeto, **não os dispare manualmente nem crie tag candidata antes de todas as fases atuais até P44 estarem mergeadas**. P30/P44 preparam os gates; a futura P45 executa a matriz completa e decide a certificação. Tag estável, release e deploy requerem todos os jobs completos verdes no mesmo SHA; falha exige novo commit/candidato, nunca mover uma tag publicada.
+- A troca economiza repetição, mas aumenta o tempo até detectar uma regressão fora dos testes direcionados. Não alegue qualidade certificada antes da matriz completa. O auditor `tools/ciaudit` verifica os gatilhos e a presença do check rápido.
 
 Este documento é a superfície do pipeline: quais gates um merge exige, em que job cada um roda, o que o `tools/ciaudit` recusa, quanto tempo a verificação pode levar e o que ficou deliberadamente de fora. Onde ele afirma um número, o número foi medido no commit que o escreveu.
 
-## 1. O que um merge exige
+## 1. O que uma versão exige (não cada merge)
 
-Dois workflows, dez jobs:
+Os dois workflows completos, executados apenas no versionamento, contêm os jobs abaixo. A revisão de dependências por ação de PR foi retirada da esteira de release porque precisa de contexto de PR; os scans de dependências e imagem continuam em `source-scans`/`image-scan`.
 
 | Workflow | Job | Gates | Ferramentas que o job instala |
 | --- | --- | --- | --- |
@@ -17,7 +24,6 @@ Dois workflows, dez jobs:
 | `verify` | `stack` | `make compose-verify` | Go, Docker, openssl |
 | `verify` | `backup` | `make backup-verify` | Go, Docker, openssl |
 | `verify` | `deploy` | `make deploy-verify` | Go, Docker, openssl |
-| `supply-chain` | `dependency-review` | revisão de dependências alteradas (`fail-on-severity: high`) | — |
 | `supply-chain` | `source-scans` | `make vuln` (`govulncheck`), `npm audit --audit-level=high`, gitleaks | Go, Node, govulncheck (versão fixada) |
 | `supply-chain` | `image-scan` | scan da imagem do PostgreSQL que o compose fixa | trivy (ação) |
 
@@ -35,7 +41,7 @@ A verificação completa é a **união** desses gates. Nenhum deles está copiad
 | `permissions-minimal` | token com escrita (`contents: write`, `read-all`, `write-all`, escopo que não seja `read`/`none`) |
 | `failure-never-masked` | passo que engole a própria falha: `\|\| true`, `\|\| exit 0`, `set +e`, `continue-on-error`, gate com `if: always()`/`failure()` |
 | `database-service` | job que roda um gate que abre PostgreSQL e não declara o serviço `postgres`, não define `ARENA_DATABASE_URL`, ou aponta para uma porta que o serviço não publica |
-| `draft-skip-without-reduction` | PR em rascunho que deixa de ser adiado e passa a ser **aprovado** (job sem a condição de rascunho, gatilho sem `ready_for_review`, filtro de caminho no `pull_request`) |
+| `release-only-cadence` | workflow quick ausente/filtrado/condicional, ou suíte completa voltando a rodar em todo PR/push de `main`, ou sem gatilho de tag |
 | `trigger-and-secret-surface` | `pull_request_target`, `workflow_run` ou um passo lendo qualquer segredo além do `GITHUB_TOKEN` da execução |
 | `job-budget` | job sem `timeout-minutes`, ou com um teto acima do orçamento do pipeline |
 
@@ -47,23 +53,13 @@ O scan da imagem é o único gate que a tabela aceita por uma forma alternativa 
 
 Ele nunca reescreve nada: a correção pertence ao commit que mudou o workflow.
 
-## 3. Rascunho é adiado, não aprovado
+## 3. PR rápido não é certificação
 
-Os dois workflows têm `on.pull_request.types: [opened, synchronize, reopened, ready_for_review]` e **todos** os jobs carregam `if: github.event_name != 'pull_request' || github.event.pull_request.draft == false`.
-
-As duas metades são necessárias e o auditor exige as duas: sem o gatilho, marcar o PR como pronto não iniciaria a verificação; sem a condição, cada push num rascunho rodaria a suíte inteira.
-
-O que isso significa, e o que não significa:
-
-- durante uma fase, o ciclo de microtarefas roda local (`make fmt-check`, os testes diretamente relacionados e os gates especializados: `.local/GIT_FLOW.md` §5);
-- o gate da fase roda inteiro sobre o PR marcado como pronto, e o `finish` só mergeia com o CI completo verde;
-- **nada é dispensado**: os mesmos dez jobs, os mesmos gates. Um rascunho não é uma verificação parcial aprovada; é uma verificação que ainda não começou.
-
-Por isso `draft-skip-without-reduction` também recusa um filtro de caminho no `pull_request`: um filtro é uma segunda maneira de um merge passar sem a verificação completa, e ela não deixa rastro no PR.
+`quick.yml` roda também em rascunhos. A suíte completa não roda automaticamente no PR: é uma verificação adiada para o candidato de versão, não uma aprovação implícita do código. O auditor recusa filtros de caminho ou condição no job rápido e exige os gatilhos de versão nos workflows completos. O `finish` só mergeia depois do gate local rápido e do check remoto verde, além dos testes direcionados que o executor registrou.
 
 ## 4. Orçamento de tempo
 
-`.local/git-flow.sh` espera 1800 segundos pelos checks do PR. Cada job declara `timeout-minutes`, e o auditor recusa acima de 30: um job que pode viver mais que a espera transforma um runner travado numa espera que expira, em vez de uma falha relatada. Os limites entregues são 30 minutos para os sete jobs de `verify` e 15 para os três de `supply-chain`.
+`.local/git-flow.sh` espera 1800 segundos pelos checks do PR, mas o único check de integração obrigatório é `Quick verification` (12 minutos de teto). Os jobs de versão mantêm tetos de 30 minutos por job, executados fora do fluxo de cada fase.
 
 Um job que estoura o próprio teto falha, e um check vermelho não tem merge (§5 de `GIT_FLOW.md`).
 
@@ -87,7 +83,7 @@ Cada job é uma linha de shell, então o pipeline é reproduzível na máquina:
 - Go, Node e os `make` de `foundation`: instalar `sqlc@v1.29.0` e rodar `make verify`, com `ARENA_DATABASE_URL` apontando para um PostgreSQL alcançável. O analisador fixado **não** é instalado: o portão o resolve por `go run honnef.co/go/tools/cmd/staticcheck@v0.8.1` com `GOTOOLCHAIN` lido do `go.mod` (na primeira execução ele vem do proxy do Go e fica no cache de módulos) — um binário instalado fora da árvore seria uma segunda versão a manter de acordo com o pino, e a medição que abriu a P23-T02 mostrou que uma versão divergente não lê esta árvore ([ADR-016](adr/ADR-016-static-analysis-toolchain.md)). A metade barata, só a análise estática, é `make lint`;
 - as jornadas de browser: `npm ci --prefix tools/e2e`, `npx --prefix tools/e2e playwright install-deps chromium` e `make test-e2e`;
 - os gates que exigem daemon Docker: `make image-verify`, `make caddy-verify`, `make compose-verify`, `make backup-verify`, `make deploy-verify`, `make migration-audit`, `make disaster-drill` (todos instalam o que precisam de Go); o `make testenv-verify` (P22-T01) exige ainda uma build do frontend, porque sobe a aplicação de verdade e dirige a prontidão dela pela porta do ambiente; o `disaster-drill` exige ainda `k6`, um navegador instalado pelo runner do `tools/e2e` e uma build do frontend, como `test-e2e` e `test-load-smoke`; a `make release-verify` (P20-T07) exige o daemon, um PostgreSQL alcançável em `127.0.0.1:54329`, Node com npm e uma árvore limpa, porque ela **cria um checkout limpo do commit** e roda o próprio `make verify` duas vezes;
-- a análise estática e a de complexidade são as duas metades baratas, ambas só biblioteca padrão mais o analisador fixado: `make lint` (P23-T02) e `make audit-complexity` (P23-T03, que também aceita `-print-findings` para imprimir o baseline depois de um refactor — o portão nunca reescreve o arquivo por conta própria);
+- a análise estática e a de complexidade são as duas metades baratas, ambas só biblioteca padrão mais o analisador fixado, e ambas no caminho rápido **e** no de release: `make lint` (P23-T02) e `make audit-complexity` (P23-T03, que também aceita `-print-findings` para imprimir o baseline depois de um refactor — o portão nunca reescreve o arquivo por conta própria);
 - os scans: `make vuln` exige `govulncheck@v1.8.0`, `make image-scan` exige `trivy`, e ambos falham com mensagem explícita quando a ferramenta não está instalada. O `govulncheck` tem de ser construído com o Go que o `go.mod` declara (`GOTOOLCHAIN=go1.27.1 go install golang.org/x/vuln/cmd/govulncheck@v1.8.0`): um binário construído com uma versão anterior não processa os pacotes e o gate fica vermelho por ambiente, não por vulnerabilidade;
 - o ciclo de vida dos testes, em uma linha: `make test-isolation` (P22-T06), que exige um PostgreSQL alcançável (o mesmo de `make test-unit`) e roda a suíte inteira com ordem embaralhada e `-parallel=16`, depois de exigir que a fixture de vazamento proposital (`internal/platform/testguard/testdata/leak/`) faça uma execução vermelha nomeando cada regra, e comparando a máquina antes e depois — banco descartável, conexão e diretório temporário — com `tools/isolationaudit`. Ele fica fora de `make verify` porque roda a suíte inteira, como `testenv-verify`;
 - a execução offline e reprodutível, em uma linha: `make test-offline` (P22-T08), que escreve o manifesto de ferramentas, imagens e lockfiles duas vezes e exige bytes iguais — o manifesto é função da árvore, sem instante, host ou caminho absoluto, e o leitor recusa a ferramenta que diverge do pino, a imagem que constrói ou publica sem digest, a imagem que o `compose.yaml` roda sem digest registrado e o `package.json` sem lockfile ao lado. Depois ele instala dos lockfiles aprovados (`go mod download`, `npm ci` duas vezes) e **repete a metade que lê** com egress negado (`go mod verify` e o `npm ci --dry-run` da árvore travada), prova que um processo que tenta alcançar o registro é recusado por regra nomeando o host e não arquiva nada, e roda `make test-unit` e `make test-integration` offline, verdes, com **zero** tentativas, arquivando o manifesto e a declaração de evidência de cada um — que o formato da P22-T07 aceita, e recusa quando a declaração é adulterada. Exige um PostgreSQL alcançável (o mesmo de `make test-unit`) e Node com os dois lockfiles, e por isso fica fora de `make verify`;
@@ -115,6 +111,6 @@ Cada job é uma linha de shell, então o pipeline é reproduzível na máquina:
 
 ## 8. Regra de manutenção
 
-- Um gate novo entra no `Makefile`, num job e na tabela do `tools/ciaudit`. Sem os três, `make audit-ci` recusa — e é isso que impede um gate de existir no documento e não no pipeline. A tabela carrega a superfície que a fase 19 exigiu; um gate de fase posterior que roda dentro de `make verify` — como `make audit-req` ([REQUIREMENTS.md](REQUIREMENTS.md) §8, P20) ou `make quality-catalog`, `make quality-waivers`, `make quality-taxonomy` e `make quality-inventory` ([catalog.json](../quality/catalog.json), [waivers.json](../quality/waivers.json), [evidence.json](../quality/evidence.json) e [coverage.json](../quality/coverage.json), P21) — aparece no alvo e nos mesmos jobs, e o `make audit-ci` é quem prova que a tabela não regrediu.
+- Um gate completo novo entra no `Makefile`, num job de versão e na tabela `requiredGates` do `tools/ciaudit`. O gate rápido é exigido separadamente por `release-only-cadence`, inclusive sua presença, gatilhos, ausência de filtro e invocação de `make quick-verify`. Gates posteriores que entram em `make verify` são alcançados pelo job de versão sem rodar em todo PR.
 - O CI não pode ser mais fraco que o alvo que ele chama: parâmetros de scan, versão de scanner e conjunto de gates são lidos do `Makefile`, nunca redigitados.
 - Achado de gate que precise de correção entra por um commit novo na branch da fase: nada de `--force`, de `--admin`, de `--no-verify` ou de limiar reduzido para obter verde.

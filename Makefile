@@ -31,7 +31,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check lint audit-complexity test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check lint audit-complexity test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -50,6 +50,21 @@ fmt-check:
 		exit 1; \
 	fi; \
 	echo "fmt-check: ok"
+
+# Gate curto de integração. Testes de comportamento direcionados permanecem
+# obrigatórios na microtarefa local; estes packages críticos dão um piso real
+# ao PR sem banco, browser ou Docker. A suíte integral é gate de versão.
+#
+# Os dois gates baratos da fase 23 rodam aqui **e** em `verify`: `lint` (P23-T02)
+# e `audit-complexity` (P23-T03) são biblioteca padrão mais o analisador fixado,
+# não precisam de banco, browser nem Docker, e o critério de saída da fase pede
+# que código estruturalmente ruim, duplicado ou morto seja recusado **antes**
+# dos testes caros — o que só acontece no caminho que roda em cada PR.
+quick-verify: fmt-check lint audit-complexity
+	$(GO) test -run '^$$' ./...
+	$(GO) test ./internal/wallet/domain/... ./internal/identity/domain/... ./internal/arguments/domain/... ./internal/arenas/domain/... ./tools/ciaudit/...
+	$(NPM) --prefix web run typecheck
+	@echo "quick-verify: ok"
 
 # test-unit executa os testes unitários das capacidades existentes (Go).
 # O frontend ainda não possui runner de testes; será agregado quando existir.
