@@ -31,7 +31,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check lint audit-complexity test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
+.PHONY: fmt fmt-check lint audit-complexity audit-deadcode test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -55,12 +55,13 @@ fmt-check:
 # obrigatórios na microtarefa local; estes packages críticos dão um piso real
 # ao PR sem banco, browser ou Docker. A suíte integral é gate de versão.
 #
-# Os dois gates baratos da fase 23 rodam aqui **e** em `verify`: `lint` (P23-T02)
-# e `audit-complexity` (P23-T03) são biblioteca padrão mais o analisador fixado,
-# não precisam de banco, browser nem Docker, e o critério de saída da fase pede
-# que código estruturalmente ruim, duplicado ou morto seja recusado **antes**
-# dos testes caros — o que só acontece no caminho que roda em cada PR.
-quick-verify: fmt-check lint audit-complexity
+# Os três gates baratos da fase 23 rodam aqui **e** em `verify`: `lint`
+# (P23-T02), `audit-complexity` (P23-T03) e `audit-deadcode` (P23-T04) são
+# biblioteca padrão mais o analisador fixado, não precisam de banco, browser nem
+# Docker, e o critério de saída da fase pede que código estruturalmente ruim,
+# duplicado ou morto seja recusado **antes** dos testes caros — o que só
+# acontece no caminho que roda em cada PR.
+quick-verify: fmt-check lint audit-complexity audit-deadcode
 	$(GO) test -run '^$$' ./...
 	$(GO) test ./internal/wallet/domain/... ./internal/identity/domain/... ./internal/arguments/domain/... ./internal/arenas/domain/... ./tools/ciaudit/...
 	$(NPM) --prefix web run typecheck
@@ -617,8 +618,23 @@ audit-complexity:
 	$(GO) run ./tools/complexityaudit -root .
 	@echo "audit-complexity: ok"
 
+# audit-deadcode é o gate de código morto, placeholder e caminho impossível
+# (P23-T04): o portão `tools/deadcodeaudit` julga a árvore inteira com seis
+# regras — panic com vocabulário de placeholder, função que se anuncia como não
+# pronta e devolve sucesso, adiamento sem dono (o marcador tem de nomear
+# `Pnn-Tnn` ou `#nn`), sentença depois de um término incondicional, desvio sobre
+# literal e configuração que mente nas cinco direções (aceita e não lida, não
+# documentada em `.env.example`, lida e não aceita, documentada e recusada, e
+# chave `ARENA_*` lida direto do ambiente fora do registro). Cada regra prova a
+# própria fixture nas duas direções — a que ela recusa e a que ela aceita — e o
+# código gerado sai do corpus por proveniência. Não há baseline: a árvore não
+# tem achado, e um achado futuro é uma recusa e não uma linha nova.
+audit-deadcode:
+	$(GO) run ./tools/deadcodeaudit -root .
+	@echo "audit-deadcode: ok"
+
 # verify agrega os gates existentes do estágio atual.
-verify: fmt-check lint audit-complexity generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
+verify: fmt-check lint audit-complexity audit-deadcode generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \

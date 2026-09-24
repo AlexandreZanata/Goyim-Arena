@@ -738,18 +738,6 @@ func checkVersionTable(snapshot *snapshot, version int64, where string) error {
 	return nil
 }
 
-func sameHistory(before, after []versionRow) bool {
-	if len(before) != len(after) {
-		return false
-	}
-	for index := range before {
-		if before[index] != after[index] {
-			return false
-		}
-	}
-	return true
-}
-
 func versionTableIsComplete(snapshot *snapshot, sources []source) bool {
 	seen := map[int64]bool{}
 	for _, row := range snapshot.Version {

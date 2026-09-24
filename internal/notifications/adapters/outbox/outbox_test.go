@@ -103,11 +103,10 @@ func (c fakeClock) Now() time.Time { return c.now }
 
 // fakeDirectory answers the account question from a table.
 type fakeDirectory struct {
-	ref    application.AccountRef
-	err    error
-	asked  []string
-	mu     sync.Mutex
-	frozen bool
+	ref   application.AccountRef
+	err   error
+	asked []string
+	mu    sync.Mutex
 }
 
 func (d *fakeDirectory) AccountForAddress(_ context.Context, address string) (application.AccountRef, error) {

@@ -6,7 +6,6 @@
     {"kind":"duplication","value":22,"owner":"internal/arenas/application","digest":"0eb1a6def3b63db6","paths":["internal/arenas/application/feed_cursor.go","internal/arguments/application/argument_cursor.go","internal/billing/application/history_cursor.go","internal/moderation/application/queue.go","internal/transparency/application/export_cursor.go","internal/wallet/application/statement_cursor.go"]},
     {"kind":"duplication","value":26,"owner":"internal/transparency/application","digest":"151ea97ce56e1c59","paths":["internal/transparency/application/metrics.go"]},
     {"kind":"duplication","value":28,"owner":"internal/arenas/domain","digest":"158b01b817814a1a","paths":["internal/arenas/domain/statement.go","internal/arguments/domain/content.go"]},
-    {"kind":"duplication","value":20,"owner":"internal/arenas/adapters/html","digest":"25bc0af3327841ea","paths":["internal/arenas/adapters/html/handler.go","internal/arguments/adapters/http/handler.go"]},
     {"kind":"duplication","value":27,"owner":"internal/persuasion/adapters/http","digest":"3b4818aaa9418052","paths":["internal/persuasion/adapters/http/handler.go","internal/positions/adapters/http/handler.go"]},
     {"kind":"duplication","value":29,"owner":"internal/persuasion/adapters/http","digest":"4e3f35ea3daabfe9","paths":["internal/persuasion/adapters/http/handler.go","internal/positions/adapters/http/handler.go"]},
     {"kind":"duplication","value":26,"owner":"internal/arenas/domain","digest":"5c21237e9d98cb12","paths":["internal/arenas/domain/reason.go","internal/wallet/domain/reason.go"]},

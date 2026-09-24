@@ -57,6 +57,7 @@ var requiredGates = []gate{
 	{"formatting", "fmt-check"},
 	{"static analysis", "lint"},
 	{"complexity, duplication and size", "audit-complexity"},
+	{"dead code, placeholders and impossible paths", "audit-deadcode"},
 	{"generated-artifact drift", "generate-check"},
 	{"unit tests", "test-unit"},
 	{"PostgreSQL integration", "test-integration"},
