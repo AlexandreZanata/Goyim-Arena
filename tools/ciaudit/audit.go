@@ -55,6 +55,7 @@ type gate struct {
 var requiredGates = []gate{
 	{"formatting", "fmt-check"},
 	{"static analysis", "lint"},
+	{"complexity, duplication and size", "audit-complexity"},
 	{"generated-artifact drift", "generate-check"},
 	{"unit tests", "test-unit"},
 	{"PostgreSQL integration", "test-integration"},

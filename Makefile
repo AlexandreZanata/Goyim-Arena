@@ -31,7 +31,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check lint test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
+.PHONY: fmt fmt-check lint audit-complexity test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -588,8 +588,22 @@ lint:
 		-toolchain "$(STATICCHECK_TOOLCHAIN)"
 	@echo "lint: ok"
 
+# audit-complexity é o gate de complexidade, duplicação e tamanho (P23-T03): o
+# portão `tools/complexityaudit` mede cada função da árvore — pontos de decisão,
+# aninhamento, parâmetros, tamanho e blocos copiados — contra orçamentos
+# declarados por escopo (produto, ferramentas e teste), com piso em cada
+# orçamento para que a barra não desça sem revisão. Código gerado sai do corpus
+# por proveniência: o marcador do Go é lido nos comentários antes da cláusula
+# `package`, nunca nos bytes do arquivo. Ele entra em `make verify` porque um
+# gate de merge é exatamente onde a função gerada sem ninguém olhando precisa
+# ser recusada — `-print-findings` imprime o baseline para um humano atualizar,
+# e o portão nunca reescreve o arquivo.
+audit-complexity:
+	$(GO) run ./tools/complexityaudit -root .
+	@echo "audit-complexity: ok"
+
 # verify agrega os gates existentes do estágio atual.
-verify: fmt-check lint generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
+verify: fmt-check lint audit-complexity generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \
