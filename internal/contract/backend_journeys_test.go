@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -42,6 +43,7 @@ import (
 	identityfake "github.com/AlexandreZanata/Regnovum/internal/identity/adapters/fakeemail"
 	identityhttp "github.com/AlexandreZanata/Regnovum/internal/identity/adapters/http"
 	identityjobs "github.com/AlexandreZanata/Regnovum/internal/identity/adapters/jobs"
+	identitymfa "github.com/AlexandreZanata/Regnovum/internal/identity/adapters/mfamechanism"
 	identitypg "github.com/AlexandreZanata/Regnovum/internal/identity/adapters/postgres"
 	identityapp "github.com/AlexandreZanata/Regnovum/internal/identity/application"
 	identitydomain "github.com/AlexandreZanata/Regnovum/internal/identity/domain"
@@ -56,6 +58,7 @@ import (
 	"github.com/AlexandreZanata/Regnovum/internal/platform/dbtest"
 	"github.com/AlexandreZanata/Regnovum/internal/platform/httpserver"
 	"github.com/AlexandreZanata/Regnovum/internal/platform/locale"
+	platformmfa "github.com/AlexandreZanata/Regnovum/internal/platform/mfa"
 	platformpg "github.com/AlexandreZanata/Regnovum/internal/platform/postgres"
 	"github.com/AlexandreZanata/Regnovum/internal/platform/providersim"
 	"github.com/AlexandreZanata/Regnovum/internal/platform/security"
@@ -120,6 +123,14 @@ func (world *journeyWorld) mountJourneyIdentity(t *testing.T) (*identityhttp.Han
 	sPolicy := identitydomain.DefaultSessionPolicy()
 	rPolicy := identitydomain.DefaultPasswordResetPolicy()
 	authUC := identityapp.NewAuthenticateSessionUseCase(repo, repo, world.clock, sPolicy, 5*time.Minute)
+	sealer, err := platformmfa.NewSealer(make([]byte, platformmfa.KeySize), world.random)
+	if err != nil {
+		t.Fatalf("mfa sealer: %v", err)
+	}
+	mechanism, err := identitymfa.New(platformmfa.Config{}, sealer, world.random)
+	if err != nil {
+		t.Fatalf("mfa mechanism: %v", err)
+	}
 	handler := identityhttp.NewHandler(identityhttp.HandlerConfig{
 		RegisterUseCase:              identityapp.NewRegisterAccountUseCase(repo, repo, hasher, sender, world.clock, world.random, vPolicy),
 		VerifyEmailUseCase:           identityapp.NewVerifyEmailUseCase(repo, repo, world.clock),
@@ -129,6 +140,10 @@ func (world *journeyWorld) mountJourneyIdentity(t *testing.T) (*identityhttp.Han
 		RequestPasswordResetUseCase:  identityapp.NewRequestPasswordResetUseCase(repo, repo, sender, world.clock, world.random, rPolicy),
 		CompletePasswordResetUseCase: identityapp.NewCompletePasswordResetUseCase(repo, repo, repo, repo, repo, hasher, sender, world.clock),
 		AuthenticateSessionUseCase:   authUC,
+		BeginMFAEnrollmentUseCase:    identityapp.NewBeginMFAEnrollmentUseCase(repo, mechanism),
+		ConfirmMFAEnrollmentUseCase:  identityapp.NewConfirmMFAEnrollmentUseCase(repo, mechanism, hasher, world.clock, journeyMFAAudit{}),
+		StepUpMFAUseCase:             identityapp.NewStepUpMFAUseCase(repo, mechanism, world.clock),
+		RecoverMFAUseCase:            identityapp.NewRecoverMFAUseCase(repo, mechanism, hasher, world.clock, journeyMFAAudit{}),
 		SecurityManager:              world.secMgr,
 	})
 	validator := security.SessionValidatorFunc(func(ctx context.Context, rawToken string) (security.AuthIdentity, error) {
@@ -547,12 +562,29 @@ func (world *journeyWorld) mountJourneyCheckout(t *testing.T) *billinghttp.Billi
 		t.Fatalf("NewCreateCheckoutUseCase: %v", err)
 	}
 	statusUC := billingapp.NewGetSubscriptionStatusUseCase(repo)
+	portalUC, err := billingapp.NewGetBillingPortalUseCase(billingapp.PortalDependencies{
+		Customers: repo,
+		Gateway:   gateway,
+		ReturnURL: "https://arena.invalid/billing/return",
+	})
+	if err != nil {
+		t.Fatalf("NewGetBillingPortalUseCase: %v", err)
+	}
 	return billinghttp.NewBillingHandler(billinghttp.BillingHandlerConfig{
 		CreateCheckout:        createCheckout,
 		GetSubscriptionStatus: statusUC,
+		GetBillingPortal:      portalUC,
 		SecurityManager:       world.secMgr,
 	})
 }
+
+// journeyMFAAudit descarta a trilha de MFA do servidor de jornadas: a
+// auditoria com contagem vive no servidor da T01/T08, que é quem prova o
+// rastro administrativo.
+type journeyMFAAudit struct{}
+
+func (journeyMFAAudit) RecordMFAEnrolled(context.Context, string, time.Time) error       { return nil }
+func (journeyMFAAudit) RecordMFABackupCodeUsed(context.Context, string, time.Time) error { return nil }
 
 // webhookEndpoint é o embrulho fino de teste do ProcessWebhookUseCase real:
 // lê corpo e assinatura do HTTP, executa verificação→persistência→
@@ -592,11 +624,22 @@ func (world *journeyWorld) webhookEndpoint(t *testing.T) func(*http.ServeMux) {
 				TimestampHeader: r.Header.Get("Stripe-Timestamp"),
 			})
 			if err != nil {
-				if strings.Contains(err.Error(), "signature") || strings.Contains(err.Error(), "tolerance") || strings.Contains(err.Error(), "timestamp") {
-					http.Error(w, "invalid signature", http.StatusBadRequest)
-					return
+				// O contrato que a futura rota de produção deve servir:
+				// assinatura/integridade 400, corpo grande 413,
+				// entrega em processamento 429 (transitório, o provider
+				// retenta) e falha de processamento 500.
+				switch {
+				case errors.Is(err, billingapp.ErrWebhookSignatureInvalid),
+					errors.Is(err, billingapp.ErrWebhookPayloadMalformed),
+					errors.Is(err, billingapp.ErrCheckoutIntentNotFound):
+					http.Error(w, "invalid webhook", http.StatusBadRequest)
+				case errors.Is(err, billingapp.ErrWebhookPayloadTooLarge):
+					http.Error(w, "webhook too large", http.StatusRequestEntityTooLarge)
+				case errors.Is(err, billingapp.ErrWebhookEventInProcessing):
+					http.Error(w, "webhook in processing", http.StatusTooManyRequests)
+				default:
+					http.Error(w, "processing failure", http.StatusInternalServerError)
 				}
-				http.Error(w, "processing failure", http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
