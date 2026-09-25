@@ -22,6 +22,18 @@ STATICCHECK_MODULE := honnef.co/go/tools/cmd/staticcheck
 STATICCHECK_VERSION := v0.8.1
 STATICCHECK_TOOLCHAIN := go$(shell sed -n 's/^go //p' go.mod | head -1)
 
+# Ferramenta de mutação (P24-T10): o gremlins mede a força dos testes dos
+# pacotes domain/application Q0/Q1, e o portão `tools/mutationaudit` cobra os
+# limiares do registro `quality/mutations.json`. Os pinos vivem aqui e no
+# registro; o portão recusa divergência entre os dois. `go run módulo@versão`
+# resolve e constrói exatamente a versão fixada (ou recusa rodar), então não
+# há binário instalado para derivar — ao contrário do analisador, que precisa
+# do GOTOOLCHAIN da árvore para ler a linguagem certa.
+GREMLINS_MODULE := github.com/go-gremlins/gremlins/cmd/gremlins
+GREMLINS_VERSION := v0.6.0
+GREMLINS_TIMEOUT_COEFFICIENT := 100
+GREMLINS_WORKERS := 8
+
 # Gerador de contratos TypeScript (P18-T02): lê o subconjunto versionado do
 # OpenAPI e emite web/src/contracts/generated.ts (nunca editado à mão).
 CONTRACTGEN := $(GO) run ./tools/contractgen
@@ -31,7 +43,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
+.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps audit-mutations test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -750,8 +762,25 @@ audit-deps:
 	$(GO) run ./tools/dependencyaudit -root .
 	@echo "audit-deps: ok"
 
+# audit-mutations é o gate de mutation testing das regras críticas (P24-T10):
+# o portão `tools/mutationaudit` executa o gremlins fixado sobre os pacotes
+# domain/application Q0/Q1 do registro `quality/mutations.json` e cobra os
+# limiares por risco (Q0 ≥ 90%, Q1 ≥ 80%), zero sobrevivente não-manifestado
+# nas áreas autorização, wallet, billing, webhook, idempotência, moderação e
+# privacidade, e o manifesto de equivalentes com prova. É teste caro (~3 min):
+# entra em `make verify`, não no caminho rápido de cada PR, cujo desenho
+# recusa o barato antes do caro. A matriz completa (operadores opt-in e os
+# pacotes diferidos) é gate de release na P45.
+audit-mutations:
+	$(GO) run ./tools/mutationaudit -root . \
+		-tool-module "$(GREMLINS_MODULE)" \
+		-tool-version "$(GREMLINS_VERSION)" \
+		-timeout-coefficient "$(GREMLINS_TIMEOUT_COEFFICIENT)" \
+		-workers "$(GREMLINS_WORKERS)"
+	@echo "audit-mutations: ok"
+
 # verify agrega os gates existentes do estágio atual.
-verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
+verify: fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps audit-mutations generate-check test-unit test-integration test-race test-migration test-contract test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci audit-req quality-catalog quality-waivers quality-taxonomy quality-inventory handoff-check
 	@echo "verify: gates criados que exigem ambiente próprio e por isso não entram neste alvo:"
 	@for gate in test-e2e test-load-smoke image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify disaster-drill vuln; do \
 		echo "  - $$gate"; \
