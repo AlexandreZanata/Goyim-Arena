@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -592,11 +593,22 @@ func (world *journeyWorld) webhookEndpoint(t *testing.T) func(*http.ServeMux) {
 				TimestampHeader: r.Header.Get("Stripe-Timestamp"),
 			})
 			if err != nil {
-				if strings.Contains(err.Error(), "signature") || strings.Contains(err.Error(), "tolerance") || strings.Contains(err.Error(), "timestamp") {
-					http.Error(w, "invalid signature", http.StatusBadRequest)
-					return
+				// O contrato que a futura rota de produção deve servir:
+				// assinatura/integridade 400, corpo grande 413,
+				// entrega em processamento 429 (transitório, o provider
+				// retenta) e falha de processamento 500.
+				switch {
+				case errors.Is(err, billingapp.ErrWebhookSignatureInvalid),
+					errors.Is(err, billingapp.ErrWebhookPayloadMalformed),
+					errors.Is(err, billingapp.ErrCheckoutIntentNotFound):
+					http.Error(w, "invalid webhook", http.StatusBadRequest)
+				case errors.Is(err, billingapp.ErrWebhookPayloadTooLarge):
+					http.Error(w, "webhook too large", http.StatusRequestEntityTooLarge)
+				case errors.Is(err, billingapp.ErrWebhookEventInProcessing):
+					http.Error(w, "webhook in processing", http.StatusTooManyRequests)
+				default:
+					http.Error(w, "processing failure", http.StatusInternalServerError)
 				}
-				http.Error(w, "processing failure", http.StatusInternalServerError)
 				return
 			}
 			w.WriteHeader(http.StatusOK)
