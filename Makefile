@@ -43,7 +43,7 @@ CONTRACTGEN := $(GO) run ./tools/contractgen
 IMAGE ?= goyim-arena:local
 TRIVY ?= trivy
 
-.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps audit-mutations audit-coverage test-unit test-integration test-race test-migration test-security test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
+.PHONY: fmt fmt-check lint audit-complexity audit-deadcode audit-errors audit-provenance audit-tests audit-diff audit-deps audit-mutations audit-coverage test-unit test-integration test-race test-migration test-security dast test-web typecheck build-web audit-web audit-i18n i18n-audit audit-ci quality-catalog quality-waivers quality-taxonomy quality-inventory quality-inventory-write testenv-verify release-gate security-audit privacy-audit release-verify handoff-check handoff-walkthrough test-contract test-e2e test-load-smoke image-build image-verify image-scan caddy-verify compose-verify migration-audit backup-verify deploy-verify vuln generate generate-check verify quick-verify
 
 # Gerador i18n (P02-T07): fontes em locales/, artefatos versionados em
 # web/src/i18n/generated.ts e internal/i18n/generated.go (nunca editados).
@@ -547,6 +547,17 @@ generate-check:
 test-security:
 	$(GO) test -count=1 ./internal/security/... ./internal/platform/security/... ./internal/arguments/adapters/http/... ./internal/arguments/adapters/postgres/... ./internal/billing/adapters/stripe/... ./internal/billing/application/... ./internal/moderation/adapters/http/... ./internal/moderation/application/... ./internal/positions/adapters/http/... ./internal/transparency/adapters/http/... ./internal/wallet/adapters/http/... ./internal/wallet/adapters/postgres/...
 	@echo "test-security: ok"
+
+# dast é o scanner DAST reproduzível do backend (P26-T10, ADR-018): motor em
+# stdlib com fixtures nas duas direções, waivers com dono e expiração, e
+# guarda que recusa alvo fora de loopback. O alvo aqui são os testes do
+# motor; a varredura integral da árvore com credenciais é sob demanda
+# (`go run ./tools/dast -target <loopback> -openapi api/openapi.json`) e
+# matriz na P45 — não entra em quick-verify nem em verify pelo custo de
+# subir stacks e pelo volume de requests.
+dast:
+	$(GO) test -count=1 ./tools/dast/
+	@echo "dast: ok"
 
 # test-e2e roda as jornadas críticas em navegador real (P18-T07). O harness
 # descartável de tools/e2e provisiona um PostgreSQL próprio, um sink de email em
