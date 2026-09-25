@@ -224,6 +224,7 @@ func writeModerationProblem(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, application.ErrAppealExpired),
 		errors.Is(err, application.ErrActionNotAppealable),
 		errors.Is(err, application.ErrSameReviewer),
+		errors.Is(err, domain.ErrTargetActionMismatch),
 		errors.Is(err, domain.ErrInvalidTargetType),
 		errors.Is(err, domain.ErrInvalidReason),
 		errors.Is(err, domain.ErrInvalidContext),
