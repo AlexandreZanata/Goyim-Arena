@@ -38,8 +38,21 @@ import (
 // completa, cobrança, privacidade e webhook de teste.
 func privilegedServer(t *testing.T) (*journeyWorld, *httptest.Server, *countingMFAAudit) {
 	t.Helper()
+	world, audit := privilegedWorld(t)
+	return world, servePrivileged(t, world, audit), audit
+}
+
+// privilegedWorld compõe as bordas sem servir: o servidor pode ser
+// reconstruído sobre o mesmo banco (restart/restauração) sem perder nada.
+func privilegedWorld(t *testing.T) (*journeyWorld, *countingMFAAudit) {
+	t.Helper()
 	world := newJourneyWorld(t)
-	audit := &countingMFAAudit{}
+	return world, &countingMFAAudit{}
+}
+
+// servePrivileged serve o mundo e fecha com o teste.
+func servePrivileged(t *testing.T, world *journeyWorld, audit *countingMFAAudit) *httptest.Server {
+	t.Helper()
 	identity, sender, validator := mountAuthIdentity(t, world, audit)
 	world.sender = sender
 	positions := mountPositions(t, world.pool, world.clock, world.secMgr)
@@ -83,7 +96,7 @@ func privilegedServer(t *testing.T) (*journeyWorld, *httptest.Server, *countingM
 	outer.Handle("/", handler)
 	server := httptest.NewServer(world.secMgr.AuthenticateMiddleware(validator)(outer))
 	t.Cleanup(server.Close)
-	return world, server, audit
+	return server
 }
 
 // privilegedEnrolledLogin executa registro, verificação, login e MFA
