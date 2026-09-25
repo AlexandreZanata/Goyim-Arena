@@ -544,8 +544,10 @@ generate-check:
 # test-security executa as regressões críticas do threat model: cache leak,
 # IDOR/ownership, CSRF, replay de webhook, double spend e bypass administrativo.
 # A matriz estrutural em internal/security também exige evidência para cada THR-*.
+# A lista de pacotes espelha a coluna de evidência da matriz
+# (docs/THREAT_MODEL_TEST_MATRIX.md): pacote citado lá roda aqui.
 test-security:
-	$(GO) test -count=1 ./internal/security/... ./internal/platform/security/... ./internal/arguments/adapters/http/... ./internal/arguments/adapters/postgres/... ./internal/billing/adapters/stripe/... ./internal/billing/application/... ./internal/moderation/adapters/http/... ./internal/moderation/application/... ./internal/positions/adapters/http/... ./internal/transparency/adapters/http/... ./internal/wallet/adapters/http/... ./internal/wallet/adapters/postgres/...
+	$(GO) test -count=1 ./internal/security/... ./internal/platform/security/... ./internal/identity/application/... ./internal/identity/adapters/http/... ./internal/platform/ratelimit/... ./internal/arenas/adapters/http/... ./internal/arguments/adapters/http/... ./internal/arguments/adapters/postgres/... ./internal/billing/adapters/stripe/... ./internal/billing/application/... ./internal/billing/adapters/http/... ./internal/moderation/adapters/http/... ./internal/moderation/application/... ./internal/moderation/adapters/postgres/... ./internal/audit/adapters/postgres/... ./internal/platform/postgres/... ./internal/wallet/application/... ./internal/positions/adapters/http/... ./internal/positions/application/... ./internal/persuasion/application/... ./internal/transparency/adapters/http/... ./internal/wallet/adapters/http/... ./internal/wallet/adapters/postgres/... ./internal/jobs/adapters/http/... ./internal/contract/...
 	@echo "test-security: ok"
 
 # dast é o scanner DAST reproduzível do backend (P26-T10, ADR-018): motor em
